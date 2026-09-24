@@ -54,10 +54,14 @@ SUARTCMD    equ  $09        ; %0000 1001 = ODD PARITY CHECK, BUT
 ; SD/block storage registers (see sdcard.asm). SD_LBA is a single 16-bit
 ; register (STX/LDX-friendly: high byte at +0, low byte at +1, matching the
 ; 6309's natural big-endian STX order) rather than two separately-named
-; byte registers.
+; byte registers. Block numbers are 32 bits: SD_LBA is the LOW word, and the
+; high word is latched into the device by the SETHI command (SD_LBA = the high
+; word, then SD_CMDSTA = SD_CMD_SETHI). It stays latched until the next SETHI
+; (and is 0 after reset), so a driver that only wants the first 32MB never
+; needs to touch it.
 
-SD_LBA      equ  SD_BASE+0  ; 16-bit block number (r/w) -- 64K blocks *
-                             ; 512B = 32MB max
+SD_LBA      equ  SD_BASE+0  ; low 16 bits of the block number (r/w); with
+                             ; SETHI's high word: 2^32 blocks * 512B = 2TB
 SD_DATA     equ  SD_BASE+2  ; stream port into/out of the active 512-byte
                              ; sector buffer; cursor auto-increments and
                              ; resets to 0 after each READ/WRITE command
@@ -67,6 +71,8 @@ SD_CMDSTA   equ  SD_BASE+3  ; WRITE: command (1=READ block at LBA into
 
 SD_CMD_READ  equ  1
 SD_CMD_WRITE equ  2
+SD_CMD_SETHI equ  3          ; latch SD_LBA's current value as block-number
+                             ; bits 31..16 (see above)
 SD_STA_BUSY  equ  %00000001
 SD_STA_CARD  equ  %00000010
 SD_STA_ERROR equ  %00000100  ; the last READ/WRITE command's underlying
@@ -117,6 +123,8 @@ B_BLK_READ  equ  $11        ; X: 16-bit LBA, Y: RAM buffer adrs -> reads
                              ; 512 bytes from the SD device into [Y..Y+511]
 B_BLK_WRITE equ  $12        ; X: 16-bit LBA, Y: RAM buffer adrs -> writes
                              ; [Y..Y+511] to the SD device
+                             ; (Both address only the first 64K blocks = 32MB;
+                             ; see B_BLK_READ32/B_BLK_WRITE32 below.)
 ; Resident DOS calls (dos/dos.asm, API version DOS_API_VERSION). All of them are
 ; reached through ONE generic handler in sdcard.asm (BIOS_DOS), which loads
 ; A=E, B=B, X=X, Y=Y from the caller's frame, calls the routine DOS installed in
@@ -200,7 +208,12 @@ B_PAGE_COPY equ  $2E         ; B: source page, E: destination page, X: source
                              ; leaving the caller's mapping alone. Ranges must stay
                              ; inside their 16KB page, and inside one page may not
                              ; overlap (ERR_BADPARAM).
-NUM_BCALLS  equ  $2F
+
+; 32-bit block numbers (sdcard.asm). Same as B_BLK_READ/WRITE, but the LBA's HIGH
+; word comes in W (E:F) -- the calls above always use high word 0.
+B_BLK_READ32  equ $2F        ; X: LBA low word, W: LBA high word, Y: RAM buffer adrs
+B_BLK_WRITE32 equ $30        ; same arguments; writes [Y..Y+511]
+NUM_BCALLS  equ  $31
 
 DOS_LOAD    equ  $0600       ; where SD_BOOT_TRY loads dos/dos.asm and jumps to it
                              ; (dos.asm ORGs here too, so nothing is hand-synced).

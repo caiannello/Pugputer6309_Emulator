@@ -118,3 +118,63 @@ TEST(sdcard_data_cursor_does_not_overrun_the_block_buffer) {
     dev.write(kRegCmdSta, kCmdWrite);
     CHECK(true); // reaching here without a crash/UB is the assertion
 }
+
+TEST(sdcard_high_lba_word_is_latched_by_sethi_and_survives_until_changed) {
+    // A sparse image just over 2^16 blocks (32MB): block 0x10005 = high word 1, low word 5.
+    std::string path = std::string(PUGPUTER_TEST_BUILD_DIR) + "/hilba.img";
+    {
+        make_blank_image("hilba.img", 8);
+        std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+        f.seekp(static_cast<std::streamoff>(0x10010) * 512 - 1);
+        f.put(0);
+    }
+    SdCardDevice dev;
+    CHECK(dev.open(path));
+    constexpr uint8_t kCmdSetHi = 3;
+    auto set_hi = [&](uint16_t hi) {
+        set_lba(dev, hi);
+        dev.write(kRegCmdSta, kCmdSetHi);
+    };
+    auto write_block = [&](uint16_t hi, uint16_t lo, uint8_t fill) {
+        set_hi(hi);
+        set_lba(dev, lo);
+        for (int i = 0; i < 512; ++i) dev.write(kRegData, fill);
+        dev.write(kRegCmdSta, kCmdWrite);
+    };
+    auto read_first = [&](uint16_t hi, uint16_t lo) {
+        set_hi(hi);
+        set_lba(dev, lo);
+        dev.write(kRegCmdSta, kCmdRead);
+        return dev.read(kRegData);
+    };
+    write_block(0, 5, 0x11);
+    write_block(1, 5, 0x22);
+    write_block(1, 0x000F, 0x33);
+    CHECK(read_first(0, 5) == 0x11); // the same low word, a different block
+    CHECK(read_first(1, 5) == 0x22);
+    CHECK(read_first(1, 0x000F) == 0x33);
+    CHECK(read_first(0, 0x000F) != 0x33);
+
+    // The high word stays latched: only the low word changes between commands.
+    set_hi(1);
+    set_lba(dev, 5);
+    dev.write(kRegCmdSta, kCmdRead);
+    CHECK(dev.read(kRegData) == 0x22);
+    set_lba(dev, 0x000F);
+    dev.write(kRegCmdSta, kCmdRead);
+    CHECK(dev.read(kRegData) == 0x33);
+    // SETHI does not disturb the SD_LBA register itself.
+    CHECK(dev.read(kRegLbaHi) == 0x00 && dev.read(kRegLbaLo) == 0x0F);
+
+    // Reset clears the latch: the next read is block 0x000F, not 0x1000F.
+    dev.reset();
+    set_lba(dev, 0x000F);
+    dev.write(kRegCmdSta, kCmdRead);
+    CHECK(dev.read(kRegData) != 0x33);
+
+    // A block beyond the end of the image is an error.
+    set_hi(2);
+    set_lba(dev, 0);
+    dev.write(kRegCmdSta, kCmdRead);
+    CHECK((dev.read(kRegCmdSta) & 0x04) != 0);
+}

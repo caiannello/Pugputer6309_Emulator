@@ -30,6 +30,8 @@ SD_READ_BLOCK   EXPORT
 SD_WRITE_BLOCK  EXPORT
 BIOS_BLK_READ   EXPORT
 BIOS_BLK_WRITE  EXPORT
+BIOS_BLK_READ32  EXPORT
+BIOS_BLK_WRITE32 EXPORT
 BIOS_DOS        EXPORT
 SD_BOOT_TRY     EXPORT
 ;------------------------------------------------------------------------------
@@ -51,11 +53,17 @@ FAT16_SIG   FCC  "FAT16   "     ; BPB FS-type string, offset $36 -- no
 ;------------------------------------------------------------------------------
 ; X=16-bit LBA, Y=destination RAM address. Reads 512 bytes into [Y..Y+511].
 ; Carry set on failure (no card present) -- [Y..Y+511] is then undefined.
-; Trashes A, B, X.
+; Trashes A, B, X, W. SD_READ_BLOCK32 is the same with the LBA's high word in W
+; (SD_READ_BLOCK is high word 0).
 ;------------------------------------------------------------------------------
 SD_READ_BLOCK
+            LDW  #0
+SD_READ_BLOCK32
             PSHS Y
-            STX  SD_LBA
+            STW  SD_LBA           ; the high word, latched by SETHI ...
+            LDA  #SD_CMD_SETHI
+            STA  SD_CMDSTA
+            STX  SD_LBA           ; ... then the low word
             LDA  #SD_CMD_READ
             STA  SD_CMDSTA
 SDRD_WAIT   LDA  SD_CMDSTA
@@ -76,13 +84,19 @@ SDRD_FAIL   ORCC #$01
             PULS Y,PC
 ;------------------------------------------------------------------------------
 ; X=16-bit LBA, Y=source RAM address. Writes [Y..Y+511] to the block. Carry
-; set on failure (no card present). Trashes A, B, X.
+; set on failure (no card present). Trashes A, B, X, W. SD_WRITE_BLOCK32: the
+; LBA's high word in W.
 ;------------------------------------------------------------------------------
 SD_WRITE_BLOCK
+            LDW  #0
+SD_WRITE_BLOCK32
             PSHS Y
             LDA  SD_CMDSTA
             BITA #SD_STA_CARD
             BEQ  SDWR_FAIL
+            STW  SD_LBA
+            LDA  #SD_CMD_SETHI
+            STA  SD_CMDSTA
             STX  SD_LBA
             LDX  #512
 SDWR_LOOP   LDA  ,Y+
@@ -121,6 +135,24 @@ BIOS_BLK_WRITE
             JMP  BC_OK
 SDBLK_WRERR LDA  #ERR_IOERR
             JMP  BC_ERR
+;------------------------------------------------------------------------------
+; The 32-bit variants: the LBA's high word is the caller's W (E:F in the frame).
+;------------------------------------------------------------------------------
+BIOS_BLK_READ32
+            LDX  SWI2_X,S
+            LDY  SWI2_Y,S
+            LDW  SWI2_E,S
+            JSR  SD_READ_BLOCK32
+            BCS  SDBLK_RDERR
+            JMP  BC_OK
+;------------------------------------------------------------------------------
+BIOS_BLK_WRITE32
+            LDX  SWI2_X,S
+            LDY  SWI2_Y,S
+            LDW  SWI2_E,S
+            JSR  SD_WRITE_BLOCK32
+            BCS  SDBLK_WRERR
+            JMP  BC_OK
 ;------------------------------------------------------------------------------
 ; Resident DOS calls (function codes B_FOPEN_NAME and up), ALL through this one
 ; handler. It loads the registers the DOS routine expects from the caller's SWI2

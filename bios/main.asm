@@ -36,6 +36,8 @@ BIOS_BLK_READ   EXTERN      ; sdcard.asm
 BIOS_BLK_WRITE  EXTERN
 BIOS_DOS        EXTERN      ; sdcard.asm: every resident-DOS call (codes B_FOPEN_NAME..)
 BIOS_BANK_GET   EXTERN      ; banks.asm
+BIOS_BLK_READ32  EXTERN     ; sdcard.asm
+BIOS_BLK_WRITE32 EXTERN
 BIOS_BANK_SET   EXTERN
 BIOS_PAGE_ALLOC EXTERN
 BIOS_PAGE_FREE  EXTERN
@@ -178,16 +180,16 @@ V_SW2       LDA  SWI2_A,S       ; caller's function code
             LDA  #ERR_BADFN
             JMP  BC_ERR
 SW2_OK      CMPA #B_BANK_GET
-            BHS  SW2_BANK       ; the banking calls: BANK_TAB
+            BHS  SW2_EXT        ; the calls added after the DOS range: EXT_TAB
             CMPA #B_FOPEN_NAME  ; codes from here up to there are the resident DOS's:
             LBHS BIOS_DOS       ; one generic handler, not a table entry each
             LSLA                ; word index into BIOS_TAB
             LDX  #BIOS_TAB
             JMP  [A,X]          ; indexed-indirect, accumulator offset:
                                 ; dispatch straight into the handler
-SW2_BANK    SUBA #B_BANK_GET
+SW2_EXT     SUBA #B_BANK_GET
             LSLA
-            LDX  #BANK_TAB
+            LDX  #EXT_TAB
             JMP  [A,X]
 
 ; Shared epilogues every BIOS_* handler in devio.asm tail-calls (JMP, not
@@ -227,16 +229,19 @@ BIOS_TAB    FDB  BIOS_DQUERY     ; $00 B_DQUERY
             FDB  BIOS_BLK_READ   ; $11 B_BLK_READ
             FDB  BIOS_BLK_WRITE  ; $12 B_BLK_WRITE
 
-; The banking calls (banks.asm), from B_BANK_GET up.
-BANK_TAB    FDB  BIOS_BANK_GET    ; $29 B_BANK_GET
+; The calls numbered above the DOS range, from B_BANK_GET up: banking
+; (banks.asm), then the 32-bit block calls (sdcard.asm).
+EXT_TAB     FDB  BIOS_BANK_GET    ; $29 B_BANK_GET
             FDB  BIOS_BANK_SET    ; $2A B_BANK_SET
             FDB  BIOS_PAGE_ALLOC  ; $2B B_PAGE_ALLOC
             FDB  BIOS_PAGE_FREE   ; $2C B_PAGE_FREE
             FDB  BIOS_PAGE_INFO   ; $2D B_PAGE_INFO
             FDB  BIOS_PAGE_COPY   ; $2E B_PAGE_COPY
-BANK_TAB_END
-    IFNE (BANK_TAB_END-BANK_TAB)-2*(NUM_BCALLS-B_BANK_GET)
-    ERROR "BANK_TAB must have one entry per banking call (see defines.d)"
+            FDB  BIOS_BLK_READ32  ; $2F B_BLK_READ32
+            FDB  BIOS_BLK_WRITE32 ; $30 B_BLK_WRITE32
+EXT_TAB_END
+    IFNE (EXT_TAB_END-EXT_TAB)-2*(NUM_BCALLS-B_BANK_GET)
+    ERROR "EXT_TAB must have one entry per call from B_BANK_GET up (see defines.d)"
     ENDC
 
 ; -----------------------------------------------------------------------------

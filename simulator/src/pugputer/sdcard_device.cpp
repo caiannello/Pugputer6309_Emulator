@@ -8,6 +8,7 @@ constexpr uint8_t kStaCard = 0x02;
 constexpr uint8_t kStaError = 0x04;
 constexpr uint8_t kCmdRead = 1;
 constexpr uint8_t kCmdWrite = 2;
+constexpr uint8_t kCmdSetHi = 3;
 } // namespace
 
 bool SdCardDevice::open(const std::string& path) {
@@ -61,12 +62,17 @@ void SdCardDevice::write(uint16_t offset, uint8_t value) {
 
 void SdCardDevice::do_command(uint8_t cmd) {
     last_error_ = false;
+    if (cmd == kCmdSetHi) {
+        lba_hi_ = lba_;
+        cursor_ = 0;
+        return;
+    }
     if (!is_open()) {
         last_error_ = true;
         cursor_ = 0;
         return;
     }
-    std::streamoff pos = static_cast<std::streamoff>(lba_) * static_cast<std::streamoff>(kBlockSize);
+    std::streamoff pos = ((static_cast<std::streamoff>(lba_hi_) << 16) | lba_) * static_cast<std::streamoff>(kBlockSize);
     if (cmd == kCmdRead) {
         file_.clear();
         file_.seekg(pos);
@@ -100,6 +106,7 @@ void SdCardDevice::do_command(uint8_t cmd) {
 
 void SdCardDevice::reset() {
     lba_ = 0;
+    lba_hi_ = 0;
     cursor_ = 0;
     buffer_.fill(0);
 }

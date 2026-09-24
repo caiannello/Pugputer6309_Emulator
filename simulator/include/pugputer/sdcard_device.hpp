@@ -6,14 +6,17 @@
 // pugputer/fat16_image.hpp, which builds one).
 //
 // Register window (4 bytes, see bios/defines.d's SD_LBA/SD_DATA/SD_CMDSTA):
-//   offset 0-1: SD_LBA, 16-bit block number, big-endian (offset 0 = high
-//               byte) to match a plain STX/LDX from the CPU side.
+//   offset 0-1: SD_LBA, the LOW 16 bits of the block number, big-endian (offset 0
+//               = high byte) to match a plain STX/LDX from the CPU side. Bits
+//               31..16 are latched separately by the SETHI command (below) and
+//               stay put until the next SETHI; they are 0 after reset.
 //   offset 2:   SD_DATA, a streaming port into/out of the active 512-byte
 //               sector buffer; an auto-incrementing cursor advances on
 //               every access and resets to 0 after a command completes.
 //   offset 3:   SD_CMDSTA -- write issues a command (1=read the block at
 //               the current LBA into the buffer, 2=write the buffer to
-//               the block at the current LBA); read returns status (bit0
+//               the block at the current LBA, 3=SETHI: latch SD_LBA's current
+//               value as block-number bits 31..16); read returns status (bit0
 //               BUSY, always clear here since this model completes
 //               synchronously; bit1 CARD_PRESENT; bit2 ERROR -- the last
 //               READ/WRITE command's underlying file I/O actually failed
@@ -50,7 +53,8 @@ public:
 
 private:
     std::fstream file_;
-    uint16_t lba_ = 0;
+    uint16_t lba_ = 0;    // SD_LBA: the low word
+    uint16_t lba_hi_ = 0; // latched by the SETHI command: the high word
     std::array<uint8_t, kBlockSize> buffer_{};
     uint16_t cursor_ = 0;
     bool last_error_ = false;
