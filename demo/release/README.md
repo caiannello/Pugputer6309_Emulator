@@ -40,6 +40,7 @@ They are on the disk; `DIR` at the shell prompt lists them.
 | `HELLO` | printing, `FOR`/`NEXT`, `MEM` |
 | `PRIMES` | arrays: a sieve of Eratosthenes |
 | `SINE` | `SIN` and `TAB` in a text plot |
+| `MANDEL` | the Mandelbrot set in ASCII: nested loops, arithmetic, `MID$` (takes a while) |
 | `SEQFILE` | sequential files: `OPEN`, `PRINT#`, `LINE INPUT#`, `EOF`, `KILL` |
 | `RANDFILE` | random-access files: `FIELD`, `LSET`, `PUT`, `GET` |
 | `ERRTRAP` | `ON ERROR GOTO`, `ERR`, `ERL`, `RESUME NEXT` |

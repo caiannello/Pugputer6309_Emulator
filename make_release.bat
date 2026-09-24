@@ -26,6 +26,7 @@ call .\build_basic.bat || (popd & exit /b 1)
 popd
 
 echo === Building the emulator (Release, static runtime) ===
+call "%ROOT%check_build_dir.bat" "%BUILD%" || exit /b 1
 cmake -S "%ROOT%simulator" -B "%BUILD%" -A x64 -DHD6309_BUILD_TESTS=OFF -DPUGPUTER_STATIC_RUNTIME=ON || exit /b 1
 cmake --build "%BUILD%" --config Release --target basic309_sdboot_demo mkdiskimg || exit /b 1
 

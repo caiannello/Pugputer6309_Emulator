@@ -29,6 +29,7 @@ call .\build_basic.bat || (popd & exit /b 1)
 popd
 
 echo === Building the emulator and tools ===
+call "%ROOT%check_build_dir.bat" "%ROOT%simulator\build" || exit /b 1
 cmake -S "%ROOT%simulator" -B "%ROOT%simulator\build" -A x64 || exit /b 1
 cmake --build "%ROOT%simulator\build" --config %CONFIG% --target mkdiskimg basic309_sdboot_demo || exit /b 1
 

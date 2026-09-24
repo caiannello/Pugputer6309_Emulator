@@ -26,10 +26,10 @@ std::string demo_disk() {
     return build_image("demo_disk.img", 16384, 2, std::move(extra));
 }
 
-std::string run_demo(Basic309Session& s, const std::string& name) {
+std::string run_demo(Basic309Session& s, const std::string& name, uint64_t budget = 200000000) {
     std::string load = s.run_line("LOAD \"" + name + "\"");
     if (!load.empty()) return "<<LOAD: " + load + ">>";
-    return s.run_line("RUN", 200000000);
+    return s.run_line("RUN", budget);
 }
 
 } // namespace
@@ -48,6 +48,9 @@ TEST(demo_programs_load_and_run_and_print_what_they_should) {
 
     out = run_demo(s, "SINE");
     CHECK(!contains(out, "ERROR") && contains(out, "*"));
+
+    out = run_demo(s, "MANDEL", 4000000000ull); // thousands of floating-point iterations: a long run
+    CHECK(!contains(out, "ERROR") && contains(out, "................,,,,,,====!> 9nv? Z9     & n >^^>8!=,,......."));
 
     out = run_demo(s, "SEQFILE");
     CHECK(contains(out, "READ: LINE 1") && contains(out, "READ: LINE 5") && !contains(out, "ERROR"));
