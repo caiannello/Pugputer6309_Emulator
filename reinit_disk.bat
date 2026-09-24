@@ -5,8 +5,12 @@ rem want a clean slate between test sessions, or after editing bios/,
 rem dos/, or basic309/.
 setlocal
 set ROOT=%~dp0
-set LWASM=%ROOT%lwtools-4.20\bin\lwasm.exe
-set MKDISKIMG=%ROOT%simulator\build\tools\Debug\mkdiskimg.exe
+set MKDISKIMG=%ROOT%simulator\build\tools\Release\mkdiskimg.exe
+if not exist "%MKDISKIMG%" set MKDISKIMG=%ROOT%simulator\build\tools\Debug\mkdiskimg.exe
+if not exist "%MKDISKIMG%" (
+    echo ERROR: mkdiskimg.exe is not built yet -- see README.md, "Building from source".
+    exit /b 1
+)
 
 echo Rebuilding BIOS...
 pushd "%ROOT%bios" || exit /b 1

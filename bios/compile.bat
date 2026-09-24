@@ -1,8 +1,5 @@
 @echo off
-set LWDIR=..\lwtools-4.20\bin
-set LWASM=%LWDIR%\lwasm.exe
-set LWLINK=%LWDIR%\lwlink.exe
-set SRECCAT=%LWDIR%\srec_cat.exe
+call "%~dp0..\lwtools_env.bat" || exit /b 1
 
 %LWASM% helpers.asm --6309 --format=obj --output=helpers.o --list=helpers.lst || exit /b 1
 %LWASM% devio.asm   --6309 --format=obj --output=devio.o   --list=devio.lst   || exit /b 1

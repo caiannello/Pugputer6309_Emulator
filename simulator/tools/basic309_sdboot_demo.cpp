@@ -10,10 +10,24 @@
 //   basic309_sdboot_demo --com COM10         -- COM port bridge
 //   basic309_sdboot_demo --bios path\to.s19  -- load a different BIOS image
 //   basic309_sdboot_demo --disk path\to.img  -- load a different disk image
+//   basic309_sdboot_demo --help
+//
+// Unless --bios / --disk say otherwise, pugbios.s19 and disk.img are looked for
+// next to the executable first (that is how the binary release is laid out), and
+// then at the paths this build was configured with (the source tree).
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
 #include <conio.h>
 
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -37,14 +51,45 @@ using pugputer::UartR65C51;
 namespace {
 constexpr uint16_t kBiosBase = 0xF000;
 constexpr uint32_t kBiosSize = 0x1000; // $F000-$FFFF
+
+// `name` next to the executable if it is there, else `fallback`.
+std::string find_default(const char* name, const char* fallback) {
+    char path[MAX_PATH] = {0};
+    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        std::string beside(path, n);
+        size_t slash = beside.find_last_of("\\/");
+        if (slash != std::string::npos) {
+            beside = beside.substr(0, slash + 1) + name;
+            if (std::ifstream(beside, std::ios::binary).good()) return beside;
+        }
+    }
+    return fallback;
+}
+
+void usage() {
+    std::printf(
+        "Pugputer 6309 emulator: boots the BIOS, DOS, the shell and BASIC.\n"
+        "\n"
+        "  --com COMn       connect the UART to a COM port (e.g. one end of a com0com pair)\n"
+        "                   instead of this console\n"
+        "  --bios FILE      BIOS image, Motorola S-record (default: pugbios.s19 beside this program)\n"
+        "  --disk FILE      FAT16 disk image (default: disk.img beside this program)\n"
+        "  --help           this text\n"
+        "\n"
+        "In console mode, type at the prompt; Ctrl+C quits.\n");
+}
 } // namespace
 
 int main(int argc, char** argv) {
     std::string com_port;
-    std::string bios_path = PUGBIOS_S19_DEFAULT;
-    std::string disk_path = DISK_IMG_DEFAULT;
+    std::string bios_path = find_default("pugbios.s19", PUGBIOS_S19_DEFAULT);
+    std::string disk_path = find_default("disk.img", DISK_IMG_DEFAULT);
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--com") == 0 && i + 1 < argc) {
+        if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "/?") == 0) {
+            usage();
+            return 0;
+        } else if (std::strcmp(argv[i], "--com") == 0 && i + 1 < argc) {
             com_port = argv[++i];
         } else if (std::strcmp(argv[i], "--bios") == 0 && i + 1 < argc) {
             bios_path = argv[++i];
@@ -66,7 +111,7 @@ int main(int argc, char** argv) {
 
     SdCardDevice sdcard;
     if (!sdcard.open(disk_path)) {
-        std::fprintf(stderr, "Failed to open disk image '%s' (build it with mkdiskimg first)\n", disk_path.c_str());
+        std::fprintf(stderr, "Failed to open disk image '%s' (is it next to the program? see --help)\n", disk_path.c_str());
         return 1;
     }
     std::printf("Attached disk image %s\n", disk_path.c_str());
@@ -98,7 +143,8 @@ int main(int argc, char** argv) {
 #endif
 
     if (!use_com) {
-        std::printf("Bridging UART to this console. Type to send bytes; Ctrl+C to quit.\n");
+        std::printf("Bridging UART to this console. Type to send bytes; Ctrl+C to quit.\n"
+                    "(At the shell prompt, type BASIC to start BASIC; SYSTEM leaves it.)\n\n");
         uart.set_tx_callback([](uint8_t b) {
             std::putchar(b);
             std::fflush(stdout);
@@ -120,6 +166,10 @@ int main(int argc, char** argv) {
         } else {
             while (_kbhit()) {
                 int ch = _getch();
+                if (ch == 0 || ch == 0xE0) { // an arrow / function key: two codes, neither is text
+                    (void)_getch();
+                    continue;
+                }
                 uart.rx_enqueue(static_cast<uint8_t>(ch));
             }
         }

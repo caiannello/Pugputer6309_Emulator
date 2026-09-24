@@ -1,8 +1,8 @@
 // Opcode dispatch for all three pages (unprefixed, $10-prefixed,
 // $11-prefixed). Opcode assignments and per-addressing-mode cycle counts
 // (both 6809-emulation and 6309-native) are taken directly from the
-// HD6309-mode cross-assembler already in this repo
-// (lwtools-4.20/lwasm/{instab.c,cycle.c}), which is ground truth rather
+// HD6309-mode cross-assembler lwasm (William Astle's lwtools,
+// lwasm/{instab.c,cycle.c}), which is ground truth rather
 // than the OCR'd programming manual. See simulator/README.md for the
 // handful of documented approximations (interrupt response latency, TFM
 // per-byte cost, DIVD/DIVQ/MULD's less-documented flag corners).

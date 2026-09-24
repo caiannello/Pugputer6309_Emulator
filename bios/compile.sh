@@ -1,8 +1,12 @@
 #!/bin/sh
-LWDIR=../lwtools-4.20/bin
-LWASM=$LWDIR/lwasm.exe
-LWLINK=$LWDIR/lwlink.exe
-SRECCAT=$LWDIR/srec_cat.exe
+# lwtools: $LWTOOLS if set, else ../lwtools/bin (see README.md, "Building from source")
+LWDIR=${LWTOOLS:-../lwtools/bin}
+LWASM=$LWDIR/lwasm
+LWLINK=$LWDIR/lwlink
+SRECCAT=$LWDIR/srec_cat
+[ -x "$LWASM" ] || LWASM=$LWASM.exe
+[ -x "$LWLINK" ] || LWLINK=$LWLINK.exe
+[ -x "$SRECCAT" ] || SRECCAT=$SRECCAT.exe
 
 $LWASM helpers.asm --6309 --format=obj --output=helpers.o --list=helpers.lst || exit 1
 $LWASM devio.asm   --6309 --format=obj --output=devio.o   --list=devio.lst   || exit 1

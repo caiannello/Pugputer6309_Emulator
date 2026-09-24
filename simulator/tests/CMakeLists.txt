@@ -1,4 +1,15 @@
-set(LWASM_EXE "${CMAKE_CURRENT_SOURCE_DIR}/../../lwtools-4.20/bin/lwasm.exe")
+# lwasm (William Astle's lwtools) is only used by the golden assembly tests, which are
+# skipped without it. Same search order as lwtools_env.bat at the repository root.
+set(LWASM_EXE "LWASM_EXE-NOTFOUND")
+set(_LW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+foreach(_dir "$ENV{LWTOOLS}" "${_LW_ROOT}/lwtools/bin" "${_LW_ROOT}/lwtools" "${_LW_ROOT}/lwtools-4.20/bin"
+             "${_LW_ROOT}/lwtools-4.25-win64" "${_LW_ROOT}/lwtools-4.20")
+    if(NOT LWASM_EXE AND _dir AND EXISTS "${_dir}/lwasm.exe")
+        set(LWASM_EXE "${_dir}/lwasm.exe")
+    elseif(NOT LWASM_EXE AND _dir AND EXISTS "${_dir}/lwasm")
+        set(LWASM_EXE "${_dir}/lwasm")
+    endif()
+endforeach()
 
 set(HD6309_TEST_SOURCES
     test_main.cpp
@@ -88,6 +99,7 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_dos_bigfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_dos_crash.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_shell.cpp)
+    list(APPEND PUGPUTER_TEST_SOURCES test_demo_programs.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_bios_audit.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_seqfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_randomfiles.cpp)
@@ -109,6 +121,7 @@ target_compile_definitions(pugputer_tests PRIVATE
     PUGPUTER_HAVE_SDBOOT=${PUGPUTER_HAVE_SDBOOT}
     DISK_IMG_PATH="${DISK_IMG}"
     PUGBIOS_MAP_PATH="${PUGBIOS_MAP}"
+    DEMO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../demo/programs"
     BIOS_DEFINES_PATH="${BIOS_DEFINES}"
     DOS_LST_PATH="${DOS_LST}"
     DOS_BIN_PATH="${DOS_BIN}"

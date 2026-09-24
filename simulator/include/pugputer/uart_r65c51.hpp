@@ -1,6 +1,5 @@
-// R65C51 ACIA-compatible UART, register-exact against
-// Claude_Readme/Pugputer6309_CPU_Card/R65C51_text.txt and validated
-// against the real driver in bios/serio.asm. See simulator/README.md for
+// R65C51 ACIA-compatible UART, register-exact against the Rockwell R65C51
+// datasheet and validated against the real driver in bios/serio.asm. See simulator/README.md for
 // the documented simplifications (DCD/DSR don't drive IRQ; SBR=0000
 // "external clock" mode is unsupported; TIC=00 doesn't actually gate the
 // transmitter, only the TDRE-IRQ).

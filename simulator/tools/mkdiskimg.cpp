@@ -8,8 +8,14 @@
 //   mkdiskimg                                  -- default paths below
 //   mkdiskimg --dos path/to/dos.bin --basic path/to/exbasrom309.s19
 //             --shell path/to/shell.bin --out path/to/disk.img
+//             [--add-dir path/to/folder]
+//
+// --add-dir puts every regular file of a folder (8.3 names) in the disk's root
+// directory as well -- the binary release does this with demo/programs.
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -44,6 +50,7 @@ int main(int argc, char** argv) {
     std::string basic_path = EXBASROM309_S19_DEFAULT;
     std::string shell_path = SHELL_BIN_DEFAULT;
     std::string out_path = DISK_IMG_DEFAULT;
+    std::string add_dir;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--dos") == 0 && i + 1 < argc) {
             dos_path = argv[++i];
@@ -51,6 +58,8 @@ int main(int argc, char** argv) {
             basic_path = argv[++i];
         } else if (std::strcmp(argv[i], "--shell") == 0 && i + 1 < argc) {
             shell_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--add-dir") == 0 && i + 1 < argc) {
+            add_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             out_path = argv[++i];
         }
@@ -87,7 +96,27 @@ int main(int argc, char** argv) {
     std::printf("Loaded %s ($%04X-$%04X) as BASIC.COM (%zu bytes with its header)\n", basic_path.c_str(),
                 basic_load.min_addr, basic_load.max_addr, basic_com.data.size());
 
-    auto result = build_fat16_image(out_path, dos_payload, {shell_com, basic_com});
+    std::vector<Fat16File> files = {shell_com, basic_com};
+    if (!add_dir.empty()) {
+        std::vector<std::filesystem::path> extra;
+        for (const auto& entry : std::filesystem::directory_iterator(add_dir))
+            if (entry.is_regular_file()) extra.push_back(entry.path());
+        std::sort(extra.begin(), extra.end());
+        for (const auto& path : extra) {
+            Fat16File f;
+            f.name = path.filename().string();
+            std::string stem = path.stem().string();
+            std::string ext = path.extension().string(); // with its dot
+            if (stem.size() > 8 || ext.size() > 4 || stem.empty()) {
+                std::fprintf(stderr, "Skipping '%s': not an 8.3 name\n", f.name.c_str());
+                continue;
+            }
+            if (!read_file(path.string(), f.data)) return 1;
+            std::printf("Added %s (%zu bytes)\n", f.name.c_str(), f.data.size());
+            files.push_back(std::move(f));
+        }
+    }
+    auto result = build_fat16_image(out_path, dos_payload, files);
     if (!result.ok) {
         std::fprintf(stderr, "Failed to build '%s': %s\n", out_path.c_str(), result.error.c_str());
         return 1;

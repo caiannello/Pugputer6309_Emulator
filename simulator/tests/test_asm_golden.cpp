@@ -1,5 +1,5 @@
 // "Golden" tests: assemble real 6309-native source with the HD6309
-// cross-assembler already in this repo (lwtools-4.20/lwasm), load the
+// cross-assembler lwasm (William Astle's lwtools), load the
 // resulting binary into the emulator, run it, and check memory results
 // -- closer to "run real assembled code and check it behaves correctly"
 // than hand-encoded opcode byte arrays alone. Only compiled/linked when

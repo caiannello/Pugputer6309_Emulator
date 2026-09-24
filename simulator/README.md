@@ -4,7 +4,8 @@ A cycle-counted HD6309 (and 6809-compatible emulation-mode) CPU core in
 C++17, built as a static library and a shared library (DLL) behind a
 stable C API (`include/hd6309/hd6309.h`), with a test suite that mixes
 direct unit tests and "golden" tests assembled with the HD6309-mode
-cross-assembler already in this repo (`lwtools-4.20/lwasm`).
+cross-assembler `lwasm` from William Astle's lwtools (not part of this
+repository -- see "Building from source" in the top-level `README.md`).
 
 This is meant to become the CPU core of a full Pugputer6309 machine
 simulator (BIOS ROM, interrupt vectors, 16 Hz NMI, UART/keyboard/
@@ -74,11 +75,11 @@ tools/tests that don't need a custom memory map.
 
 ## Ground truth used for opcodes and cycle counts
 
-Rather than trust the OCR'd programming manual in `Claude_Readme/` for
+Rather than trust an OCR'd copy of the programming manual for
 opcode bytes and per-addressing-mode cycle counts, this emulator was
-built directly against `lwtools-4.20/lwasm/instab.c` (the authoritative
-opcode/addressing-mode table used by the working cross-assembler already
-in this repo) and `lwtools-4.20/lwasm/cycle.c` (its per-opcode cycle
+built directly against lwtools' `lwasm/instab.c` (the authoritative
+opcode/addressing-mode table used by the working cross-assembler, by
+William Astle) and `lwasm/cycle.c` (its per-opcode cycle
 table, which separately gives 6809-emulation-mode and 6309-native-mode
 timing). That source caught real gaps in the programming manual's
 Appendix A -- e.g. `NEGW`/`ASRW`/`ASLW` ($1050/$1057/$1058) are absent
@@ -214,7 +215,7 @@ future timer). Addresses outside every mapping fall through to RAM.
 ### `UartR65C51` -- R65C51 ACIA-compatible UART
 
 Register-exact against
-`Claude_Readme/Pugputer6309_CPU_Card/R65C51_text.txt` and validated
+the Rockwell R65C51 datasheet and validated
 against the real driver in `bios/serio.asm` (Control=`$1F`,
 Command=`$09` for 19200 baud/8N1/RX-IRQ-on/TX-IRQ-off/DTR-ready, exactly
 matching the BIOS's own init sequence). It has its own fixed 1.8432MHz
@@ -455,8 +456,8 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
 - `test_asm_golden.cpp` -- assembles `tests/test_asm/*.asm` with the
   real `lwasm.exe` at test-run time, loads the resulting binary, runs
   it, and checks memory results. Skipped automatically (at CMake
-  configure time) if `lwasm.exe` isn't found next to this checkout's
-  `lwtools-4.20`.
+  configure time) if `lwasm.exe` isn't found (see `tests/CMakeLists.txt`
+  for where it looks; the `LWTOOLS` environment variable works too).
 
 `pugputer_tests` (the `SystemBus`/`UartR65C51` suite):
 - `test_uart.cpp` -- register-level UART behavior direct against

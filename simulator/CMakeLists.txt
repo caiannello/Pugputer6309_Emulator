@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(HD6309_BUILD_TESTS "Build the hd6309 emulator test suite" ON)
+option(PUGPUTER_STATIC_RUNTIME "Link the MSVC C++ runtime statically, so the programs need no Visual C++ redistributable" ON)
+if(MSVC AND PUGPUTER_STATIC_RUNTIME)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 option(PUGPUTER_BUILD_COM_BRIDGE "Build the Windows COM-port bridge for the UART device" ${WIN32})
 
 if(MSVC)
@@ -25,7 +29,8 @@ set(HD6309_SOURCES
 add_library(hd6309_static STATIC ${HD6309_SOURCES})
 target_include_directories(hd6309_static PUBLIC include)
 target_include_directories(hd6309_static PRIVATE src)
-set_target_properties(hd6309_static PROPERTIES OUTPUT_NAME hd6309)
+# (Not named hd6309 like the DLL: on Windows the DLL's import library is hd6309.lib too, and
+# the two would overwrite each other -- whichever was built last is what got linked.)
 
 # Shared library: the DLL/.so surface for out-of-process or
 # cross-language consumers (matches the public C API in hd6309.h).
