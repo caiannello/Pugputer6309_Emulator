@@ -1,9 +1,9 @@
 // Harness for testing the resident DOS layer directly: boots the real chain
-// (BIOS -> SD_BOOT_TRY -> dos.asm -> BASIC.COM, so dos.asm has genuinely
+// (BIOS -> SD_BOOT_TRY -> dos.asm -> SHELL.COM, so dos.asm has genuinely
 // installed its calls in the BIOS's DOS call table), waits for BASIC's prompt,
 // then makes BIOS calls itself by loading CPU registers and running a tiny stub
-// in RAM (SWI2 ; BRA *) -- the same way BASIC reaches DOS, minus BASIC. BASIC is
-// left idle and never resumed. Works on the shared disk.img, so tests must clean
+// in RAM (SWI2 ; BRA *) -- the same way a program reaches DOS. The shell is left
+// idle and never resumed. Works on the shared disk.img, so tests must clean
 // up (or overwrite) the files they use before relying on them.
 #pragma once
 
@@ -26,12 +26,13 @@ constexpr uint8_t B_FOPEN_NAME = 0x13, B_READLINE = 0x14, B_WRITELINE = 0x15, B_
 constexpr uint8_t B_OPENDIR = 0x17, B_READDIR = 0x18, B_KILL_NAME = 0x19, B_RENAME_NAME = 0x1A;
 constexpr uint8_t B_FGETC = 0x1B, B_FPUTC = 0x1C, B_FREAD = 0x1D, B_FWRITE = 0x1E, B_FSEEK_NAME = 0x1F,
                   B_FSTAT_NAME = 0x20, B_FFLUSH = 0x21, B_MKDIR = 0x22, B_RMDIR = 0x23, B_CHDIR = 0x24,
-                  B_GETCWD = 0x25, B_CLOSEDIR = 0x26, B_STAT = 0x27, B_DOS_VERSION = 0x28;
-constexpr uint8_t B_BANK_GET = 0x29, B_BANK_SET = 0x2A, B_PAGE_ALLOC = 0x2B, B_PAGE_FREE = 0x2C,
-                  B_PAGE_INFO = 0x2D, B_PAGE_COPY = 0x2E;
+                  B_GETCWD = 0x25, B_CLOSEDIR = 0x26, B_STAT = 0x27, B_DOS_VERSION = 0x28, B_EXEC = 0x29, B_ARGS = 0x2A,
+                  B_EXIT = 0x2B;
+constexpr uint8_t B_BANK_GET = 0x2C, B_BANK_SET = 0x2D, B_PAGE_ALLOC = 0x2E, B_PAGE_FREE = 0x2F,
+                  B_PAGE_INFO = 0x30, B_PAGE_COPY = 0x31;
 constexpr uint8_t ERR_BADDEV = 0x02, ERR_NOTFOUND = 0x05, ERR_NOSPACE = 0x06, ERR_NOSLOT = 0x07, ERR_EXISTS = 0x08,
                   ERR_EOF = 0x09, ERR_ISOPEN = 0x0A, ERR_BADMODE = 0x0B, ERR_NOTDIR = 0x0C, ERR_ISDIR = 0x0D,
-                  ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10, ERR_BADPARAM = 0x11;
+                  ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10, ERR_BADPARAM = 0x11, ERR_BADEXE = 0x12;
 constexpr uint8_t READ = 0, WRITE = 1, APPEND = 2, UPDATE = 3;
 constexpr uint8_t FROM_START = 0, FROM_CUR = 1, FROM_END = 2; // (SEEK_* are stdio macros)
 constexpr uint8_t ATTR_DIR = 0x10;
@@ -78,10 +79,11 @@ struct DosSession {
         bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
         uart.set_tx_callback([this](uint8_t b) { console += static_cast<char>(b); });
         bus.reset();
-        // BIOS, disk boot, DOS start, BASIC banner and prompt -- in slices, so a boot
-        // that finishes early doesn't run out the clock.
-        for (int slice = 0; slice < 60 && console.find("OK") == std::string::npos; ++slice) bus.run(200000);
-        if (console.find("OK") == std::string::npos) return false;
+        // BIOS, disk boot, DOS start, the shell's banner and prompt -- in slices, so a
+        // boot that finishes early doesn't run out the clock. (The shell is left idle
+        // at its prompt and never resumed.)
+        for (int slice = 0; slice < 60 && console.find("/> ") == std::string::npos; ++slice) bus.run(200000);
+        if (console.find("/> ") == std::string::npos) return false;
         uint8_t* ram = bus.ram();
         for (uint16_t at : {kStub, kStub0}) {
             ram[at] = 0x10; // SWI2

@@ -54,8 +54,8 @@ TEST(basic309_load_save_round_trips_a_program_through_disk) {
     uart.set_tx_callback([&](uint8_t b) { received += static_cast<char>(b); });
 
     bus.reset();
-    bus.run(6000000); // boot to the OK prompt
-    CHECK(received.find("OK") != std::string::npos);
+    for (int i = 0; i < 100 && received.find("/> ") == std::string::npos; ++i) bus.run(200000); // boot to the shell
+    CHECK(received.find("/> ") != std::string::npos);
 
     // Handshake off the real RDRF flag (wait for it to go 1 -- the byte
     // arrived -- then wait for it to go 0 -- BASIC actually read it)
@@ -86,6 +86,11 @@ TEST(basic309_load_save_round_trips_a_program_through_disk) {
         send_byte('\r');
         bus.run(50000);
     };
+
+    // Start BASIC from the shell, as a user would.
+    type("BASIC");
+    bus.run(6000000);
+    CHECK(received.find("OK") != std::string::npos);
 
     received.clear();
     type("10 PRINT \"HELLO FROM DISK\"");

@@ -8,21 +8,25 @@ only BASIC.
 - `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`).
 - `build_basic.bat` -- builds `exbasrom309.s19` **and** `exbasrom309.lst` with a symbol
   table (`--symbols`). Always build through it: the token-audit test reads the symbols.
-- `../reinit_disk.bat` -- rebuilds the BIOS, `dos/dos.asm` and BASIC, then regenerates
-  `disk.img` (DOS + `BASIC.COM` only -- a clean slate). Run it after editing `bios/`,
+- `../reinit_disk.bat` -- rebuilds the BIOS, `dos/dos.asm`, the shell and BASIC, then
+  regenerates `disk.img` (DOS + `SHELL.COM` + `BASIC.COM` only -- a clean slate). Run it after editing `bios/`,
   `dos/` or `basic309/`, and after test runs if you want the disk emptied.
 - `disk.img` -- the FAT16 SD-card image the emulator boots from (see
   `../simulator/README.md`, "boot chain").
 
 ## How it is loaded and where it lives
 
-`BASIC.COM` is `$C000-$EFFF` (12288 bytes) of RAM, loaded from the disk by `dos/dos.asm`
-(BIOS -> `SD_BOOT_TRY` -> DOS -> BASIC).
+`BASIC.COM` is an ordinary program file (see `../shell/README.md`): an 8-byte header
+("PX", load `$C000`, entry `$C000`, flags 0) followed by `$C000-$EFFF` (12288 bytes). At boot
+DOS starts the shell (BIOS -> `SD_BOOT_TRY` -> DOS -> `SHELL.COM`); typing `BASIC` at its
+prompt has DOS load BASIC.COM and jump to `BASIC_ENTRY`. `SYSTEM` leaves BASIC: DOS closes
+every open file and starts the shell again. (On a disk with no `SHELL.COM`, DOS starts
+`BASIC.COM` directly.)
 
 | Range          | What |
 |----------------|------|
-| `$0600-$31B9`  | resident DOS (code, variables, a FAT-sector cache, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE`; only its first ~6KB is on disk, the buffers are just RAM |
-| `$3200`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$32`); its top, `PROGST`, moves as variables are added. Must stay above `DOS_END` (`dos/dos.lst`); `test_bios_layout` checks it. |
+| `$0600-$3331`  | resident DOS (code, variables, a FAT-sector cache, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE`; only its first ~6KB is on disk, the buffers are just RAM |
+| `$3400`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$34`); its top, `PROGST`, moves as variables are added. Must stay above `DOS_END` (`dos/dos.lst`); `test_bios_layout` checks it. |
 | `PROGST+1`     | start of the BASIC program, then variables, arrays, free memory |
 | `$BFFF`        | fixed top of string space (`TOPRAM_FIXED`) |
 | `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (DOS, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
@@ -35,7 +39,8 @@ BASIC further means trimming unused Color BASIC code or moving `BASIC.COM` lower
 
 `LOAD "path"`, `SAVE "path"` (programs are stored as plain text listings, one line per
 program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
-`MKDIR "path"`, `RMDIR "path"`, `CHDIR "path"` (`CHDIR` alone prints the current directory).
+`MKDIR "path"`, `RMDIR "path"`, `CHDIR "path"` (`CHDIR` alone prints the current directory),
+`SYSTEM` (leave BASIC, back to the shell).
 
 - **Paths** use `/` as the separator: `SAVE "GAMES/CHESS"`. A leading `/` means the root,
   anything else is relative to the current directory (one, system-wide; it starts at the root

@@ -417,7 +417,7 @@ TEST(dos_dirs_stat_fstat_seek_whence_and_flush) {
     CHECK(d.flush(0xFF).ok()); // all files
     CHECK(d.flush(7).carry && d.flush(7).a == bios::ERR_BADDEV);
     CHECK(d.close(o.a).ok());
-    CHECK(d.call(bios::B_DOS_VERSION).a == 0x20);
+    CHECK(d.call(bios::B_DOS_VERSION).a == 0x21);
 
     wipe(d, {"T1/F.DAT"}, {"T1"});
 }

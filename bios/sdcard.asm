@@ -223,6 +223,9 @@ DOS_OUTMASK FCB  1              ; $13 B_FOPEN_NAME   A = handle
             FCB  0              ; $26 B_CLOSEDIR
             FCB  0              ; $27 B_STAT         (in the buffer)
             FCB  1              ; $28 B_DOS_VERSION  A = version
+            FCB  0              ; $29 B_EXEC         (returns only on failure)
+            FCB  2              ; $2A B_ARGS         X = the command tail
+            FCB  0              ; $2B B_EXIT         (never returns)
 DOS_OUTMASK_END
     IFNE (DOS_OUTMASK_END-DOS_OUTMASK)-NUM_DOS_JT
     ERROR "DOS_OUTMASK must have one byte per DOS call (see defines.d)"

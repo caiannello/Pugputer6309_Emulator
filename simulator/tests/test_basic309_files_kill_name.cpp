@@ -49,8 +49,8 @@ TEST(basic309_files_kill_name_round_trip) {
     uart.set_tx_callback([&](uint8_t b) { received += static_cast<char>(b); });
 
     bus.reset();
-    bus.run(6000000);
-    CHECK(received.find("OK") != std::string::npos);
+    for (int i = 0; i < 100 && received.find("/> ") == std::string::npos; ++i) bus.run(200000); // boot to the shell
+    CHECK(received.find("/> ") != std::string::npos);
 
     constexpr uint32_t kStepBudget = 400000;
     auto send_byte = [&](uint8_t ch) {
@@ -65,6 +65,11 @@ TEST(basic309_files_kill_name_round_trip) {
         send_byte('\r');
         bus.run(50000);
     };
+
+    // Start BASIC from the shell, as a user would.
+    type("BASIC");
+    bus.run(6000000);
+    CHECK(received.find("OK") != std::string::npos);
 
     // Start from a known state even if an earlier run left these behind
     // (KILL of a missing file just reports ?NE, which we ignore here).

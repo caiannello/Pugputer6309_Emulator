@@ -27,6 +27,7 @@ B_MKDIR       equ $22          ; X=path
 B_RMDIR       equ $23          ; X=path
 B_CHDIR       equ $24          ; X=path
 B_GETCWD      equ $25          ; X=dest,Y=size -> the current directory as a path
+B_EXIT        equ $2B          ; leave BASIC: DOS closes all files and starts the shell
 B_CLOSEDIR    equ $26          ; B=scan handle
 SEEK_SET      equ $00
 ATTR_DIR      equ $10
@@ -54,10 +55,10 @@ FM_OUT        equ 2            ; OPEN "O" / FOR OUTPUT
 FM_APP        equ 3            ; OPEN "A" / FOR APPEND
 FM_RND        equ 4            ; OPEN "R" / random access
 
-WORKBASE    equ  $3200         ; base of BASIC's relocated fixed workspace. Must
+WORKBASE    equ  $3400         ; base of BASIC's relocated fixed workspace. Must
                                ; stay a multiple of $100 (it's a direct page) and
                                ; above the top of dos/dos.asm's RAM (code, sector
-                               ; buffers, variables -- DOS_END in dos/dos.lst; $31BA
+                               ; buffers, variables -- DOS_END in dos/dos.lst; $3332
                                ; with 8 file buffers). test_bios_layout checks it.
                                ; DP is derived from this, not hand-typed.
 TOPRAM_FIXED equ $BFFF         ; fixed top-of-RAM for BASIC's use (interpreter
@@ -775,6 +776,8 @@ TOK_GO    EQU  $81
           FCB  $80+'R'
           FCC  "RMDI"          AE
           FCB  $80+'R'
+          FCC  "SYSTE"         AF
+          FCB  $80+'M'
 * END OF EXECUTABLE COMMANDS. THE REMAINDER OF THE TABLE ARE NON-EXECUTABLE TOKENS
           FCC  "TAB"          A4
           FCB  $80+'('
@@ -956,6 +959,7 @@ TOK_INPUT EQU  (*-CMD_TAB)/2+$7F
           FDB  MKDIR           AC
           FDB  CHDIR           AD
           FDB  RMDIR           AE
+          FDB  SYSTEM          AF
 TOK_HIGH_EXEC EQU  (*-CMD_TAB)/2+$7F
                                
 * ERROR MESSAGES AND THEIR NUMBERS AS USED INTERNALLY                      
@@ -1477,6 +1481,13 @@ CHDIR_PR  LDA  ,X+
           BRA  CHDIR_PR
 CHDIR_DONE LDA #CR
           JMP  PUTCHR
+;------------------------------------------------------------------------------
+; SYSTEM -- leave BASIC. DOS closes every open file (flushing what was written)
+; and starts the shell again; this never returns.
+;------------------------------------------------------------------------------
+SYSTEM    LDA  #B_EXIT
+          SWI2
+          RTS
 ;==============================================================================
 ; File I/O for BASIC programs (GW-BASIC style sequential files).
 ;

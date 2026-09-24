@@ -75,7 +75,7 @@ TEST(dos_big_volume_reads_files_across_the_64k_block_boundary_and_the_high_addre
     uint32_t size = 0;
     CHECK(d.stat_path("LOW.BIN", &size).ok() && size == 33u * 1024 * 1024);
     CHECK(d.stat_path("HIGH.BIN", &size).ok() && size == 33u * 1024 * 1024);
-    CHECK(d.stat_path("BASIC.COM", &size).ok() && size == 12288);
+    CHECK(d.stat_path("BASIC.COM", &size).ok() && size == 12296);
 
     Fat16Volume::Entry low, high;
     CHECK(vol.find("/LOW.BIN", low) && vol.find("/HIGH.BIN", high));

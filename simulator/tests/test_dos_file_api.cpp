@@ -1,11 +1,11 @@
 // Exercises the resident DOS file API (B_FOPEN_NAME/B_READLINE/
 // B_WRITELINE/B_FCLOSE_NAME) directly via SWI2, independent of BASIC's
 // own LOAD/SAVE commands (which don't exist yet as of this test): boots
-// the real BIOS+dos.asm+basic309 chain from disk.img (so DOS_JTAB is
+// the real BIOS+dos.asm+shell chain from disk.img (so DOS_JTAB is
 // genuinely patched by dos.asm, not faked), waits for the boot to reach
-// BASIC's idle prompt, then hijacks PC to a small hand-assembled test
-// program (test_asm/dos_file_api.asm, injected into BASIC's otherwise-
-// unused free RAM at $9000) that writes a two-line file, closes it,
+// the shell's idle prompt, then hijacks PC to a small hand-assembled test
+// program (test_asm/dos_file_api.asm, injected into otherwise-unused
+// free RAM at $9000) that writes a two-line file, closes it,
 // reopens it for read, and confirms both lines plus EOF round-trip
 // correctly.
 #include <cstdio>
@@ -87,11 +87,10 @@ TEST(dos_file_api_write_close_reopen_read_round_trips) {
     uart.set_tx_callback([&](uint8_t b) { received += static_cast<char>(b); });
 
     bus.reset();
-    bus.run(6000000); // BIOS cold-start + disk boot + basic309's own
-                       // cold-start + banner + idle input loop (DOS_JTAB
-                       // is patched partway through this, before BASIC
-                       // ever gets control)
-    CHECK(received.find("OK") != std::string::npos);
+    // BIOS cold-start + disk boot; DOS patches the BIOS's call table before it starts
+    // the shell, and the shell then idles at its prompt.
+    for (int i = 0; i < 100 && received.find("/> ") == std::string::npos; ++i) bus.run(200000);
+    CHECK(received.find("/> ") != std::string::npos);
 
     // Inject the test program into BASIC's otherwise-unused free RAM and
     // hijack PC to it.

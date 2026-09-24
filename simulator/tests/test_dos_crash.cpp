@@ -309,7 +309,8 @@ TEST(dos_crash_at_every_disk_write_leaves_a_consistent_volume) {
         for (size_t i = 0; i < completed; ++i) ops[i].apply(m);
         std::set<std::string> flux;
         if (completed < ops.size()) flux = ops[completed].touched;
-        flux.insert("/BASIC.COM"); // not part of the model
+        flux.insert("/BASIC.COM"); // (these two are not part of the model)
+        flux.insert("/SHELL.COM");
 
         bool content_ok = true;
         std::string why;

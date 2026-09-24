@@ -55,8 +55,17 @@ TEST(basic309_boots_from_disk_image_via_the_real_bios_and_dos_chain) {
 
     bus.reset(); // PC comes from the real BIOS $FFFE vector -- the whole
                  // chain runs for real from here.
-    bus.run(6000000); // BIOS cold-start + disk boot + basic309's own
-                       // cold-start + banner + idle input loop
+    for (int i = 0; i < 100 && received.find("/> ") == std::string::npos; ++i) bus.run(200000);
+    // BIOS cold-start + disk boot + the shell's banner and prompt. Then start BASIC
+    // from the shell: keys go in one at a time, with the UART's read flag as the
+    // handshake (see Basic309Session::send_byte).
+    CHECK(received.find("Pugputer 6309 shell") != std::string::npos);
+    for (char c : std::string("BASIC\r")) {
+        uart.rx_enqueue(static_cast<uint8_t>(c));
+        for (int i = 0; i < 400000 && !(uart.status_register() & 0x08); ++i) bus.step();
+        for (int i = 0; i < 400000 && (uart.status_register() & 0x08); ++i) bus.step();
+    }
+    for (int i = 0; i < 200 && received.find("OK") == std::string::npos; ++i) bus.run(200000);
 
     hd6309_regs_t regs{};
     hd6309_get_regs(bus.cpu(), &regs);

@@ -53,11 +53,12 @@ struct Basic309Session {
         return run_until_ok(20000000);
     }
 
-    // The whole real chain instead: BIOS -> SD boot -> dos.asm -> BASIC.COM, from
-    // a copy of `disk_img` (BASIC.COM must be on it). Needed for anything that
-    // touches files. The shared disk.img is used in place, so tests must clean
+    // The whole real chain instead: BIOS -> SD boot -> dos.asm -> SHELL.COM, from
+    // `disk_img` (SHELL.COM and BASIC.COM must be on it). boot_shell() stops at the
+    // shell's prompt; boot_disk() goes on to start BASIC from it. Needed for anything
+    // that touches files. The shared disk.img is used in place, so tests must clean
     // up after themselves (or KILL what they use before starting).
-    bool boot_disk(const char* bios_s19, const char* disk_img) {
+    bool boot_shell(const char* bios_s19, const char* disk_img) {
         std::vector<uint8_t> bios_image(65536, 0);
         if (!pugputer::load_srec_file(bios_s19, bios_image.data(), bios_image.size()).ok) return false;
         bios_rom.load(bios_image.data() + kBiosBase, kBiosSize);
@@ -68,6 +69,13 @@ struct Basic309Session {
         bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
         uart.set_tx_callback([this](uint8_t b) { received += static_cast<char>(b); });
         bus.reset();
+        return wait_for("> ", 20000000);
+    }
+
+    // The same, then starts BASIC from the shell like a user would (type BASIC).
+    bool boot_disk(const char* bios_s19, const char* disk_img) {
+        if (!boot_shell(bios_s19, disk_img)) return false;
+        type("BASIC");
         return run_until_ok(20000000);
     }
 

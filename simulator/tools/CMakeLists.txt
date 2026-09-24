@@ -8,6 +8,7 @@ target_link_libraries(cycle_bench PRIVATE pugputer_system)
 set(PUGBIOS_S19_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../bios/pugbios.s19")
 set(EXBASROM309_S19_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/exbasrom309.s19")
 set(DOS_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.bin")
+set(SHELL_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../shell/shell.bin")
 set(DISK_IMG_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
 
 # mkdiskimg is plain, cross-platform file I/O -- no conio.h/Windows
@@ -16,6 +17,7 @@ add_executable(mkdiskimg mkdiskimg.cpp)
 target_link_libraries(mkdiskimg PRIVATE pugputer_system)
 target_compile_definitions(mkdiskimg PRIVATE
     DOS_BIN_DEFAULT="${DOS_BIN_DEFAULT}"
+    SHELL_BIN_DEFAULT="${SHELL_BIN_DEFAULT}"
     EXBASROM309_S19_DEFAULT="${EXBASROM309_S19_DEFAULT}"
     DISK_IMG_DEFAULT="${DISK_IMG_DEFAULT}"
 )

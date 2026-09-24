@@ -1,6 +1,6 @@
 @echo off
-rem Rebuilds BIOS, dos.asm, and basic309, then regenerates basic309\disk.img
-rem from scratch (just BASIC.COM, no other files) -- run this any time you
+rem Rebuilds BIOS, dos.asm, the shell and basic309, then regenerates
+rem basic309\disk.img from scratch (just SHELL.COM and BASIC.COM, no other files) -- run this any time you
 rem want a clean slate between test sessions, or after editing bios/,
 rem dos/, or basic309/.
 setlocal
@@ -17,6 +17,12 @@ popd
 echo Rebuilding dos.asm...
 pushd "%ROOT%dos" || exit /b 1
 call "%ROOT%dos\compile.bat"
+if errorlevel 1 (popd & exit /b 1)
+popd
+
+echo Rebuilding shell...
+pushd "%ROOT%shell" || exit /b 1
+call "%ROOT%shell\compile.bat"
 if errorlevel 1 (popd & exit /b 1)
 popd
 

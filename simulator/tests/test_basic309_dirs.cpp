@@ -29,7 +29,7 @@ TEST(basic309_dirs_make_enter_list_and_remove_directories) {
     CHECK(expect_eq("start", s.run_line("CHDIR"), "/\r\n")); // no argument: where am I
     CHECK(expect_eq("mkdir", s.run_line("MKDIR \"SUB1\""), ""));
     CHECK(contains(s.run_line("FILES"), "SUB1 <DIR>"));
-    CHECK(contains(s.run_line("FILES"), "BASIC.COM 12288"));
+    CHECK(contains(s.run_line("FILES"), "BASIC.COM 12296"));
     CHECK(expect_eq("chdir", s.run_line("CHDIR \"SUB1\""), ""));
     CHECK(expect_eq("cwd", s.run_line("CHDIR"), "/SUB1\r\n"));
     CHECK(expect_eq("empty", s.run_line("FILES"), "")); // "." and ".." aren't shown

@@ -393,21 +393,23 @@ V_RESET (bios/main.asm)  --calls-->  SD_BOOT_TRY (bios/sdcard.asm)
                    assembled as a flat raw binary, not ROM) to RAM and
                    jumps there, never returning
 
-dos/dos.asm (a real BIOS client, talks to BIOS purely via SWI2 B_BLK_READ)
-  parses the BPB, scans the root directory for "BASIC.COM", walks its
-  FAT16 cluster chain loading it to $C000, jumps to $C000 (BASIC_ENTRY, a
-  JMP RESVEC that stays put however the interpreter's code grows)
-  and STAYS RESIDENT: it patches the BIOS's JT_DOS_* RAM vectors so BASIC's
-  file calls (B_FOPEN_NAME, B_FGETC, B_FWRITE, B_FSEEK_NAME, ... -- see
-  bios/defines.d) reach it while BASIC runs
+dos/dos.asm (a real BIOS client, talks to BIOS purely via SWI2 block calls)
+  parses the BPB, installs its calls in the BIOS's JT_DOS table, and starts
+  the first program: /SHELL.COM (or, on a disk without one, /BASIC.COM) --
+  B_EXEC: read the 8-byte program header ("PX", load, entry, flags), load
+  the body at the load address, jump to the entry. It STAYS RESIDENT, so
+  the file calls (B_FOPEN_NAME, B_FGETC, B_FWRITE, B_FSEEK_NAME, ... -- see
+  bios/defines.d) reach it while programs run; a program ends with B_EXIT,
+  which closes its files and starts the shell again. The shell (shell/)
+  starts BASIC.COM the same way when you type BASIC.
 ```
 
 `tests/test_basic309_sdboot_golden.cpp` boots from the BIOS's real
 `$FFFE` reset vector with no hand-wired PC hijack anywhere -- nothing in
-the test tells the emulator where `BASIC.COM` is; the disk/DOS chain
-finds it. `tools/mkdiskimg.cpp` builds `basic309/disk.img` (`dos/dos.bin`
-+ `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`, the same
-bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_demo.cpp`
+the test tells the emulator where `SHELL.COM` or `BASIC.COM` is; the disk/DOS chain
+finds them. `tools/mkdiskimg.cpp` builds `basic309/disk.img` (`dos/dos.bin`
++ `SHELL.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
+with a program header, the same bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_demo.cpp`
 is the interactive equivalent of `basic309_demo` for this path
 (`--com`/`--bios`/`--disk` flags).
 
@@ -475,6 +477,12 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   refusals (bank 0, uninstalled pages, the stack's bank), RAM-size probing (4 to 256 pages),
   page copy (unaligned, whole page, callers' remapped banks, stack in any bank, interrupt mask
   kept, bad ranges rejected), and the BIOS/DOS memory layout check.
+- `test_shell.cpp` -- the program loader and the shell, with real keystrokes through the
+  whole boot chain (each test on its own small disk image): the built-in commands (DIR, CD,
+  MD, RD, DEL, REN, TYPE, COPY, VER, MEM, HELP) and their errors, line editing, running
+  programs with a command tail (hand-assembled test programs), the loader's rejections (bad
+  magic/flags/entry, would overwrite DOS or run into the ROM), B_EXIT closing and flushing
+  files a program left open, and BASIC starting from the shell and `SYSTEM` returning to it.
 - `test_dos_bigfiles.cpp` -- 32-bit sizes/positions and block numbers: a 100MB volume with two
   33MB files (read at offsets across block 65536 and 131072, so the SD device's high address word
   is used), new files placed beyond block 131072, files past 64KB appended/updated/gap-filled/
@@ -515,9 +523,9 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
 - `test_basic309_sdboot_golden.cpp` -- the real end-to-end integration
   test: boots `bios/pugbios.s19` from its actual `$FFFE` reset vector
   against `basic309/disk.img`, with no PC hijack anywhere -- `SD_BOOT_TRY`
-  finds and loads `dos/dos.asm`, which finds and loads `BASIC.COM` via a
-  real FAT16 root-directory scan and cluster-chain walk, and confirms
-  BASIC's actual startup banner and `OK` prompt come out the far end.
+  finds and loads `dos/dos.asm`, which starts `SHELL.COM`; the test types
+  `BASIC` at the shell and confirms BASIC's actual startup banner and `OK`
+  prompt come out the far end.
   Skipped automatically if `bios/pugbios.s19` and/or `basic309/disk.img`
   don't exist.
 - `test_basic309_golden.cpp` -- BASIC's banner and `OK` prompt with the BIOS but

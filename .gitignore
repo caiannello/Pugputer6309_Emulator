@@ -19,3 +19,5 @@
 /basic309/*.lst
 /basic309/*.s19
 /basic309/disk.img
+/shell/shell.bin
+/shell/shell.lst

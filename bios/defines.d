@@ -138,8 +138,8 @@ B_BLK_WRITE equ  $12        ; X: 16-bit LBA, Y: RAM buffer adrs -> writes
 ; to the current directory; "." and ".." are understood; each component is an
 ; 8.3 name (letters are folded to upper case). Handles are small numbers: file
 ; handles 0..7 (DOS_NFILES) and, separately, directory-scan handles 0..3.
-; Sizes and positions are 32-bit in the API (this DOS handles files up to 64KB-1
-; for now: a larger value is ERR_TOOBIG).
+; Sizes and positions are 32-bit in the API and in DOS (ERR_TOOBIG only for a
+; position past 32 bits).
 B_FOPEN_NAME  equ $13        ; X: path, E: mode (FOPEN_*) -> A: file handle
 B_READLINE    equ $14        ; B: handle, X: dest buf, Y: max len ->
                              ; X: actual length read (0 = empty line or EOF).
@@ -186,23 +186,35 @@ B_CLOSEDIR  equ  $26         ; B: scan handle
 B_STAT      equ  $27         ; X: path, Y: dest buf (same 16 bytes as FSTAT; the
                              ; position is 0 and the open mode $FF)
 B_DOS_VERSION equ $28        ; -> A: API version (DOS_API_VERSION)
-B_DOS_END   equ  $29         ; the DOS calls are B_FOPEN_NAME up to (not including) this
+; Programs. A program file starts with an 8-byte header (EXE_* below); DOS loads
+; its body at the header's load address and starts it at the entry address.
+B_EXEC        equ $29        ; X: path of a program file, Y: its command tail (a
+                             ; NUL-terminated string, or 0 for none) -> loads and
+                             ; STARTS the program: on success this does not return
+                             ; (the caller's memory may be overwritten); on failure
+                             ; carry set + A = ERR_NOTFOUND / ERR_BADEXE / ERR_TOOBIG
+B_ARGS        equ $2A        ; -> X: address (in DOS's RAM) of the running program's
+                             ; command tail, NUL-terminated (empty if there was none)
+B_EXIT        equ $2B        ; the program is finished: DOS closes every open file
+                             ; and directory scan and starts the shell again (or, on
+                             ; a disk with none, BASIC.COM). Never returns.
+B_DOS_END   equ  $2C         ; the DOS calls are B_FOPEN_NAME up to (not including) this
 NUM_DOS_JT  equ  B_DOS_END-B_FOPEN_NAME ; DOS-resident calls: one JT_DOS slot
                              ; each (main.asm), in call-code order
 
 ; RAM banking (banks.asm). Bank 0 is always page 0 (the system's); banks 1..3
 ; belong to applications. Every bank change must go through B_BANK_SET, which
 ; keeps the BIOS's readable shadow copies right (the registers are write-only).
-B_BANK_GET  equ  $29         ; B: bank (0..3) -> A: the page mapped there
-B_BANK_SET  equ  $2A         ; B: bank (1..3), E: page -> maps it. ERR_BADPARAM for
+B_BANK_GET  equ  B_DOS_END   ; B: bank (0..3) -> A: the page mapped there
+B_BANK_SET  equ  B_DOS_END+1 ; B: bank (1..3), E: page -> maps it. ERR_BADPARAM for
                              ; bank 0, a page that isn't installed, or the bank the
                              ; caller's stack is in (remapping that would strand the
                              ; frame the call returns through)
-B_PAGE_ALLOC equ $2B         ; -> A: a free 16KB RAM page (pages 0..3 are never
+B_PAGE_ALLOC equ B_DOS_END+2 ; -> A: a free 16KB RAM page (pages 0..3 are never
                              ; handed out); ERR_NOSPACE when none are left
-B_PAGE_FREE equ  $2C         ; B: a page from B_PAGE_ALLOC (ERR_BADPARAM otherwise)
-B_PAGE_INFO equ  $2D         ; -> X: installed pages, Y: pages still free
-B_PAGE_COPY equ  $2E         ; B: source page, E: destination page, X: source
+B_PAGE_FREE equ  B_DOS_END+3 ; B: a page from B_PAGE_ALLOC (ERR_BADPARAM otherwise)
+B_PAGE_INFO equ  B_DOS_END+4 ; -> X: installed pages, Y: pages still free
+B_PAGE_COPY equ  B_DOS_END+5 ; B: source page, E: destination page, X: source
                              ; offset, Y: destination offset, U: length -- copies
                              ; between two pages regardless of the current banks,
                              ; leaving the caller's mapping alone. Ranges must stay
@@ -211,16 +223,28 @@ B_PAGE_COPY equ  $2E         ; B: source page, E: destination page, X: source
 
 ; 32-bit block numbers (sdcard.asm). Same as B_BLK_READ/WRITE, but the LBA's HIGH
 ; word comes in W (E:F) -- the calls above always use high word 0.
-B_BLK_READ32  equ $2F        ; X: LBA low word, W: LBA high word, Y: RAM buffer adrs
-B_BLK_WRITE32 equ $30        ; same arguments; writes [Y..Y+511]
-NUM_BCALLS  equ  $31
+B_BLK_READ32  equ B_DOS_END+6 ; X: LBA low word, W: LBA high word, Y: RAM buffer adrs
+B_BLK_WRITE32 equ B_DOS_END+7 ; same arguments; writes [Y..Y+511]
+NUM_BCALLS  equ  B_DOS_END+8
 
 DOS_LOAD    equ  $0600       ; where SD_BOOT_TRY loads dos/dos.asm and jumps to it
                              ; (dos.asm ORGs here too, so nothing is hand-synced).
                              ; Must be above the BIOS's RAM (EndOfVars in
                              ; pugbios.map); test_bios_layout checks that.
 
-DOS_API_VERSION equ $20      ; major*16 + minor: 2.0
+DOS_API_VERSION equ $21      ; major*16 + minor: 2.1 (2.1 added programs)
+
+; Program files. Header, all 16-bit values big-endian:
+;   +0  "PX"           magic
+;   +2  load address   where the body (everything after the header) goes; must be at
+;                      or above the end of DOS's RAM (DOS_END) and the body must end
+;                      below the ROM ($F000)
+;   +4  entry address  where execution starts; inside the body
+;   +6  flags          must be 0 (reserved: a later revision will use it to mark a
+;                      header extension with a segment table for banked programs)
+EXE_MAGIC   equ  $5058       ; "PX"
+EXE_HDRSIZE equ  8
+EXE_MAXTOP  equ  $F000       ; a body may not reach the ROM
 DOS_NFILES  equ  8           ; open files at once (handles 0..7)
 DOS_NDIRS   equ  4           ; directory scans open at once
 
@@ -244,6 +268,7 @@ ERR_NOTEMPTY equ $0E        ; B_RMDIR: the directory still has entries
 ERR_BADPATH equ  $0F        ; a name that isn't a valid 8.3 name / too long
 ERR_TOOBIG  equ  $10        ; a size or position beyond what this DOS handles
 ERR_BADPARAM equ $11        ; an argument out of range (bank, page, offset, length)
+ERR_BADEXE  equ  $12        ; B_EXEC: not a valid program file (magic, flags, addresses)
 
 ; B_FOPEN_NAME mode values
 FOPEN_READ   equ $00        ; must exist; read (and seek) only

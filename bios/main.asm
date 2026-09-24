@@ -231,14 +231,14 @@ BIOS_TAB    FDB  BIOS_DQUERY     ; $00 B_DQUERY
 
 ; The calls numbered above the DOS range, from B_BANK_GET up: banking
 ; (banks.asm), then the 32-bit block calls (sdcard.asm).
-EXT_TAB     FDB  BIOS_BANK_GET    ; $29 B_BANK_GET
-            FDB  BIOS_BANK_SET    ; $2A B_BANK_SET
-            FDB  BIOS_PAGE_ALLOC  ; $2B B_PAGE_ALLOC
-            FDB  BIOS_PAGE_FREE   ; $2C B_PAGE_FREE
-            FDB  BIOS_PAGE_INFO   ; $2D B_PAGE_INFO
-            FDB  BIOS_PAGE_COPY   ; $2E B_PAGE_COPY
-            FDB  BIOS_BLK_READ32  ; $2F B_BLK_READ32
-            FDB  BIOS_BLK_WRITE32 ; $30 B_BLK_WRITE32
+EXT_TAB     FDB  BIOS_BANK_GET    ; B_BANK_GET
+            FDB  BIOS_BANK_SET    ; B_BANK_SET
+            FDB  BIOS_PAGE_ALLOC  ; B_PAGE_ALLOC
+            FDB  BIOS_PAGE_FREE   ; B_PAGE_FREE
+            FDB  BIOS_PAGE_INFO   ; B_PAGE_INFO
+            FDB  BIOS_PAGE_COPY   ; B_PAGE_COPY
+            FDB  BIOS_BLK_READ32  ; B_BLK_READ32
+            FDB  BIOS_BLK_WRITE32 ; B_BLK_WRITE32
 EXT_TAB_END
     IFNE (EXT_TAB_END-EXT_TAB)-2*(NUM_BCALLS-B_BANK_GET)
     ERROR "EXT_TAB must have one entry per call from B_BANK_GET up (see defines.d)"

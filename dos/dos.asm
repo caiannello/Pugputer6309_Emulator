@@ -50,7 +50,7 @@
 ;------------------------------------------------------------------------------
     ORG  DOS_LOAD       ; where the BIOS loads and starts us (defines.d)
 ;------------------------------------------------------------------------------
-BASIC_ENTRY   equ $C000   ; basic309's fixed entry: a JMP RESVEC at the start of its image
+ARGMAX      equ  79         ; longest command tail kept (B_EXEC / B_ARGS)
 ;------------------------------------------------------------------------------
 NSLOTS      equ DOS_NFILES  ; open files at once (defines.d). Callers may hold up to
                             ; NSLOTS-1 of them and still have a slot free for LOAD/SAVE.
@@ -88,6 +88,7 @@ idx         rmb 1        ; next entry (0..15) in that sector
             ENDS
 ;------------------------------------------------------------------------------
 DOS_START   STY  JT_BASE        ; the BIOS's call table (see SD_BOOT_TRY)
+            STS  BOOT_SP        ; programs start (and B_EXIT restarts the shell) on this stack
             LDQ  #0             ; LBA 0: the boot sector
             LDY  #DOSBUF
             JSR  BLKREAD
@@ -233,50 +234,20 @@ TC_STORE    STW  TOTALCLUS
             STD  MAXCLUS
 MC_OK
 
-            ; Find BASIC.COM (in the root) and load its cluster chain to $C000.
-            LDX  #BASICNAME
-            JSR  FIND_DIRENT
-            LBCS NOTFOUND
-            LDD  #$C000
-            STD  DESTPTR
-            LDD  FOUND_CLUSTER
-            STD  CURCLUS
-LOADCLUS    LDD  CURCLUS
-            JSR  CLUS_TO_LBA
-            STQ  RDLBA
-            LDA  SECPERCLUS
-            STA  MULCNT
-RDCLUSLOOP  TST  MULCNT
-            BEQ  RDCLUS_DONE
-            LDQ  RDLBA
-            LDY  DESTPTR
-            JSR  BLKREAD
-            LDQ  RDLBA
-            ADDW #1
-            ADCD #0
-            STQ  RDLBA
-            LDD  DESTPTR
-            ADDD #512
-            STD  DESTPTR
-            DEC  MULCNT
-            BRA  RDCLUSLOOP
-RDCLUS_DONE
-            LDD  CURCLUS
-            JSR  NEXT_CLUSTER
-            CMPD #$FFF8         ; $FFF8-$FFFF: end of chain
-            BHS  ALLDONE
-            STD  CURCLUS
-            JMP  LOADCLUS
-
             ; Install the resident file API in the BIOS's DOS call table, in
-            ; function-code order, then hand off. Never returns.
-ALLDONE     LDX  #DOS_ENTRIES
+            ; function-code order, then start the first program: the shell
+            ; (/SHELL.COM), or on a disk without one, BASIC. Never returns.
+            LDX  #DOS_ENTRIES
             LDY  JT_BASE
             LDW  #NUM_DOS_JT*2
             TFM  X+,Y+
-            JMP  BASIC_ENTRY
-
-NOTFOUND    LDX  #MSG_NOBASIC
+RUN_STARTUP LDX  #PATH_SHELL
+            LDY  #0
+            JSR  DOS_EXEC       ; (returns only if it couldn't start it)
+            LDX  #PATH_BASIC
+            LDY  #0
+            JSR  DOS_EXEC
+            LDX  #MSG_NOSHELL
             LDB  #F_STDOUT
             LDA  #B_PUTS
             SWI2
@@ -2121,6 +2092,126 @@ DOS_VERSION LDA  #DOS_API_VERSION
             ANDCC #$FE
             RTS
 ;==============================================================================
+; Programs. A program file is an 8-byte header (see EXE_* in defines.d) followed by
+; the body. B_EXEC loads the body where the header says and jumps to the entry
+; address; a program ends with B_EXIT, which starts the shell again.
+;==============================================================================
+; IN: X = the program's path, Y = its command tail (NUL-terminated string in the
+; caller's memory) or 0. On success: does not return -- the program is running,
+; on the boot stack. On failure: carry set + A = ERR_NOTFOUND / ERR_ISDIR / ... /
+; ERR_BADEXE (bad header) / ERR_TOOBIG (doesn't fit where it asks to go). The
+; command tail is copied first (the program may load over the caller's copy) and
+; the path is parsed by the open, so nothing depends on the caller's memory once
+; the body starts loading.
+;------------------------------------------------------------------------------
+DOS_EXEC    STX  EX_PATH
+            LDX  #ARGBUF          ; copy the command tail
+            LDB  #ARGMAX
+            CMPY #0
+            BEQ  EX_ARGEND
+EX_ARGLOOP  LDA  ,Y+
+            BEQ  EX_ARGEND
+            STA  ,X+
+            DECB
+            BNE  EX_ARGLOOP
+EX_ARGEND   CLR  ,X
+            LDX  EX_PATH
+            LDA  #FOPEN_READ
+            JSR  DOS_OPEN
+            LBCS EX_RET
+            STA  EX_H
+            TFR  A,B
+            JSR  SLOT_CHECK
+            LDD  #HDRBUF
+            STD  IO_BUF
+            LDD  #EXE_HDRSIZE
+            STD  IO_LEN
+            JSR  FILE_READ
+            LBCS EX_FAIL
+            LDD  IO_CNT
+            CMPD #EXE_HDRSIZE
+            LBNE EX_BAD
+            LDD  HDRBUF
+            CMPD #EXE_MAGIC
+            LBNE EX_BAD
+            LDD  HDRBUF+6         ; flags: none defined yet
+            LBNE EX_BAD
+            LDD  HDRBUF+2
+            STD  EX_LOAD
+            LDD  HDRBUF+4
+            STD  EX_ENTRY
+            LDX  CUR_SLOT
+            LDQ  fslot.size,X     ; the body is the rest of the file
+            SUBW #EXE_HDRSIZE
+            SBCD #0
+            TSTD
+            LBNE EX_TOOBIG
+            STW  EX_LEN
+            LDD  EX_LOAD
+            CMPD #DOS_END
+            LBLO EX_TOOBIG        ; it would overwrite the BIOS or DOS
+            ADDD EX_LEN
+            LBCS EX_TOOBIG
+            CMPD #EXE_MAXTOP
+            LBHI EX_TOOBIG        ; ... or run into the ROM
+            LDD  EX_ENTRY
+            SUBD EX_LOAD
+            LBLO EX_BAD           ; the entry must lie inside the body
+            CMPD EX_LEN
+            LBHS EX_BAD
+            LDD  EX_LOAD
+            STD  IO_BUF
+            LDD  EX_LEN
+            STD  IO_LEN
+            JSR  FILE_READ
+            BCS  EX_FAIL
+            LDD  IO_CNT
+            CMPD EX_LEN
+            BNE  EX_BAD
+            LDB  EX_H
+            JSR  DOS_CLOSE
+            LDS  BOOT_SP          ; the caller's frame is abandoned: the program has
+            JMP  [EX_ENTRY]       ; the machine
+EX_TOOBIG   LDA  #ERR_TOOBIG
+            BRA  EX_FAIL
+EX_BAD      LDA  #ERR_BADEXE
+EX_FAIL     STA  EX_ERR           ; close the file (an error there is not the news)
+            LDB  EX_H
+            JSR  DOS_CLOSE
+            LDA  EX_ERR
+            ORCC #1
+EX_RET      RTS
+;------------------------------------------------------------------------------
+; -> X = the current command tail (see B_EXEC), NUL-terminated.
+;------------------------------------------------------------------------------
+DOS_ARGS    LDX  #ARGBUF
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; The program is done. Closes every open file (flushing what was written) and
+; every directory scan, then starts the shell again on the boot stack. Never
+; returns.
+;------------------------------------------------------------------------------
+DOS_EXIT    LDS  BOOT_SP
+            CLR  FF_IDX
+EXT_LOOP    LDA  FF_IDX
+            CMPA #NSLOTS
+            BHS  EXT_DONE
+            JSR  SLOT_ADDR
+            TST  fslot.inuse,X
+            BEQ  EXT_NEXT
+            LDB  FF_IDX
+            JSR  DOS_CLOSE        ; (a write error here has nobody to tell)
+EXT_NEXT    INC  FF_IDX
+            BRA  EXT_LOOP
+EXT_DONE    LDX  #DHANDLES
+            CLR  ,X
+            LDY  #DHANDLES
+            LDW  #NDIRH*sizeof{dhandle}
+            TFM  X,Y+
+            JSR  FAT_COMMIT
+            JMP  RUN_STARTUP
+;==============================================================================
 ; The byte-stream layer under the file API: maps a file's byte position to a
 ; sector via its FAT cluster chain, and caches one sector per open file in
 ; that file's own buffer. "File sector N" always means the Nth 512-byte sector
@@ -2634,8 +2725,11 @@ PB_FULL     LDA  #ERR_TOOBIG
             ORCC #1
             RTS
 ;------------------------------------------------------------------------------
-BASICNAME   FCC  "BASIC   COM"      ; 8.3 name, space-padded, no dot
-MSG_NOBASIC FCC  "BASIC.COM not found on disk"
+PATH_SHELL  FCC  "/SHELL.COM"
+            FCB  0
+PATH_BASIC  FCC  "/BASIC.COM"
+            FCB  0
+MSG_NOSHELL FCC  "No SHELL.COM or BASIC.COM on the disk"
             FCB  LF,CR,0
 ;------------------------------------------------------------------------------
 ; The resident API's entry points, in function-code order (bios/defines.d,
@@ -2663,6 +2757,9 @@ DOS_ENTRIES FDB  DOS_OPEN       ; $13 B_FOPEN_NAME
             FDB  DOS_CLOSEDIR   ; $26 B_CLOSEDIR
             FDB  DOS_STAT       ; $27 B_STAT
             FDB  DOS_VERSION    ; $28 B_DOS_VERSION
+            FDB  DOS_EXEC       ; $29 B_EXEC
+            FDB  DOS_ARGS       ; $2A B_ARGS
+            FDB  DOS_EXIT       ; $2B B_EXIT
 DOS_ENTRIES_END
     IFNE (DOS_ENTRIES_END-DOS_ENTRIES)-2*NUM_DOS_JT
     ERROR "DOS_ENTRIES must have one entry per DOS call (see defines.d)"
@@ -2684,9 +2781,15 @@ FATLBA        RMB  2
 ROOTLBA       RMB  4
 ROOTDIRSEC    RMB  2
 DATALBA       RMB  4
-CURCLUS       RMB  2
-RDLBA         RMB  4
-DESTPTR       RMB  2
+BOOT_SP       RMB  2        ; the stack DOS started on: programs start on it
+ARGBUF        RMB  ARGMAX+1 ; the command tail of the program being started
+HDRBUF        RMB  EXE_HDRSIZE
+EX_PATH       RMB  2
+EX_H          RMB  1
+EX_LOAD       RMB  2
+EX_ENTRY      RMB  2
+EX_LEN        RMB  2
+EX_ERR        RMB  1
 SICW          RMB  2        ; CLUS_SIC_TO_LBA: sector within the cluster
 ; The FAT cache and free-cluster search
 FATBUFSEC     RMB  2        ; which sector of the FAT FATBUF holds ($FFFF = none)

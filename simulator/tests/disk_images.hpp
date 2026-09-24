@@ -14,8 +14,8 @@
 #include "pugputer/fat16_image.hpp"
 #include "pugputer/srec_loader.hpp"
 
-// A fresh disk image in the build directory: dos.bin, BASIC.COM (so the boot chain
-// works) and `extra`. Returns its path ("" on failure).
+// A fresh disk image in the build directory: dos.bin, SHELL.COM and BASIC.COM (so the
+// boot chain works, as on mkdiskimg's disk) and `extra`. Returns its path ("" on failure).
 inline std::string build_image(const char* name, uint32_t sectors, uint8_t spc, std::vector<pugputer::Fat16File> extra) {
     std::string path = std::string(PUGPUTER_TEST_BUILD_DIR) + "/" + name;
 #ifdef _WIN32
@@ -31,8 +31,14 @@ inline std::string build_image(const char* name, uint32_t sectors, uint8_t spc, 
     if (!pugputer::load_srec_file(EXBASROM309_S19_PATH, image.data(), image.size()).ok) return "";
     pugputer::Fat16File basic;
     basic.name = "BASIC.COM";
-    basic.data.assign(image.begin() + 0xC000, image.begin() + 0xC000 + 0x3000);
-    std::vector<pugputer::Fat16File> files{basic};
+    basic.data = {'P', 'X', 0xC0, 0x00, 0xC0, 0x00, 0, 0}; // program header: load $C000, entry $C000
+    basic.data.insert(basic.data.end(), image.begin() + 0xC000, image.begin() + 0xC000 + 0x3000);
+    pugputer::Fat16File shell;
+    shell.name = "SHELL.COM";
+    std::ifstream shell_file(SHELL_BIN_PATH, std::ios::binary);
+    if (!shell_file) return "";
+    shell.data.assign((std::istreambuf_iterator<char>(shell_file)), std::istreambuf_iterator<char>());
+    std::vector<pugputer::Fat16File> files{shell, basic};
     for (auto& f : extra) files.push_back(std::move(f));
     auto r = pugputer::build_fat16_image(path, dos, files, sectors, spc);
     if (!r.ok) {
