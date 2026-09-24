@@ -42,7 +42,7 @@ cmake -S "%ROOT%simulator" -B "%ROOT%simulator\build" -A x64 >nul || exit /b 1
 cmake --build "%ROOT%simulator\build" --config %CONFIG% || exit /b 1
 
 if "%RUNTESTS%"=="1" (
-    echo === Running the tests ^(a few minutes^) ===
+    echo === Running the tests ^(under a minute in Release, several minutes in Debug^) ===
     ctest --test-dir "%ROOT%simulator\build" -C %CONFIG% --output-on-failure || exit /b 1
 )
 echo.

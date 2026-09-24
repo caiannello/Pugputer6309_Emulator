@@ -99,8 +99,9 @@ build_all.bat
 ```
 
 That assembles the BIOS, DOS, shell and BASIC, builds the emulator and the tools, makes the disk
-image `basic309\disk.img`, and runs the test suite (about 150 tests; add `notests` to skip
-it). To run the result:
+image `basic309\disk.img`, and runs the test suite (about 150 tests, under a minute in the
+default Release configuration; add `notests` to skip it, or `Debug` for a debug build, in which
+the tests take several minutes). To run the result:
 
 ```
 simulator\build\tools\Release\basic309_sdboot_demo.exe
