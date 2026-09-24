@@ -17,6 +17,11 @@ RUN
 **Just want to try it?** Download the Windows demo from the *Releases* page, unzip it and
 double-click `start-console.bat`. Nothing to install or compile; see the release's `README.md`.
 
+## Future plans
+Self-hosted assembler/linker
+Text editor
+Simulated graphic display
+
 ## What is in here
 
 | Folder | What it is |
