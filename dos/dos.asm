@@ -6,63 +6,48 @@
 ; sectors (not ROM -- this is disk payload, assembled to a flat raw binary
 ; and written there by simulator/tools/mkdiskimg.cpp) into RAM at ORG below,
 ; which must match wherever bios/main.asm's EndOfVars/USER_RAM currently
-; falls (see bios/pugbios.map after a bios rebuild) -- same kind of fixed,
-; hand-verified cross-module constant as loader.asm's RUN_ADRS or
-; basic309's RESVEC.
+; falls (see bios/pugbios.map after a bios rebuild) -- the one remaining
+; hand-verified cross-module constant, like basic309's BASIC_ENTRY.
 ;
 ; Two jobs, both against the same FAT16 volume (BPB fields parsed once at
 ; boot into resident variables both share):
 ;
 ; 1. Boot-time: find "BASIC.COM" in the root directory, walk its cluster
-;    chain loading it to $C000, jump to basic309's RESVEC.
-; 2. Resident file API for BASIC (LOAD/SAVE/FILES/KILL/NAME and file I/O
-;    statements): right before jumping to BASIC, patches bios/main.asm's
-;    JT_DOS_* vectors (a RAM vector table BIOS's SWI2 B_FOPEN_NAME/etc.
-;    indirect through -- same pattern serio.asm's UT_INIT already uses for
-;    JT_IRQ) with the DOS_* routines below, so they stay reachable for as
-;    long as BASIC runs. DOS's own RAM footprint (code, per-file sector
-;    buffers, variables) sits entirely below basic309's WORKBASE, which
-;    BASIC never touches, so nothing needs to relocate for this to work --
-;    DOS simply never gets overwritten. If DOS's footprint grows, raise
-;    WORKBASE in basic309/exbasrom309.asm to stay above its last byte.
+;    chain loading it to $C000, jump to BASIC_ENTRY.
+; 2. Resident file API (see the B_* DOS calls in bios/defines.d): SD_BOOT_TRY
+;    passes the address of the BIOS's DOS call table (JT_DOS) in Y; right
+;    before jumping to BASIC, DOS copies its DOS_ENTRIES table there, so the
+;    routines below stay reachable through the BIOS's SWI2 calls for as long as
+;    programs run. DOS's own RAM footprint (code, per-file sector buffers,
+;    variables) sits entirely below basic309's WORKBASE, which BASIC never
+;    touches, so nothing needs to relocate for this to work -- DOS simply never
+;    gets overwritten. If DOS's footprint grows, raise WORKBASE in
+;    basic309/exbasrom309.asm to stay above its last byte.
 ;
 ; Files are byte streams with a position: sequential read, write (create or
-; truncate), append, and update (read/write/seek in place). Up to NSLOTS
-; files can be open at once, each with its own 512-byte sector buffer.
+; truncate), append, and update (read/write/seek in place). Up to NSLOTS files
+; can be open at once, each with its own 512-byte sector buffer. Files live in
+; a tree of directories: paths use "/" as the separator, a leading "/" names
+; the root, and there is one system-wide current directory (CWDCLUS). Names are
+; 8.3 (no long filenames); a directory is the root (a fixed run of sectors) or
+; a cluster chain like any file.
 ;
-; No command shell, no long filenames, no subdirectories, files capped at
-; 64KB (the on-disk size field is the real 32-bit FAT16 field, but this
-; DOS only ever reads/writes the low 16 bits of it -- more than enough
-; for a BASIC program or data file). Assumes 512-byte sectors throughout
-; (mkdiskimg.cpp always uses that) and a power-of-two sectors-per-cluster
-; (FAT16 requires it).
+; Files are capped at 64KB-1 for now (the API takes 32-bit sizes and positions
+; -- a larger value is ERR_TOOBIG -- and the on-disk size field is the real
+; 32-bit FAT16 field, but only its low 16 bits are used). Assumes 512-byte
+; sectors throughout (mkdiskimg.cpp always uses that) and a power-of-two
+; sectors-per-cluster (FAT16 requires it).
 ;------------------------------------------------------------------------------
     INCLUDE defines.d
 ;------------------------------------------------------------------------------
     ORG  $04FE          ; MUST match bios/pugbios.map's EndOfVars/USER_RAM
 ;------------------------------------------------------------------------------
 BASIC_ENTRY   equ $C000   ; basic309's fixed entry: a JMP RESVEC at the start of its image
-; bios/main.asm's DOS_JTAB slots (see bios/pugbios.map after a bios
-; rebuild) -- fixed, hand-verified constants, same reasoning as
-; BASIC_ENTRY above; DOS can't EXTERN these since it's assembled and
-; linked completely separately from bios/.
-JT_DOS_OPEN      equ $002B
-JT_DOS_READLINE  equ $002D
-JT_DOS_WRITELINE equ $002F
-JT_DOS_CLOSE     equ $0031
-JT_DOS_DIRFIRST  equ $0033
-JT_DOS_DIRNEXT   equ $0035
-JT_DOS_KILL      equ $0037
-JT_DOS_RENAME    equ $0039
-JT_DOS_FGETC     equ $003B
-JT_DOS_FPUTC     equ $003D
-JT_DOS_FREAD     equ $003F
-JT_DOS_FWRITE    equ $0041
-JT_DOS_FSEEK     equ $0043
-JT_DOS_FSTAT     equ $0045
 ;------------------------------------------------------------------------------
-NSLOTS      equ 5        ; open files at once. Callers may hold up to NSLOTS-1
-                         ; of them and still have a slot free for LOAD/SAVE.
+NSLOTS      equ DOS_NFILES  ; open files at once (defines.d). Callers may hold up to
+                            ; NSLOTS-1 of them and still have a slot free for LOAD/SAVE.
+NDIRH       equ DOS_NDIRS   ; directory scans open at once
+PATHMAX     equ 64          ; longest absolute path B_GETCWD can build
 ;------------------------------------------------------------------------------
 fslot       STRUCT
 inuse       rmb 1        ; 0 = free
@@ -81,8 +66,20 @@ cacheidx    rmb 1        ; cluster index (within the file) of cacheclus ...
 cacheclus   rmb 2        ; ... a cached spot in the chain (0 = none), so
                          ; sequential access doesn't re-walk from the start
             ENDS
+; One open directory scan (B_OPENDIR/B_READDIR): the DS_* iteration state
+; (see DS_START below) saved between calls, plus the next entry to look at.
+dhandle     STRUCT
+inuse       rmb 1
+dir         rmb 2        ; the directory's first cluster (0 = root)
+cur         rmb 2        ; cluster the scan is in
+sic         rmb 1        ; sector within that cluster
+lba         rmb 2        ; the sector being read
+left        rmb 2        ; root only: sectors left, counting the current one
+idx         rmb 1        ; next entry (0..15) in that sector
+            ENDS
 ;------------------------------------------------------------------------------
-DOS_START   LDX  #0             ; LBA 0: the boot sector
+DOS_START   STY  JT_BASE        ; the BIOS's call table (see SD_BOOT_TRY)
+            LDX  #0             ; LBA 0: the boot sector
             LDY  #DOSBUF
             JSR  BLKREAD
 
@@ -112,6 +109,14 @@ SHIFTDONE
             LDY  #FSLOTS
             LDW  #NSLOTS*sizeof{fslot}
             TFM  X,Y+
+            LDX  #DHANDLES
+            CLR  ,X
+            LDY  #DHANDLES
+            LDW  #NDIRH*sizeof{dhandle}
+            TFM  X,Y+
+            LDD  #0
+            STD  CWDCLUS        ; the current directory starts at the root
+            STD  FD_DIR
             LDA  DOSBUF+15      ; reserved sector count, offset $0E/$0F
             LDB  DOSBUF+14
             STD  RESSEC
@@ -196,7 +201,7 @@ TCDONE      LDD  TOTALCLUS
             ADDD #2
             STD  MAXCLUS
 
-            ; Find BASIC.COM and load its cluster chain to $C000.
+            ; Find BASIC.COM (in the root) and load its cluster chain to $C000.
             LDX  #BASICNAME
             JSR  FIND_DIRENT
             LBCS NOTFOUND
@@ -230,37 +235,12 @@ RDCLUS_DONE
             STD  CURCLUS
             JMP  LOADCLUS
 
-            ; Patch bios/main.asm's DOS_JTAB so LOAD/SAVE can reach the
-            ; resident file API below for as long as BASIC runs, then
-            ; hand off. Never returns.
-ALLDONE     LDX  #DOS_OPEN
-            STX  JT_DOS_OPEN
-            LDX  #DOS_READLINE
-            STX  JT_DOS_READLINE
-            LDX  #DOS_WRITELINE
-            STX  JT_DOS_WRITELINE
-            LDX  #DOS_CLOSE
-            STX  JT_DOS_CLOSE
-            LDX  #DOS_DIR_FIRST
-            STX  JT_DOS_DIRFIRST
-            LDX  #DOS_DIR_NEXT
-            STX  JT_DOS_DIRNEXT
-            LDX  #DOS_KILL
-            STX  JT_DOS_KILL
-            LDX  #DOS_RENAME
-            STX  JT_DOS_RENAME
-            LDX  #DOS_FGETC
-            STX  JT_DOS_FGETC
-            LDX  #DOS_FPUTC
-            STX  JT_DOS_FPUTC
-            LDX  #DOS_FREAD
-            STX  JT_DOS_FREAD
-            LDX  #DOS_FWRITE
-            STX  JT_DOS_FWRITE
-            LDX  #DOS_FSEEK
-            STX  JT_DOS_FSEEK
-            LDX  #DOS_FSTAT
-            STX  JT_DOS_FSTAT
+            ; Install the resident file API in the BIOS's DOS call table, in
+            ; function-code order, then hand off. Never returns.
+ALLDONE     LDX  #DOS_ENTRIES
+            LDY  JT_BASE
+            LDW  #NUM_DOS_JT*2
+            TFM  X+,Y+
             JMP  BASIC_ENTRY
 
 NOTFOUND    LDX  #MSG_NOBASIC
@@ -338,6 +318,27 @@ LOAD_FAT_ENTRY
             LEAX D,X
             RTS
 ;------------------------------------------------------------------------------
+; Writes the FAT sector in DOSBUF (the one LOAD_FAT_ENTRY loaded, at
+; FATSECLBA_CUR) back to disk -- to EVERY copy of the FAT, so the second one
+; never falls behind the first. OUT: carry as the last write left it. Trashes
+; A, B, D, X, Y.
+;------------------------------------------------------------------------------
+WRITE_FAT   LDX  FATSECLBA_CUR
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            BCS  WF_RET
+            LDA  NUMFATS
+            CMPA #2
+            BLO  WF_OK
+            LDD  FATSECLBA_CUR
+            ADDD SECPERFAT        ; the same sector in the second FAT
+            TFR  D,X
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            RTS
+WF_OK       ANDCC #$FE
+WF_RET      RTS
+;------------------------------------------------------------------------------
 ; IN: D = cluster number. OUT: D = next cluster in the chain ($FFF8-$FFFF
 ; = end of chain). Trashes A, B, X.
 ;------------------------------------------------------------------------------
@@ -355,9 +356,7 @@ SET_FAT_ENTRY
             LDD  SETVAL
             STB  ,X              ; little-endian, same reasoning as
             STA  1,X             ; OPEN_WRITE_INIT's cluster/size writes
-            LDX  FATSECLBA_CUR
-            LDY  #DOSBUF
-            JSR  BLKWRITE
+            JSR  WRITE_FAT
             RTS
 ;------------------------------------------------------------------------------
 ; Scans the FAT for a free (zero) entry, from cluster 2 up to MAXCLUS.
@@ -377,9 +376,7 @@ AC_LOOP     LDD  ACCLUS
             BNE  AC_NEXT
             LDD  #$FFFF          ; both bytes equal -- byte order is moot
             STD  ,X
-            LDX  FATSECLBA_CUR
-            LDY  #DOSBUF
-            JSR  BLKWRITE
+            JSR  WRITE_FAT
             LDD  ACCLUS
             ANDCC #$FE
             RTS
@@ -403,9 +400,7 @@ FC_LOOP     LDD  FCCLUS
             STD  FCNEXT
             LDD  #0
             STD  ,X
-            LDX  FATSECLBA_CUR
-            LDY  #DOSBUF
-            JSR  BLKWRITE
+            JSR  WRITE_FAT
             LDD  FCNEXT
             STD  FCCLUS
             BRA  FC_LOOP
@@ -421,23 +416,106 @@ SLOT_ADDR   TFR  A,B
             LEAX D,X
             RTS
 ;------------------------------------------------------------------------------
-; IN: X = pointer to an 11-byte name (space-padded 8.3, no dot). OUT:
-; carry clear if found (FOUND_LBA/FOUND_OFS/FOUND_CLUSTER/FOUND_SIZE set);
-; carry set if not found. Trashes A, B, D, X, Y.
+; Directory sector iteration. A directory is either the root (a fixed run of
+; ROOTDIRSEC sectors from ROOTLBA) or a subdirectory (a cluster chain like any
+; file's). One sector at a time is held in DOSBUF; DS_* say which.
+;
+; IN: D = the directory's first cluster (0 = root). OUT: carry clear + its
+; first sector loaded in DOSBUF; carry set + A = error. Trashes A, B, X, Y.
 ;------------------------------------------------------------------------------
-FIND_DIRENT STX  FDNAME
+DS_START    STD  DS_DIR
+            STD  DS_CUR
+            CLR  DS_SIC
+            LDD  DS_DIR
+            BNE  DSS_SUB
             LDD  ROOTLBA
-            STD  FDLBA
+            STD  DS_LBA
             LDD  ROOTDIRSEC
-            STD  FDSECLEFT
-FD_SECLOOP  LDD  FDSECLEFT
-            BEQ  FD_NOTFOUND
-            LDX  FDLBA
+            STD  DS_LEFT
+            BRA  DS_LOAD
+DSS_SUB     JSR  DS_SETLBA
+DS_LOAD     LDX  DS_LBA           ; (re)reads the current sector
             LDY  #DOSBUF
             JSR  BLKREAD
-            LDX  #DOSBUF
+            BCS  DSL_ERR
+            RTS                   ; carry clear
+DSL_ERR     LDA  #ERR_IOERR
+            ORCC #1
+            RTS
+; DS_LBA = the LBA of sector DS_SIC of cluster DS_CUR.
+DS_SETLBA   LDD  DS_CUR
+            JSR  CLUS_TO_LBA
+            STD  DS_TMP
+            CLRA
+            LDB  DS_SIC
+            ADDD DS_TMP
+            STD  DS_LBA
+            RTS
+;------------------------------------------------------------------------------
+; Advances to the directory's next sector and loads it. OUT: carry clear on
+; success; carry set + A = ERR_EOF past the last sector (or another error).
+;------------------------------------------------------------------------------
+DS_NEXT     LDD  DS_DIR
+            BNE  DSN_SUB
+            LDD  DS_LEFT          ; the root: a fixed number of sectors
+            SUBD #1
+            STD  DS_LEFT
+            BEQ  DSN_END
+            LDD  DS_LBA
+            ADDD #1
+            STD  DS_LBA
+            BRA  DS_LOAD
+DSN_SUB     LDA  DS_SIC
+            INCA
+            CMPA SECPERCLUS
+            BHS  DSN_NEXTCLUS
+            STA  DS_SIC
+            JSR  DS_SETLBA
+            BRA  DS_LOAD
+DSN_NEXTCLUS
+            LDD  DS_CUR
+            JSR  NEXT_CLUSTER
+            CMPD #$FFF8
+            BHS  DSN_END
+            STD  DS_CUR
+            CLR  DS_SIC
+            JSR  DS_SETLBA
+            BRA  DS_LOAD
+DSN_END     LDA  #ERR_EOF
+            ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = pointer to an 11-byte name (space-padded 8.3, no dot); FD_DIR = the
+; directory to search (first cluster, 0 = root). OUT: carry clear if found
+; (FOUND_LBA/OFS/CLUSTER/SIZE/SIZEHI/ATTR set, the entry's sector still in
+; DOSBUF); carry set + A = ERR_NOTFOUND (or an I/O error). Skips deleted
+; entries and volume labels. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FIND_DIRENT STX  FDNAME
+            CLR  FD_MODE
+            BRA  FD_GO
+;------------------------------------------------------------------------------
+; The same search, but for the subdirectory entry whose first cluster is D (used
+; to find a directory's own name from its parent).
+;------------------------------------------------------------------------------
+FIND_BYCLUS STD  FD_TARGET
+            LDA  #1
+            STA  FD_MODE
+FD_GO       LDD  FD_DIR
+            JSR  DS_START
+            LBCS FD_RET
+FD_ENTS     LDX  #DOSBUF
             LDB  #16
-FD_ENTLOOP  PSHS B,X
+FD_ENTLOOP  LDA  ,X
+            BEQ  FD_NOTFOUND      ; $00: no more entries in this directory
+            CMPA #$E5
+            BEQ  FD_NEXTENT
+            LDA  11,X
+            BITA #$08             ; a volume label (or long-name piece): skip
+            BNE  FD_NEXTENT
+            TST  FD_MODE
+            BNE  FD_BYC
+            PSHS B,X
             LDB  #11
             LDY  FDNAME
 FD_CMP      LDA  ,X+
@@ -445,13 +523,31 @@ FD_CMP      LDA  ,X+
             BNE  FD_NOMATCH
             DECB
             BNE  FD_CMP
-            PULS B,X             ; X = start of this 32-byte entry
-            LDD  FDLBA
+            PULS B,X              ; X = start of this 32-byte entry
+            BRA  FD_MATCH
+FD_NOMATCH  PULS B,X
+FD_NEXTENT  LEAX 32,X
+            DECB
+            BNE  FD_ENTLOOP
+            JSR  DS_NEXT
+            BCC  FD_ENTS
+            CMPA #ERR_EOF
+            BEQ  FD_NOTFOUND
+            ORCC #1               ; a real error: A says which
+            RTS
+FD_BYC      BITA #ATTR_DIR
+            BEQ  FD_NEXTENT
+            PSHS B
+            LDA  27,X
+            LDB  26,X
+            CMPD FD_TARGET
+            PULS B
+            BNE  FD_NEXTENT
+FD_MATCH    LDD  DS_LBA
             STD  FOUND_LBA
             TFR  X,D
             SUBD #DOSBUF
-            STD  FOUND_OFS       ; 0..480 -- doesn't fit in 1 byte (16
-                                 ; entries/sector, entry 9+ is >= 256)
+            STD  FOUND_OFS        ; 0..480 -- doesn't fit in 1 byte
             LDA  27,X
             LDB  26,X
             STD  FOUND_CLUSTER
@@ -460,38 +556,26 @@ FD_CMP      LDA  ,X+
             STD  FOUND_SIZE
             LDA  31,X
             LDB  30,X
-            STD  FOUND_SIZEHI    ; nonzero = a file this DOS can't fully handle
+            STD  FOUND_SIZEHI     ; nonzero = a file this DOS can't fully handle
+            LDA  11,X
+            STA  FOUND_ATTR
             ANDCC #$FE
             RTS
-FD_NOMATCH  PULS B,X
-            LEAX 32,X
-            DECB
-            BNE  FD_ENTLOOP
-            LDD  FDLBA
-            ADDD #1
-            STD  FDLBA
-            LDD  FDSECLEFT
-            SUBD #1
-            STD  FDSECLEFT
-            BRA  FD_SECLOOP
-FD_NOTFOUND ORCC #1
-            RTS
+FD_NOTFOUND LDA  #ERR_NOTFOUND
+            ORCC #1
+FD_RET      RTS
 ;------------------------------------------------------------------------------
-; Scans the root directory for a free entry (first byte $00=never used or
-; $E5=deleted). OUT: carry clear + FOUND_LBA/FOUND_OFS set; carry set if
-; the root directory is completely full. Trashes A, B, D, X, Y.
+; FD_DIR = a directory. Finds a free entry (first byte $00=never used or
+; $E5=deleted); if the directory is full, a subdirectory grows by a cluster (the
+; root is fixed-size). OUT: carry clear + FOUND_LBA/FOUND_OFS = the free slot;
+; carry set + A = ERR_NOSPACE (root full / disk full) or an I/O error. Trashes
+; A, B, D, X, Y.
 ;------------------------------------------------------------------------------
 FIND_FREE_DIRENT
-            LDD  ROOTLBA
-            STD  FDLBA
-            LDD  ROOTDIRSEC
-            STD  FDSECLEFT
-FFD_SECLOOP LDD  FDSECLEFT
-            BEQ  FD_NOTFOUND     ; reuse FIND_DIRENT's not-found exit
-            LDX  FDLBA
-            LDY  #DOSBUF
-            JSR  BLKREAD
-            LDX  #DOSBUF
+            LDD  FD_DIR
+            JSR  DS_START
+            BCS  FFD_RET
+FFD_ENTS    LDX  #DOSBUF
             LDB  #16
 FFD_ENTLOOP LDA  ,X
             BEQ  FFD_GOTIT
@@ -500,24 +584,313 @@ FFD_ENTLOOP LDA  ,X
             LEAX 32,X
             DECB
             BNE  FFD_ENTLOOP
-            LDD  FDLBA
-            ADDD #1
-            STD  FDLBA
-            LDD  FDSECLEFT
-            SUBD #1
-            STD  FDSECLEFT
-            BRA  FFD_SECLOOP
-FFD_GOTIT   LDD  FDLBA
+            JSR  DS_NEXT
+            BCC  FFD_ENTS
+            CMPA #ERR_EOF
+            BNE  FFD_ERR          ; a real I/O error
+            LDD  FD_DIR           ; no free slot anywhere
+            BEQ  FFD_FULL         ; the root can't grow
+            JMP  EXTEND_DIR       ; a subdirectory can
+FFD_GOTIT   LDD  DS_LBA
             STD  FOUND_LBA
             TFR  X,D
             SUBD #DOSBUF
             STD  FOUND_OFS
             ANDCC #$FE
             RTS
+FFD_FULL    LDA  #ERR_NOSPACE
+FFD_ERR     ORCC #1
+FFD_RET     RTS
+;------------------------------------------------------------------------------
+; Grows the subdirectory the last DS_START/DS_NEXT scan ran off the end of (its
+; last cluster is DS_CUR) by one zeroed cluster. OUT: carry clear + FOUND_LBA/
+; FOUND_OFS = the first entry of the new cluster; carry set + A = error.
+;------------------------------------------------------------------------------
+EXTEND_DIR  JSR  ALLOC_CLUSTER    ; D = a free cluster, already marked end-of-chain
+            BCC  ED_GOT
+            LDA  #ERR_NOSPACE
+            RTS                   ; carry still set
+ED_GOT      STD  ED_NEW
+            STD  SETVAL
+            LDD  DS_CUR
+            JSR  SET_FAT_ENTRY    ; link the old last cluster to it
+            LDD  ED_NEW
+            JSR  ZERO_CLUSTER
+            BCS  ED_RET
+            LDD  ED_NEW
+            JSR  CLUS_TO_LBA
+            STD  FOUND_LBA
+            LDD  #0
+            STD  FOUND_OFS
+            ANDCC #$FE
+ED_RET      RTS
+;------------------------------------------------------------------------------
+; IN: D = a cluster. Writes zeros over every sector of it (a new directory's
+; unused entries must read as $00). OUT: carry clear, or set + A = error.
+; Trashes A, B, X, Y, W and DOSBUF.
+;------------------------------------------------------------------------------
+ZERO_CLUSTER
+            STD  ZC_CLUS
+            JSR  CLEAR_DOSBUF
+            LDD  ZC_CLUS
+            JSR  CLUS_TO_LBA
+            STD  ZC_LBA
+            LDA  SECPERCLUS
+            STA  ZC_CNT
+ZC_LOOP     LDX  ZC_LBA
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            BCS  ZC_ERR
+            LDD  ZC_LBA
+            ADDD #1
+            STD  ZC_LBA
+            DEC  ZC_CNT
+            BNE  ZC_LOOP
+            ANDCC #$FE
+            RTS
+ZC_ERR      LDA  #ERR_IOERR
+            ORCC #1
+            RTS
 ;==============================================================================
-; Resident file API -- see DOS_JTAB patching in ALLDONE above. Each of these
-; is a plain subroutine (RTS, carry=error), called by bios/sdcard.asm's BIOS_*
-; handlers, which own finishing the SWI2 response.
+; Paths. A path is a NUL-terminated string of components separated by "/".
+; NEXT_COMPONENT takes them one at a time; RESOLVE_PATH walks all but the last
+; through the directory tree and reports what the last one is.
+;==============================================================================
+; Characters that can't be in an 8.3 name (besides controls, space and DEL).
+NC_BADCHARS FCB  $22,$2A,$2B,$2C,$2F,$3A,$3B,$3C,$3D,$3E,$3F,$5B,$5C,$5D,$7C,0
+DOT_NAME    FCC  ".          "    ; the "." and ".." directory entries' names
+DOTDOT_NAME FCC  "..         "
+;------------------------------------------------------------------------------
+; IN: A = a name character. OUT: carry clear + A upper-cased if it is valid in
+; an 8.3 name; carry set if not. Preserves B, X, Y.
+;------------------------------------------------------------------------------
+NC_CHAR     CMPA #'a'
+            BLO  NCC_CHK
+            CMPA #'z'
+            BHI  NCC_CHK
+            SUBA #$20
+NCC_CHK     CMPA #$21
+            BLO  NCC_BAD
+            CMPA #$7E
+            BHI  NCC_BAD
+            PSHS U
+            LDU  #NC_BADCHARS
+NCC_LOOP    TST  ,U
+            BEQ  NCC_OK
+            CMPA ,U+
+            BNE  NCC_LOOP
+            PULS U
+NCC_BAD     ORCC #1
+            RTS
+NCC_OK      PULS U
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; Parses the next component of the path at PP_PTR (leading "/"s skipped) and
+; advances PP_PTR past it. OUT: carry clear + PP_KIND = 0 (no more components),
+; 1 (a name: PP_NAME = its 11-byte 8.3 form, upper-cased), 2 ("."), or 3
+; (".."); carry set + A = ERR_BADPATH (a name that isn't valid 8.3).
+; Trashes A, B, X, Y.
+;------------------------------------------------------------------------------
+NEXT_COMPONENT
+            LDX  PP_PTR
+NC_SKIP     LDA  ,X
+            CMPA #'/'
+            BNE  NC_START
+            LEAX 1,X
+            BRA  NC_SKIP
+NC_START    TSTA
+            BNE  NC_PARSE
+            STX  PP_PTR
+            CLR  PP_KIND
+            ANDCC #$FE
+            RTS
+NC_PARSE    LDY  #PP_NAME         ; blank the 11-byte name
+            LDB  #11
+            LDA  #' '
+NC_BLANK    STA  ,Y+
+            DECB
+            BNE  NC_BLANK
+            LDA  ,X
+            CMPA #'.'
+            BNE  NC_NAME0
+            LDA  1,X              ; "." or ".."?
+            BEQ  NC_DOT
+            CMPA #'/'
+            BEQ  NC_DOT
+            CMPA #'.'
+            BNE  NC_NAME0         ; ".X...": no base name -> rejected below
+            LDA  2,X
+            BEQ  NC_DOTDOT
+            CMPA #'/'
+            BEQ  NC_DOTDOT
+            BRA  NC_BAD
+NC_DOT      LEAX 1,X
+            LDA  #2
+            BRA  NC_KIND
+NC_DOTDOT   LEAX 2,X
+            LDA  #3
+NC_KIND     STX  PP_PTR
+            STA  PP_KIND
+            ANDCC #$FE
+            RTS
+NC_NAME0    LDY  #PP_NAME
+            LDB  #8
+NC_NAME     LDA  ,X
+            BEQ  NC_END
+            CMPA #'/'
+            BEQ  NC_END
+            CMPA #'.'
+            BEQ  NC_EXT
+            LBSR NC_CHAR
+            BCS  NC_BAD
+            TSTB
+            BEQ  NC_BAD           ; a base name longer than 8
+            STA  ,Y+
+            LEAX 1,X
+            DECB
+            BRA  NC_NAME
+NC_EXT      LEAX 1,X              ; past the dot
+            LDY  #PP_NAME+8
+            LDB  #3
+NC_EXTL     LDA  ,X
+            BEQ  NC_END
+            CMPA #'/'
+            BEQ  NC_END
+            CMPA #'.'
+            BEQ  NC_BAD           ; a second dot
+            LBSR NC_CHAR
+            BCS  NC_BAD
+            TSTB
+            BEQ  NC_BAD           ; an extension longer than 3
+            STA  ,Y+
+            LEAX 1,X
+            DECB
+            BRA  NC_EXTL
+NC_END      LDA  PP_NAME
+            CMPA #' '
+            BEQ  NC_BAD           ; ".EXT": no base name
+            STX  PP_PTR
+            LDA  #1
+            STA  PP_KIND
+            ANDCC #$FE
+            RTS
+NC_BAD      LDA  #ERR_BADPATH
+            ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = a path. Walks every component but the last through the directory
+; tree (starting at the root if the path begins with "/", else at the current
+; directory). OUT: carry clear + RP_DIR = the directory containing the last
+; component, RP_KIND = what it is (0 = the path had no components, i.e. it is
+; RP_DIR itself; 1 = a name, RP_NAME = its 11-byte form; 2 = "."; 3 = ".."); or
+; carry set + A = ERR_NOTFOUND / ERR_NOTDIR / ERR_BADPATH / an I/O error.
+; Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+RESOLVE_PATH
+            STX  PP_PTR
+            LDA  ,X
+            CMPA #'/'
+            BEQ  RP_ROOT
+            LDD  CWDCLUS
+            BRA  RP_SET
+RP_ROOT     LDD  #0
+RP_SET      STD  RP_DIR
+RP_LOOP     JSR  NEXT_COMPONENT
+            BCS  RP_RET
+            LDA  PP_KIND
+            STA  RP_KIND
+            BEQ  RP_DONE          ; no (more) components
+            CMPA #1
+            BNE  RP_PEEK
+            LDX  #PP_NAME         ; remember the name: the last one is the answer
+            LDY  #RP_NAME
+            LDW  #11
+            TFM  X+,Y+
+RP_PEEK     LDX  PP_PTR           ; is this the last component?
+RP_PK       LDA  ,X
+            CMPA #'/'
+            BNE  RP_PK2
+            LEAX 1,X
+            BRA  RP_PK
+RP_PK2      TSTA
+            BEQ  RP_DONE          ; yes: report it, don't enter it
+            LDA  RP_KIND          ; no: it must be a directory to walk into
+            CMPA #2
+            BEQ  RP_LOOP          ; "." -- stay where we are
+            CMPA #3
+            BEQ  RP_UP
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT
+            BCS  RP_RET
+            LDA  FOUND_ATTR
+            ANDA #ATTR_DIR
+            BEQ  RP_NOTDIR
+            LDD  FOUND_CLUSTER
+            STD  RP_DIR
+            BRA  RP_LOOP
+RP_UP       JSR  PARENT_OF_RPDIR
+            BCC  RP_LOOP
+            RTS
+RP_DONE     ANDCC #$FE
+            RTS
+RP_NOTDIR   LDA  #ERR_NOTDIR
+            ORCC #1
+RP_RET      RTS
+;------------------------------------------------------------------------------
+; RP_DIR := its parent directory (the root's parent is the root). OUT: carry
+; clear, or set + A = error. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+PARENT_OF_RPDIR
+            LDD  RP_DIR
+            BEQ  PR_OK
+            STD  FD_DIR
+            LDX  #DOTDOT_NAME
+            JSR  FIND_DIRENT
+            BCS  PR_RET
+            LDD  FOUND_CLUSTER    ; 0 when the parent is the root
+            STD  RP_DIR
+PR_OK       ANDCC #$FE
+PR_RET      RTS
+;------------------------------------------------------------------------------
+; IN: X = a path that must name a directory. OUT: carry clear + D = that
+; directory's first cluster (0 = root); carry set + A = error (ERR_NOTDIR if it
+; names a file). "" and "." are the current directory.
+;------------------------------------------------------------------------------
+RESOLVE_DIR JSR  RESOLVE_PATH
+            BCS  RD_RET
+            LDA  RP_KIND
+            BEQ  RD_CUR
+            CMPA #2
+            BEQ  RD_CUR
+            CMPA #3
+            BEQ  RD_UP
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT
+            BCS  RD_RET
+            LDA  FOUND_ATTR
+            ANDA #ATTR_DIR
+            BEQ  RD_NOTDIR
+            LDD  FOUND_CLUSTER
+            ANDCC #$FE
+            RTS
+RD_UP       JSR  PARENT_OF_RPDIR
+            BCS  RD_RET
+RD_CUR      LDD  RP_DIR
+            ANDCC #$FE
+            RTS
+RD_NOTDIR   LDA  #ERR_NOTDIR
+            ORCC #1
+RD_RET      RTS
+
+;==============================================================================
+; Resident file API -- see DOS_ENTRIES at the end (installed in the BIOS's DOS call
+; table). Each of these is a plain subroutine (RTS, carry=error), called by
+; bios/sdcard.asm's BIOS_DOS, which owns finishing the SWI2 response.
 ;
 ; Every open file has its own slot (fslot) and its own 512-byte sector buffer
 ; (SLOTBUFS), so any number of files can be open at once and used in any
@@ -566,23 +939,31 @@ CNO_BUSY    LDA  #ERR_ISOPEN
             ORCC #1
             RTS
 ;------------------------------------------------------------------------------
-; IN: X = 11-byte 8.3 filename, A = mode (FOPEN_READ/WRITE/APPEND/UPDATE).
-; OUT: carry clear + A = fileref (0..NSLOTS-1); carry set + A = error code.
+; IN: X = a path, A = mode (FOPEN_READ/WRITE/APPEND/UPDATE). OUT: carry clear +
+; A = file handle (0..NSLOTS-1); carry set + A = error code.
 ;   READ    must exist; read and seek only.
 ;   WRITE   created, or truncated if it exists; write only.
 ;   APPEND  created if missing; existing contents kept, writes go at the end.
 ;   UPDATE  created if missing; existing contents kept; read, write and seek.
-; A file that's already open (in any slot) can't be opened again.
+; A file that's already open (in any slot) can't be opened again; a directory
+; can't be opened as a file (ERR_ISDIR).
 ;------------------------------------------------------------------------------
-DOS_OPEN    STX  OPEN_NAME
-            STA  OPEN_MODE
+DOS_OPEN    STA  OPEN_MODE
             CMPA #FOPEN_UPDATE
             BLS  OPEN_MODE_OK
             LDA  #ERR_BADMODE
             ORCC #1
             RTS
 OPEN_MODE_OK
-            CLR  OPEN_SLOTIDX
+            JSR  RESOLVE_PATH
+            BCS  OPEN_RET
+            LDA  RP_KIND
+            CMPA #1
+            BEQ  OPEN_ISNAME
+OPEN_ISDIR  LDA  #ERR_ISDIR       ; "/", "." or ".." (or an empty path)
+            ORCC #1
+OPEN_RET    RTS
+OPEN_ISNAME CLR  OPEN_SLOTIDX
 OPEN_FINDSLOT
             LDA  OPEN_SLOTIDX
             CMPA #NSLOTS
@@ -598,14 +979,22 @@ OPEN_CHECKSLOT
             BRA  OPEN_FINDSLOT
 OPEN_GOTSLOT
             STX  OPEN_SLOTPTR
-            LDX  OPEN_NAME
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            STX  OPEN_NAME
             JSR  FIND_DIRENT
             BCC  OPEN_FOUND
+            CMPA #ERR_NOTFOUND
+            BEQ  OPEN_MISSING
+            ORCC #1               ; an I/O error: A says which
+            RTS
+OPEN_MISSING
             LDA  OPEN_MODE
             BEQ  OPEN_NOTFOUND_READ
             JSR  FIND_FREE_DIRENT
-            BCS  OPEN_NOSPACE
-            LDD  #0                   ; brand-new empty file: no clusters yet
+            BCS  OPEN_RET         ; A = why (directory/disk full, I/O)
+            LDD  #0               ; brand-new empty file: no clusters yet
             STD  FOUND_CLUSTER
             STD  FOUND_SIZE
             STD  FOUND_SIZEHI
@@ -614,17 +1003,16 @@ OPEN_NOTFOUND_READ
             LDA  #ERR_NOTFOUND
             ORCC #1
             RTS
-OPEN_NOSPACE
-            LDA  #ERR_NOSPACE
-            ORCC #1
-            RTS
 OPEN_IOERR  LDA  #ERR_IOERR
             ORCC #1
             RTS
 OPEN_TOOBIG LDA  #ERR_BADMODE
             ORCC #1
             RTS
-OPEN_FOUND  JSR  CHECK_NOT_OPEN
+OPEN_FOUND  LDA  FOUND_ATTR
+            ANDA #ATTR_DIR
+            BNE  OPEN_ISDIR
+            JSR  CHECK_NOT_OPEN
             BCC  OPEN_FOUND2
             RTS                       ; carry set, A = ERR_ISOPEN
 OPEN_FOUND2 LDD  FOUND_SIZEHI
@@ -780,11 +1168,10 @@ WL_DOCR     LDA  #CR
             JSR  FILE_PUTBYTE
 WL_RET      RTS
 ;------------------------------------------------------------------------------
-; IN: B = fileref. Finalizes: a file opened for writing has its buffered
-; sector flushed and its directory entry updated with the final first cluster
-; and size; a file opened for reading just frees its slot. The slot is freed
-; even if a write-back fails (that error is still reported). Trashes A, B, D,
-; X, Y.
+; IN: B = handle. Finalizes: a file opened for writing has its buffered sector
+; flushed and its directory entry updated with the final first cluster and size;
+; a file opened for reading just frees its slot. The slot is freed even if a
+; write-back fails (that error is still reported). Trashes A, B, D, X, Y.
 ;------------------------------------------------------------------------------
 DOS_CLOSE   JSR  SLOT_CHECK
             BCS  DC_RET
@@ -792,10 +1179,27 @@ DOS_CLOSE   JSR  SLOT_CHECK
             LDX  CUR_SLOT
             LDA  fslot.mode,X
             BEQ  DC_FREE              ; read mode: nothing to write back
-            JSR  FLUSH_SLOT
-            BCC  DC_DIRENT
+            JSR  SYNC_SLOT
+            BCC  DC_FREE
             STA  DC_STATUS            ; remember it, but finish closing anyway
-DC_DIRENT   LDX  CUR_SLOT
+DC_FREE     LDX  CUR_SLOT
+            CLR  fslot.inuse,X
+            LDA  DC_STATUS
+            BEQ  DC_OK
+            ORCC #1
+            RTS
+DC_OK       ANDCC #$FE
+DC_RET      RTS
+;------------------------------------------------------------------------------
+; IN: CUR_SLOT, an open writable file. Writes its buffered sector out and updates
+; its directory entry (first cluster and size), leaving it open. OUT: carry
+; clear on success; carry set + A = the first error. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+SYNC_SLOT   CLR  SY_STATUS
+            JSR  FLUSH_SLOT
+            BCC  SY_DIRENT
+            STA  SY_STATUS            ; remember it, but still update the entry
+SY_DIRENT   LDX  CUR_SLOT
             LDD  fslot.dirlba,X
             STD  FGBTMP
             LDD  fslot.dirofs,X
@@ -807,7 +1211,7 @@ DC_DIRENT   LDX  CUR_SLOT
             LDX  FGBTMP
             LDY  #DOSBUF
             JSR  BLKREAD
-            BCS  DC_IOERR
+            BCS  SY_IOERR
             LDD  DC_DIROFS
             LDX  #DOSBUF
             LEAX D,X                  ; X = this file's directory entry
@@ -822,17 +1226,45 @@ DC_DIRENT   LDX  CUR_SLOT
             LDX  FGBTMP
             LDY  #DOSBUF
             JSR  BLKWRITE
-            BCC  DC_FREE
-DC_IOERR    LDA  #ERR_IOERR
-            STA  DC_STATUS
-DC_FREE     LDX  CUR_SLOT
-            CLR  fslot.inuse,X
-            LDA  DC_STATUS
-            BEQ  DC_OK
+            BCS  SY_IOERR
+            LDA  SY_STATUS
+            BEQ  SY_OK
+            ORCC #1                   ; the flush error, now that the entry is done
+            RTS
+SY_OK       ANDCC #$FE
+            RTS
+SY_IOERR    LDA  #ERR_IOERR
             ORCC #1
             RTS
-DC_OK       ANDCC #$FE
-DC_RET      RTS
+;------------------------------------------------------------------------------
+; IN: B = handle, or $FF for every open file. Writes out buffered data and updates
+; the directory entries, so the data survives a crash from here on. OUT: carry
+; clear, or set + A = an error. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+DOS_FFLUSH  CMPB #$FF
+            BEQ  FF_ALL
+            JSR  SLOT_CHECK
+            BCS  FF_RET
+            LDX  CUR_SLOT
+            LDA  fslot.mode,X
+            BEQ  FF_OK                ; read-only: nothing to write
+            JMP  SYNC_SLOT
+FF_ALL      CLR  FF_IDX
+FF_LOOP     LDA  FF_IDX
+            CMPA #NSLOTS
+            BHS  FF_OK
+            JSR  SLOT_ADDR
+            TST  fslot.inuse,X
+            BEQ  FF_NEXT
+            LDA  fslot.mode,X
+            BEQ  FF_NEXT
+            STX  CUR_SLOT
+            JSR  SYNC_SLOT
+            BCS  FF_RET
+FF_NEXT     INC  FF_IDX
+            BRA  FF_LOOP
+FF_OK       ANDCC #$FE
+FF_RET      RTS
 ;------------------------------------------------------------------------------
 ; IN: B = fileref. OUT: carry clear + A = next byte; carry set + A = ERR_EOF at
 ; end of file (or another error code).
@@ -907,110 +1339,278 @@ FW_LOOP     LDD  IO_CNT
 FW_DONE     ANDCC #$FE
 FW_RET      RTS
 ;------------------------------------------------------------------------------
-; IN: B = fileref, X = new byte position. Read and update modes only.
+; IN: B = handle, A = whence (SEEK_SET/CUR/END), X:Y = 32-bit offset (X = high
+; word). Read and update modes only. OUT: carry clear + X:Y = the new position;
+; carry set + A = ERR_BADMODE / ERR_TOOBIG (beyond what this DOS handles, 64KB-1).
 ;------------------------------------------------------------------------------
-DOS_FSEEK   STX  SK_POS
+DOS_FSEEK   STA  SK_WHENCE
+            STX  SK_HI
+            STY  SK_LO
             JSR  SLOT_CHECK
             BCS  SK_RET
             LDX  CUR_SLOT
             LDA  fslot.mode,X
-            BEQ  SK_OK                ; read
+            BEQ  SK_MODE_OK           ; read
             CMPA #FOPEN_UPDATE
-            BEQ  SK_OK
-            LDA  #ERR_BADMODE
+            BEQ  SK_MODE_OK
+SK_BADMODE  LDA  #ERR_BADMODE
             ORCC #1
             RTS
-SK_OK       LDD  SK_POS
-            STD  fslot.pos,X
+SK_MODE_OK  LDD  SK_HI
+            BNE  SK_TOOBIG            ; anything over 64KB-1
+            LDA  SK_WHENCE
+            BEQ  SK_SET
+            CMPA #SEEK_CUR
+            BEQ  SK_CUR
+            CMPA #SEEK_END
+            BNE  SK_BADMODE           ; not a whence
+            LDD  fslot.size,X
+            BRA  SK_ADD
+SK_CUR      LDD  fslot.pos,X
+SK_ADD      ADDD SK_LO
+            BCS  SK_TOOBIG
+            BRA  SK_STORE
+SK_SET      LDD  SK_LO
+SK_STORE    STD  fslot.pos,X
+            TFR  D,Y
+            LDX  #0
             ANDCC #$FE
+            RTS
+SK_TOOBIG   LDA  #ERR_TOOBIG
+            ORCC #1
 SK_RET      RTS
 ;------------------------------------------------------------------------------
-; IN: B = fileref. OUT: carry clear + X = file size, Y = current position.
+; IN: B = handle, X = dest buffer (16 bytes: size 4, position 4, attr 1, open
+; mode 1, 6 reserved; 32-bit values big-endian). OUT: carry clear, buffer filled.
 ;------------------------------------------------------------------------------
-DOS_FSTAT   JSR  SLOT_CHECK
+DOS_FSTAT   STX  FS_DEST
+            JSR  SLOT_CHECK
             BCS  FS_RET
             LDX  CUR_SLOT
-            LDY  fslot.pos,X
-            LDX  fslot.size,X
+            LDY  FS_DEST
+            LDD  #0
+            STD  ,Y                   ; size: high word ...
+            LDD  fslot.size,X
+            STD  2,Y                  ; ... low word
+            LDD  #0
+            STD  4,Y                  ; position: the same
+            LDD  fslot.pos,X
+            STD  6,Y
+            LDA  #$20                 ; ARCHIVE
+            STA  8,Y
+            LDA  fslot.mode,X
+            STA  9,Y
+            LDD  #0
+            STD  10,Y
+            STD  12,Y
+            STD  14,Y
             ANDCC #$FE
 FS_RET      RTS
 ;------------------------------------------------------------------------------
-; IN: X = destination 16-byte buffer (11 name + 1 attr + 4 size). OUT:
-; carry clear + buffer filled with the first live (non-deleted) directory
-; entry; carry set = the directory has no entries at all. Trashes A, B, D,
-; X, Y.
+; IN: X = path, Y = dest buffer (the same 16 bytes as DOS_FSTAT; position 0, open
+; mode $FF). Works for files and directories (a directory: size 0, attr $10).
 ;------------------------------------------------------------------------------
-DOS_DIR_FIRST
-            STX  DIRDEST
-            LDD  ROOTLBA
-            STD  DIRLBA_CUR
-            LDD  ROOTDIRSEC
-            STD  DIRSECLEFT
+DOS_STAT    STY  FS_DEST
+            JSR  RESOLVE_PATH
+            BCS  ST_RET
+            LDA  RP_KIND
+            CMPA #1
+            BEQ  ST_NAME
+            LDD  #0                   ; the root, ".", ".." or "": a directory
+            STD  FOUND_SIZE
+            STD  FOUND_SIZEHI
+            LDA  #ATTR_DIR
+            STA  FOUND_ATTR
+            BRA  ST_FILL
+ST_NAME     LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT
+            BCS  ST_RET
+ST_FILL     LDY  FS_DEST
+            LDD  FOUND_SIZEHI
+            STD  ,Y
+            LDD  FOUND_SIZE
+            STD  2,Y
+            LDD  #0
+            STD  4,Y
+            STD  6,Y
+            LDA  FOUND_ATTR
+            STA  8,Y
+            LDA  #$FF
+            STA  9,Y
+            LDD  #0
+            STD  10,Y
+            STD  12,Y
+            STD  14,Y
+            ANDCC #$FE
+ST_RET      RTS
+;------------------------------------------------------------------------------
+; Directory scans. Each open scan has its own dhandle holding the DS_* state, so
+; several directories can be read at once (and files opened between reads).
+;------------------------------------------------------------------------------
+; IN: A = scan index. OUT: X = its dhandle. Trashes A, B, D.
+DH_ADDR     TFR  A,B
+            LDA  #sizeof{dhandle}
+            MUL
+            LDX  #DHANDLES
+            LEAX D,X
+            RTS
+; IN: B = a scan handle. OUT: carry clear + CUR_DH = its dhandle; carry set +
+; A = ERR_BADDEV if it isn't open. Trashes A, B, D, X.
+DH_CHECK    CMPB #NDIRH
+            BHS  DHC_BAD
+            TFR  B,A
+            JSR  DH_ADDR
+            TST  dhandle.inuse,X
+            BEQ  DHC_BAD
+            STX  CUR_DH
+            ANDCC #$FE
+            RTS
+DHC_BAD     LDA  #ERR_BADDEV
+            ORCC #1
+            RTS
+; IN: X = a dhandle. Saves the DS_* scan state and DIRENTIDX into it.
+DH_SAVE     LDD  DS_DIR
+            STD  dhandle.dir,X
+            LDD  DS_CUR
+            STD  dhandle.cur,X
+            LDA  DS_SIC
+            STA  dhandle.sic,X
+            LDD  DS_LBA
+            STD  dhandle.lba,X
+            LDD  DS_LEFT
+            STD  dhandle.left,X
+            LDA  DIRENTIDX
+            STA  dhandle.idx,X
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = the path of a directory ("" or "." = the current one). OUT: carry clear
+; + A = a scan handle (0..NDIRH-1); carry set + A = error (ERR_NOTFOUND,
+; ERR_NOTDIR, ERR_NOSLOT, ...).
+;------------------------------------------------------------------------------
+DOS_OPENDIR JSR  RESOLVE_DIR
+            BCS  OD_RET
+            STD  OD_CLUS
+            CLR  OD_IDX
+OD_FIND     LDA  OD_IDX
+            CMPA #NDIRH
+            BHS  OD_NOSLOT
+            JSR  DH_ADDR
+            TST  dhandle.inuse,X
+            BEQ  OD_GOT
+            INC  OD_IDX
+            BRA  OD_FIND
+OD_GOT      STX  OD_PTR
+            LDD  OD_CLUS
+            JSR  DS_START             ; positions on the first sector (and checks it reads)
+            BCS  OD_RET
             CLR  DIRENTIDX
-            BRA  DDS_LOADSEC
+            LDX  OD_PTR
+            LDA  #1
+            STA  dhandle.inuse,X
+            JSR  DH_SAVE
+            LDA  OD_IDX
+            ANDCC #$FE
+            RTS
+OD_NOSLOT   LDA  #ERR_NOSLOT
+            ORCC #1
+OD_RET      RTS
 ;------------------------------------------------------------------------------
-; Same signature as DOS_DIR_FIRST; continues the scan it started (resuming
-; from DIRLBA_CUR/DIRSECLEFT/DIRENTIDX, left where the previous call
-; stopped). Trashes A, B, D, X, Y.
+; IN: B = a scan handle, X = dest buffer (16 bytes: 11 name + 1 attr + 4 size,
+; big-endian). OUT: carry clear + the next live entry ("." and ".." included;
+; deleted entries and volume labels skipped); carry set + A = ERR_EOF when there
+; are no more. Trashes A, B, D, X, Y.
 ;------------------------------------------------------------------------------
-DOS_DIR_NEXT
-            STX  DIRDEST
-DDS_LOADSEC LDD  DIRSECLEFT
-            BEQ  DDS_EOF
-            LDX  DIRLBA_CUR
-            LDY  #DOSBUF
-            JSR  BLKREAD
-DDS_ENTLOOP LDB  DIRENTIDX
+DOS_READDIR STX  DIRDEST
+            JSR  DH_CHECK
+            BCS  RDR_RET
+            LDX  CUR_DH
+            LDD  dhandle.dir,X
+            STD  DS_DIR
+            LDD  dhandle.cur,X
+            STD  DS_CUR
+            LDA  dhandle.sic,X
+            STA  DS_SIC
+            LDD  dhandle.lba,X
+            STD  DS_LBA
+            LDD  dhandle.left,X
+            STD  DS_LEFT
+            LDA  dhandle.idx,X
+            STA  DIRENTIDX
+            JSR  DS_LOAD              ; the sector we were in
+            BCS  RDR_RET
+RDR_LOOP    LDB  DIRENTIDX
             CMPB #16
-            BLO  DDS_CHECKENT
-            LDD  DIRLBA_CUR
-            ADDD #1
-            STD  DIRLBA_CUR
-            LDD  DIRSECLEFT
-            SUBD #1
-            STD  DIRSECLEFT
+            BLO  RDR_CHECK
+            JSR  DS_NEXT
+            BCS  RDR_RET              ; A = ERR_EOF after the last sector
             CLR  DIRENTIDX
-            BRA  DDS_LOADSEC
-DDS_CHECKENT
-            LDB  DIRENTIDX
-            LDA  #32
-            MUL                  ; D = DIRENTIDX*32 (max 15*32=480, fits D)
+            BRA  RDR_LOOP
+RDR_CHECK   LDA  #32
+            MUL                       ; D = DIRENTIDX*32 (max 15*32=480)
             LDX  #DOSBUF
-            LEAX D,X             ; X = this entry's address
+            LEAX D,X                  ; X = this entry
             LDA  ,X
-            BEQ  DDS_EOF         ; $00 -- never used, and everything after
-                                 ; it is too (compact-directory convention)
-            INC  DIRENTIDX       ; advance for the NEXT call regardless
+            BEQ  RDR_EOF              ; $00: never used, and neither is anything after
+            INC  DIRENTIDX            ; the NEXT call starts after this one
             CMPA #$E5
-            BEQ  DDS_ENTLOOP     ; deleted -- skip, try the next one
+            BEQ  RDR_LOOP             ; deleted
+            LDA  11,X
+            BITA #$08
+            BNE  RDR_LOOP             ; a volume label
             LDY  DIRDEST
             LDB  #11
-DDS_CPNAME  LDA  ,X+
+RDR_CPNAME  LDA  ,X+
             STA  ,Y+
             DECB
-            BNE  DDS_CPNAME      ; X now at offset 11 (attribute byte)
+            BNE  RDR_CPNAME           ; X now at offset 11 (the attribute)
             LDA  ,X
-            STA  ,Y+             ; attribute
-            LEAX 17,X            ; 11+17=28, the size field
-            LDA  ,X+
             STA  ,Y+
-            LDA  ,X+
+            LEAX 17,X                 ; 11+17 = 28: the little-endian size field
+            LDA  3,X                  ; ... stored big-endian
             STA  ,Y+
-            LDA  ,X+
+            LDA  2,X
+            STA  ,Y+
+            LDA  1,X
             STA  ,Y+
             LDA  ,X
             STA  ,Y
+            LDX  CUR_DH
+            JSR  DH_SAVE
             ANDCC #$FE
-            RTS
-DDS_EOF     ORCC #1
+RDR_RET     RTS
+RDR_EOF     LDA  #ERR_EOF
+            ORCC #1
             RTS
 ;------------------------------------------------------------------------------
-; IN: X = 11-byte 8.3 filename. Frees its cluster chain (if any) and marks
-; its directory entry deleted ($E5). OUT: carry clear = deleted; carry set
-; + A=ERR_NOTFOUND. Trashes A, B, D, X, Y.
+; IN: B = a scan handle. Frees it.
 ;------------------------------------------------------------------------------
-DOS_KILL    JSR  FIND_DIRENT
-            BCS  DK_NOTFOUND
+DOS_CLOSEDIR
+            JSR  DH_CHECK
+            BCS  CD_RET
+            LDX  CUR_DH
+            CLR  dhandle.inuse,X
+            ANDCC #$FE
+CD_RET      RTS
+;------------------------------------------------------------------------------
+; IN: X = a path. Frees the file's cluster chain (if any) and marks its
+; directory entry deleted ($E5). OUT: carry clear = deleted; carry set + A =
+; ERR_NOTFOUND / ERR_ISDIR (use RMDIR) / ERR_ISOPEN. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+DOS_KILL    JSR  RESOLVE_PATH
+            BCS  DK_RET
+            LDA  RP_KIND
+            CMPA #1
+            BNE  DK_ISDIR
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT
+            BCS  DK_RET
+            LDA  FOUND_ATTR
+            ANDA #ATTR_DIR
+            BNE  DK_ISDIR
             JSR  CHECK_NOT_OPEN  ; deleting a file out from under an open
             BCC  DK_GO           ; handle would corrupt it
             RTS                  ; carry set, A = ERR_ISOPEN
@@ -1030,35 +1630,63 @@ DK_MARKDEL  LDX  FOUND_LBA
             JSR  BLKWRITE
             ANDCC #$FE
             RTS
-DK_NOTFOUND LDA  #ERR_NOTFOUND
+DK_ISDIR    LDA  #ERR_ISDIR
             ORCC #1
-            RTS
+DK_RET      RTS
 ;------------------------------------------------------------------------------
-; IN: X = 11-byte OLD 8.3 filename, Y = 11-byte NEW 8.3 filename. OUT:
-; carry clear = renamed; carry set + A=ERR_NOTFOUND (old doesn't exist) or
-; A=ERR_EXISTS (new name is already taken). Trashes A, B, D, X, Y.
+; IN: X = the OLD path, Y = the NEW name (a single component -- the entry stays
+; in its directory). OUT: carry clear = renamed; carry set + A = ERR_NOTFOUND
+; (old doesn't exist), ERR_EXISTS (the new name is taken), ERR_ISOPEN (an open
+; file), ERR_BADPATH. Works on directories too. Trashes A, B, D, X, Y.
 ;------------------------------------------------------------------------------
 DOS_RENAME  STY  RENAME_NEW
-            JSR  FIND_DIRENT     ; X = old name -- must already exist
-            BCS  DR_NOTFOUND
+            JSR  RESOLVE_PATH
+            LBCS DR_RET
+            LDA  RP_KIND
+            CMPA #1
+            LBNE DR_BAD
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT     ; the old name must already exist
+            BCS  DR_RET
+            LDA  FOUND_ATTR
+            ANDA #ATTR_DIR
+            BNE  DR_OLDOK        ; a directory: no open-file check applies
             JSR  CHECK_NOT_OPEN  ; renaming an open file would leave its
-            BCC  DR_OLDCLOSED    ; handle pointing at the wrong name
+            BCC  DR_OLDOK        ; handle pointing at the wrong name
             RTS                  ; carry set, A = ERR_ISOPEN
-DR_OLDCLOSED
-            LDD  FOUND_LBA
+DR_OLDOK    LDD  FOUND_LBA
             STD  DR_OLDLBA
             LDD  FOUND_OFS
             STD  DR_OLDOFS
             LDX  RENAME_NEW
+            STX  PP_PTR
+            JSR  NEXT_COMPONENT  ; parse the new name into PP_NAME
+            BCS  DR_RET
+            LDA  PP_KIND
+            CMPA #1
+            BNE  DR_BAD
+            LDX  PP_PTR
+            LDA  ,X
+            BNE  DR_BAD          ; nothing may follow it (no "/", no second name)
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #PP_NAME
             JSR  FIND_DIRENT     ; does the NEW name already exist?
             BCC  DR_EXISTS       ; found -- refuse to collide
-            LDX  DR_OLDLBA
+            CMPA #ERR_NOTFOUND
+            BEQ  DR_DO
+            ORCC #1              ; an I/O error
+            RTS
+DR_DO       LDX  DR_OLDLBA
             LDY  #DOSBUF
             JSR  BLKREAD
+            BCS  DR_IOERR
             LDD  DR_OLDOFS
             LDX  #DOSBUF
             LEAX D,X
-            LDY  RENAME_NEW
+            LDY  #PP_NAME
             LDB  #11
 DR_COPYNAME LDA  ,Y+
             STA  ,X+
@@ -1067,13 +1695,302 @@ DR_COPYNAME LDA  ,Y+
             LDX  DR_OLDLBA
             LDY  #DOSBUF
             JSR  BLKWRITE
+            BCS  DR_IOERR
             ANDCC #$FE
             RTS
-DR_NOTFOUND LDA  #ERR_NOTFOUND
+DR_BAD      LDA  #ERR_BADPATH
             ORCC #1
-            RTS
+DR_RET      RTS
 DR_EXISTS   LDA  #ERR_EXISTS
             ORCC #1
+            RTS
+DR_IOERR    LDA  #ERR_IOERR
+            ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = the path of a new directory. Creates it (with its "." and ".." entries)
+; in the directory the path leads to. OUT: carry clear; carry set + A =
+; ERR_EXISTS, ERR_NOTFOUND / ERR_NOTDIR (a missing or non-directory parent),
+; ERR_BADPATH, ERR_NOSPACE. Trashes A, B, D, X, Y, W and DOSBUF.
+;------------------------------------------------------------------------------
+DOS_MKDIR   JSR  RESOLVE_PATH
+            BCS  MK_RET
+            LDA  RP_KIND
+            CMPA #1
+            BEQ  MK_NAME
+MK_EXISTS   LDA  #ERR_EXISTS         ; "/", ".", "..", "": already there
+            ORCC #1
+MK_RET      RTS
+MK_NAME     LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT
+            BCC  MK_EXISTS
+            CMPA #ERR_NOTFOUND
+            BEQ  MK_GO
+            ORCC #1
+            RTS
+MK_GO       JSR  FIND_FREE_DIRENT ; a slot for the entry (may grow the parent)
+            BCS  MK_RET
+            LDD  FOUND_LBA
+            STD  MK_LBA
+            LDD  FOUND_OFS
+            STD  MK_OFS
+            JSR  ALLOC_CLUSTER   ; the new directory's own cluster
+            LBCS MK_NOSPACE
+            STD  MK_CLUS
+            JSR  ZERO_CLUSTER    ; every entry of it starts free ...
+            BCS  MK_RET
+            LDX  #DOSBUF         ; ... except "." (itself) and ".." (the parent;
+            LDY  #DOT_NAME       ; cluster 0 when that is the root)
+            JSR  COPY_NAME11
+            LDA  #ATTR_DIR
+            STA  ,X
+            LDD  MK_CLUS
+            STB  15,X            ; entry offset 26 = 11 (attr) + 15
+            STA  16,X
+            LDX  #DOSBUF+32
+            LDY  #DOTDOT_NAME
+            JSR  COPY_NAME11
+            LDA  #ATTR_DIR
+            STA  ,X
+            LDD  RP_DIR
+            STB  15,X
+            STA  16,X
+            LDD  MK_CLUS
+            JSR  CLUS_TO_LBA
+            TFR  D,X
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            BCS  MK_IOERR
+            LDX  MK_LBA          ; finally, its entry in the parent
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            BCS  MK_IOERR
+            LDD  MK_OFS
+            LDX  #DOSBUF
+            LEAX D,X
+            LDY  #RP_NAME
+            JSR  COPY_NAME11     ; X now at offset 11
+            LDA  #ATTR_DIR
+            STA  ,X+
+            LDB  #20
+MK_ZERO     CLR  ,X+             ; offsets 12..31 (dates, cluster, size)
+            DECB
+            BNE  MK_ZERO
+            LEAX -6,X            ; back to offset 26: the first cluster
+            LDD  MK_CLUS
+            STB  ,X
+            STA  1,X
+            LDX  MK_LBA
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            BCS  MK_IOERR
+            ANDCC #$FE
+            RTS
+MK_NOSPACE  LDA  #ERR_NOSPACE
+            ORCC #1
+            RTS
+MK_IOERR    LDA  #ERR_IOERR
+            ORCC #1
+            RTS
+; IN: Y = source, X = destination. Copies 11 bytes; X is left just past them.
+; Trashes A, B, Y.
+COPY_NAME11 LDB  #11
+CN_LOOP     LDA  ,Y+
+            STA  ,X+
+            DECB
+            BNE  CN_LOOP
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = a directory's path. Removes it if it is empty (only "." and ".."). OUT:
+; carry clear; carry set + A = ERR_NOTFOUND / ERR_NOTDIR / ERR_NOTEMPTY /
+; ERR_ISOPEN (it is the current directory) / ERR_BADPATH.
+;------------------------------------------------------------------------------
+DOS_RMDIR   JSR  RESOLVE_PATH
+            LBCS RM_RET
+            LDA  RP_KIND
+            CMPA #1
+            LBNE RM_BAD
+            LDD  RP_DIR
+            STD  FD_DIR
+            LDX  #RP_NAME
+            JSR  FIND_DIRENT
+            LBCS RM_RET
+            LDA  FOUND_ATTR
+            ANDA #ATTR_DIR
+            BEQ  RM_NOTDIR
+            LDD  FOUND_CLUSTER
+            STD  RM_CLUS
+            CMPD CWDCLUS
+            BEQ  RM_BUSY         ; can't remove the directory we are in
+            LDD  FOUND_LBA
+            STD  RM_LBA
+            LDD  FOUND_OFS
+            STD  RM_OFS
+            LDD  RM_CLUS
+            JSR  DS_START
+            BCS  RM_RET
+RM_SCAN     LDX  #DOSBUF
+            LDB  #16
+RM_ENT      LDA  ,X
+            BEQ  RM_EMPTY        ; $00: nothing more in the directory
+            CMPA #$E5
+            BEQ  RM_NEXT         ; deleted
+            CMPA #'.'
+            BEQ  RM_NEXT         ; "." and ".."
+            LDA  #ERR_NOTEMPTY
+            ORCC #1
+            RTS
+RM_NEXT     LEAX 32,X
+            DECB
+            BNE  RM_ENT
+            JSR  DS_NEXT
+            BCC  RM_SCAN
+            CMPA #ERR_EOF
+            BEQ  RM_EMPTY
+            ORCC #1
+            RTS
+RM_EMPTY    LDD  RM_CLUS
+            JSR  FREE_CHAIN
+            LDX  RM_LBA
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            BCS  RM_IOERR
+            LDD  RM_OFS
+            LDX  #DOSBUF
+            LEAX D,X
+            LDA  #$E5
+            STA  ,X
+            LDX  RM_LBA
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            BCS  RM_IOERR
+            ANDCC #$FE
+            RTS
+RM_BAD      LDA  #ERR_BADPATH
+            ORCC #1
+RM_RET      RTS
+RM_NOTDIR   LDA  #ERR_NOTDIR
+            ORCC #1
+            RTS
+RM_BUSY     LDA  #ERR_ISOPEN
+            ORCC #1
+            RTS
+RM_IOERR    LDA  #ERR_IOERR
+            ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = a directory's path. Makes it the current directory. OUT: carry clear;
+; carry set + A = ERR_NOTFOUND / ERR_NOTDIR.
+;------------------------------------------------------------------------------
+DOS_CHDIR   JSR  RESOLVE_DIR
+            BCS  CH_RET
+            STD  CWDCLUS
+            ANDCC #$FE
+CH_RET      RTS
+;------------------------------------------------------------------------------
+; IN: X = dest buffer, Y = its size. Writes the current directory as an absolute
+; path ("/" for the root, else "/A/B") plus a NUL. Built from the disk itself: at
+; each level the directory's ".." entry names its parent, and the parent's entry
+; pointing back at it names it. OUT: carry clear; carry set + A = ERR_TOOBIG (the
+; path doesn't fit, or is longer than PATHMAX).
+;------------------------------------------------------------------------------
+DOS_GETCWD  STX  GC_DEST
+            STY  GC_SIZE
+            LDX  #PATHBUF+PATHMAX
+            STX  GC_P
+            CLR  ,X               ; the terminating NUL; names are prepended before it
+            LDD  CWDCLUS
+            STD  GC_CUR
+GC_LOOP     LDD  GC_CUR
+            LBEQ GC_DONE          ; reached the root
+            STD  FD_DIR
+            LDX  #DOTDOT_NAME
+            JSR  FIND_DIRENT      ; this directory's ".." entry -> its parent
+            LBCS GC_RET
+            LDD  FOUND_CLUSTER
+            STD  GC_PAR
+            STD  FD_DIR
+            LDD  GC_CUR
+            JSR  FIND_BYCLUS      ; the parent's entry for it -> its name
+            LBCS GC_RET
+            LDX  #DOSBUF
+            LDD  FOUND_OFS
+            LEAX D,X              ; X = that entry
+            LDY  #GC_NAME
+            LDA  #'/'
+            STA  ,Y+
+            LDB  #8
+GC_BASE     LDA  ,X
+            CMPA #' '
+            BEQ  GC_BASEDONE
+            STA  ,Y+
+            LEAX 1,X
+            DECB
+            BNE  GC_BASE
+GC_BASEDONE LDX  #DOSBUF
+            LDD  FOUND_OFS
+            LEAX D,X
+            LEAX 8,X              ; the extension field
+            LDA  ,X
+            CMPA #' '
+            BEQ  GC_NAMEDONE
+            LDA  #'.'
+            STA  ,Y+
+            LDB  #3
+GC_EXT      LDA  ,X
+            CMPA #' '
+            BEQ  GC_NAMEDONE
+            STA  ,Y+
+            LEAX 1,X
+            DECB
+            BNE  GC_EXT
+GC_NAMEDONE TFR  Y,D
+            SUBD #GC_NAME
+            STB  GC_LEN           ; "/NAME.EXT" is at most 13 bytes
+            LDD  GC_P
+            SUBB GC_LEN
+            SBCA #0
+            CMPD #PATHBUF
+            BLO  GC_TOOBIG
+            STD  GC_P
+            LDX  #GC_NAME
+            LDY  GC_P
+            LDB  GC_LEN
+GC_CP       LDA  ,X+
+            STA  ,Y+
+            DECB
+            BNE  GC_CP
+            LDD  GC_PAR
+            STD  GC_CUR
+            LBRA GC_LOOP
+GC_DONE     LDX  GC_P
+            CMPX #PATHBUF+PATHMAX
+            BNE  GC_COPY
+            LEAX -1,X             ; the root itself: just "/"
+            LDA  #'/'
+            STA  ,X
+            STX  GC_P
+GC_COPY     LDD  #PATHBUF+PATHMAX+1
+            SUBD GC_P             ; bytes to copy, counting the NUL
+            CMPD GC_SIZE
+            BHI  GC_TOOBIG
+            LDX  GC_P
+            LDY  GC_DEST
+GC_CL       LDA  ,X+
+            STA  ,Y+
+            BNE  GC_CL
+            ANDCC #$FE
+            RTS
+GC_TOOBIG   LDA  #ERR_TOOBIG
+            ORCC #1
+GC_RET      RTS
+;------------------------------------------------------------------------------
+; -> A = the API version (DOS_API_VERSION).
+;------------------------------------------------------------------------------
+DOS_VERSION LDA  #DOS_API_VERSION
+            ANDCC #$FE
             RTS
 ;==============================================================================
 ; The byte-stream layer under the file API: maps a file's byte position to a
@@ -1411,7 +2328,39 @@ BASICNAME   FCC  "BASIC   COM"      ; 8.3 name, space-padded, no dot
 MSG_NOBASIC FCC  "BASIC.COM not found on disk"
             FCB  LF,CR,0
 ;------------------------------------------------------------------------------
+; The resident API's entry points, in function-code order (bios/defines.d,
+; B_FOPEN_NAME upward): ALLDONE copies this table into the BIOS's JT_DOS.
+;------------------------------------------------------------------------------
+DOS_ENTRIES FDB  DOS_OPEN       ; $13 B_FOPEN_NAME
+            FDB  DOS_READLINE   ; $14 B_READLINE
+            FDB  DOS_WRITELINE  ; $15 B_WRITELINE
+            FDB  DOS_CLOSE      ; $16 B_FCLOSE_NAME
+            FDB  DOS_OPENDIR    ; $17 B_OPENDIR
+            FDB  DOS_READDIR    ; $18 B_READDIR
+            FDB  DOS_KILL       ; $19 B_KILL_NAME
+            FDB  DOS_RENAME     ; $1A B_RENAME_NAME
+            FDB  DOS_FGETC      ; $1B B_FGETC
+            FDB  DOS_FPUTC      ; $1C B_FPUTC
+            FDB  DOS_FREAD      ; $1D B_FREAD
+            FDB  DOS_FWRITE     ; $1E B_FWRITE
+            FDB  DOS_FSEEK      ; $1F B_FSEEK_NAME
+            FDB  DOS_FSTAT      ; $20 B_FSTAT_NAME
+            FDB  DOS_FFLUSH     ; $21 B_FFLUSH
+            FDB  DOS_MKDIR      ; $22 B_MKDIR
+            FDB  DOS_RMDIR      ; $23 B_RMDIR
+            FDB  DOS_CHDIR      ; $24 B_CHDIR
+            FDB  DOS_GETCWD     ; $25 B_GETCWD
+            FDB  DOS_CLOSEDIR   ; $26 B_CLOSEDIR
+            FDB  DOS_STAT       ; $27 B_STAT
+            FDB  DOS_VERSION    ; $28 B_DOS_VERSION
+DOS_ENTRIES_END
+    IFNE (DOS_ENTRIES_END-DOS_ENTRIES)-2*NUM_DOS_JT
+    ERROR "DOS_ENTRIES must have one entry per DOS call (see defines.d)"
+    ENDC
+;------------------------------------------------------------------------------
 DOSBUF        RMB  512
+JT_BASE       RMB  2        ; the BIOS's DOS call table (from SD_BOOT_TRY, in Y)
+CWDCLUS       RMB  2        ; the current directory's first cluster (0 = root)
 RESSEC        RMB  2
 SECPERCLUS    RMB  1
 SECPERCLUS16  RMB  2
@@ -1439,20 +2388,42 @@ ACCLUS        RMB  2
 FCCLUS        RMB  2
 FCNEXT        RMB  2
 SETVAL        RMB  2
+; Directory search / iteration (FIND_DIRENT, DS_*)
 FDNAME        RMB  2
-FDLBA         RMB  2
-FDSECLEFT     RMB  2
+FD_DIR        RMB  2        ; the directory a search runs in (first cluster; 0 = root)
+FD_MODE       RMB  1        ; 0 = by name, 1 = by first cluster
+FD_TARGET     RMB  2
 FOUND_LBA     RMB  2
 FOUND_OFS     RMB  2
 FOUND_CLUSTER RMB  2
 FOUND_SIZE    RMB  2
 FOUND_SIZEHI  RMB  2
+FOUND_ATTR    RMB  1
+DS_DIR        RMB  2
+DS_CUR        RMB  2
+DS_SIC        RMB  1
+DS_LBA        RMB  2
+DS_LEFT       RMB  2
+DS_TMP        RMB  2
+ED_NEW        RMB  2
+ZC_CLUS       RMB  2
+ZC_LBA        RMB  2
+ZC_CNT        RMB  1
+; Path parsing (NEXT_COMPONENT, RESOLVE_PATH)
+PP_PTR        RMB  2
+PP_KIND       RMB  1
+PP_NAME       RMB  11
+RP_DIR        RMB  2
+RP_KIND       RMB  1
+RP_NAME       RMB  11
 FSLOTS        RMB  NSLOTS*sizeof{fslot}
+DHANDLES      RMB  NDIRH*sizeof{dhandle}
 OPEN_NAME     RMB  2
 OPEN_MODE     RMB  1
 OPEN_SLOTIDX  RMB  1
 OPEN_SLOTPTR  RMB  2
 CUR_SLOT      RMB  2
+CUR_DH        RMB  2
 RL_DEST       RMB  2
 RL_MAX        RMB  2
 RL_COUNT      RMB  2
@@ -1462,8 +2433,6 @@ WL_I          RMB  2
 FGBTMP        RMB  2
 DC_DIROFS     RMB  2
 DC_SIZE       RMB  2
-DIRLBA_CUR    RMB  2
-DIRSECLEFT    RMB  2
 DIRENTIDX     RMB  1
 DIRDEST       RMB  2
 RENAME_NEW    RMB  2
@@ -1474,11 +2443,33 @@ SPCMASK       RMB  1        ; sectors per cluster - 1
 CNO_IDX       RMB  1
 DC_CLUS       RMB  2
 DC_STATUS     RMB  1
+SY_STATUS     RMB  1
+FF_IDX        RMB  1
 FP_BYTE       RMB  1
 IO_BUF        RMB  2
 IO_LEN        RMB  2
 IO_CNT        RMB  2
-SK_POS        RMB  2
+SK_WHENCE     RMB  1
+SK_HI         RMB  2
+SK_LO         RMB  2
+FS_DEST       RMB  2
+OD_CLUS       RMB  2
+OD_IDX        RMB  1
+OD_PTR        RMB  2
+MK_LBA        RMB  2
+MK_OFS        RMB  2
+MK_CLUS       RMB  2
+RM_CLUS       RMB  2
+RM_LBA        RMB  2
+RM_OFS        RMB  2
+GC_DEST       RMB  2
+GC_SIZE       RMB  2
+GC_P          RMB  2
+GC_CUR        RMB  2
+GC_PAR        RMB  2
+GC_LEN        RMB  1
+GC_NAME       RMB  14
+PATHBUF       RMB  PATHMAX+1
 LOC_N         RMB  1        ; LOCATE_SECTOR arguments/scratch
 LOC_EXT       RMB  1
 LOC_K         RMB  1

@@ -137,7 +137,8 @@ FAILCOMMON  STA  RESULT+1
             STA  RESULT
 DONE        BRA  DONE
 
-FNAME       FCC  "TEST    TXT"
+FNAME       FCC  "TEST.TXT"
+            FCB  0
 LINE1       FCC  "HELLO WORLD"
 LINE2       FCC  "SECOND LINE"
 FILEREF     RMB  1

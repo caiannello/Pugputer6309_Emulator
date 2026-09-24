@@ -177,6 +177,7 @@ TEST(basic309_token_tables_are_internally_consistent) {
         {"LOAD", "LOAD"}, {"SAVE", "SAVE"},   {"FILES", "FILES"}, {"KILL", "KILL"},
         {"NAME", "NAME"}, {"OPEN", "OPEN"},   {"CLOSE", "CLOSE"}, {"WRITE", "WRITE"},
         {"FIELD", "FIELD"}, {"GET", "GET"},   {"PUT", "PUT"},     {"LSET", "LSET"},   {"RSET", "RSET"},
+        {"MKDIR", "MKDIR"}, {"CHDIR", "CHDIR"}, {"RMDIR", "RMDIR"},
         {"PRINT", "PRINT"}, {"INPUT", "INPUT"}, {"LINE", "LINE"},
     };
     for (const auto& [word, handler] : statement_handlers) {

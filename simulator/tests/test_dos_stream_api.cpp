@@ -264,7 +264,8 @@ TEST(dos_stream_read_mode_seek) {
 TEST(dos_stream_mode_and_handle_rules) {
     DosSession d;
     CHECK(d.boot(PUGBIOS_S19_PATH, DISK_IMG_PATH));
-    kill_all(d, {"S7A.DAT", "S7B.DAT", "S7C.DAT", "S7D.DAT", "S7E.DAT", "S7F.DAT", "S7X.DAT"});
+    kill_all(d, {"S7A.DAT", "S7B.DAT", "S7C.DAT", "S7D.DAT", "S7E.DAT", "S7F.DAT", "S7G.DAT", "S7H.DAT", "S7I.DAT",
+                 "S7X.DAT"});
     CHECK(d.write_file("S7A.DAT", bytes("data")));
 
     // Mode enforcement.
@@ -290,7 +291,7 @@ TEST(dos_stream_mode_and_handle_rules) {
     // Missing file, bad filerefs.
     auto nf = d.open("S7X.DAT", READ);
     CHECK(nf.carry && nf.a == bios::ERR_NOTFOUND);
-    CHECK(d.getc(7).carry && d.getc(7).a == bios::ERR_BADDEV);  // out of range
+    CHECK(d.getc(bios::NFILES).carry && d.getc(bios::NFILES).a == bios::ERR_BADDEV); // out of range
     CHECK(d.getc(4).carry && d.getc(4).a == bios::ERR_BADDEV);  // in range but not open
     CHECK(d.close(4).carry && d.close(4).a == bios::ERR_BADDEV);
 
@@ -305,24 +306,26 @@ TEST(dos_stream_mode_and_handle_rules) {
     CHECK(d.rename("S7A.DAT", "S7X.DAT").ok()); // fine once closed
     CHECK(d.rename("S7X.DAT", "S7A.DAT").ok());
 
-    // Slot exhaustion: with all NSLOTS (5) open, the next open fails cleanly,
+    // Slot exhaustion: with all 8 files open, the next open fails cleanly,
     // and a slot freed by close is immediately reusable.
     std::vector<uint8_t> refs;
-    const char* names[] = {"S7A.DAT", "S7B.DAT", "S7C.DAT", "S7D.DAT", "S7E.DAT"};
+    const char* names[] = {"S7A.DAT", "S7B.DAT", "S7C.DAT", "S7D.DAT", "S7E.DAT", "S7G.DAT", "S7H.DAT", "S7I.DAT"};
     for (const char* n : names) {
         auto o = d.open(n, UPDATE);
         CHECK(o.ok());
         refs.push_back(o.a);
     }
-    auto sixth = d.open("S7F.DAT", WRITE);
-    CHECK(sixth.carry && sixth.a == bios::ERR_NOSLOT);
+    CHECK(refs.size() == static_cast<size_t>(bios::NFILES));
+    auto ninth = d.open("S7F.DAT", WRITE);
+    CHECK(ninth.carry && ninth.a == bios::ERR_NOSLOT);
     CHECK(d.close(refs[2]).ok());
     auto again = d.open("S7F.DAT", WRITE);
     CHECK(again.ok() && again.a == refs[2]);
     CHECK(d.close(again.a).ok());
     for (size_t i = 0; i < refs.size(); ++i)
         if (i != 2) CHECK(d.close(refs[i]).ok());
-    kill_all(d, {"S7A.DAT", "S7B.DAT", "S7C.DAT", "S7D.DAT", "S7E.DAT", "S7F.DAT", "S7X.DAT"});
+    kill_all(d, {"S7A.DAT", "S7B.DAT", "S7C.DAT", "S7D.DAT", "S7E.DAT", "S7F.DAT", "S7G.DAT", "S7H.DAT", "S7I.DAT",
+                 "S7X.DAT"});
 }
 
 TEST(dos_stream_write_mode_truncates_existing_file) {
@@ -393,26 +396,18 @@ TEST(dos_directory_entry_reflects_final_size_and_cluster) {
     CHECK(o.ok());
     CHECK(d.close(o.a).ok());
 
-    d.put_name("SA.DAT", 0x9E40);
-    d.put_name("SB.DAT", 0x9E50);
-    std::string want_a(reinterpret_cast<char*>(d.bus.ram() + 0x9E40), 11);
-    std::string want_b(reinterpret_cast<char*>(d.bus.ram() + 0x9E50), 11);
+    bool listed = false;
     bool found_a = false, found_b = false;
-    auto r = d.call(bios::B_DIR_FIRST, 0, 0, DosSession::kData);
-    for (int guard = 0; r.ok() && guard < 600; ++guard) {
-        std::vector<uint8_t> e = d.peek(DosSession::kData, 16); // 11 name, attr, 4 size (little-endian)
-        std::string name(e.begin(), e.begin() + 11);
-        uint32_t size = e[12] | (e[13] << 8) | (e[14] << 16) | (static_cast<uint32_t>(e[15]) << 24);
-        if (name == want_a) {
+    for (const auto& e : d.list("", &listed)) {
+        if (e.name == "SA.DAT") {
             found_a = true;
-            CHECK(size == 1234);
+            CHECK(e.size == 1234 && !e.is_dir());
         }
-        if (name == want_b) {
+        if (e.name == "SB.DAT") {
             found_b = true;
-            CHECK(size == 0);
+            CHECK(e.size == 0 && !e.is_dir());
         }
-        r = d.call(bios::B_DIR_NEXT, 0, 0, DosSession::kData);
     }
-    CHECK(found_a && found_b);
+    CHECK(listed && found_a && found_b);
     kill_all(d, {"SA.DAT", "SB.DAT"});
 }

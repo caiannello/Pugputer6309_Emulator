@@ -387,14 +387,23 @@ bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_
 is the interactive equivalent of `basic309_demo` for this path
 (`--com`/`--bios`/`--disk` flags).
 
-The resident DOS (`dos/dos.asm`) is a small FAT16 file layer: five file slots each with a
-private 512-byte sector buffer, byte-level read/write/seek/size calls, open modes read /
-write / append / update (in-place, with zero-filled gaps), cluster allocation and chain
-extension, root-directory listing, delete and rename. Its tests are `test_dos_file_api.cpp`
-(one write/close/reopen/read round trip through raw BIOS calls) and
-`test_dos_stream_api.cpp` (multi-cluster files, interleaved files, append at sector and
-cluster boundaries, update and stale-data safety, mode and error rules, CR/LF line reads),
-using `tests/dos_session.hpp`, which boots the real chain and then makes BIOS calls itself.
+The resident DOS (`dos/dos.asm`) is a small FAT16 file layer with a directory tree: eight
+file slots each with a private 512-byte sector buffer, byte-level read/write/seek/size calls,
+open modes read / write / append / update (in-place, with zero-filled gaps), cluster
+allocation and chain extension (both FAT copies kept in sync), subdirectories (make, remove,
+change, get the current directory; directories grow by a cluster when full), path parsing
+(`/` separated, absolute or relative to one system-wide current directory, `.` and `..`),
+directory scans, flush, delete and rename. The whole interface is documented in
+`bios/defines.d` (function codes `$13`-`$28`) and is reached through ONE generic BIOS handler
+(`BIOS_DOS` in `bios/sdcard.asm`) indexing the `JT_DOS` table that DOS fills in at boot --
+SD_BOOT_TRY passes the table's address to DOS in Y, so no address is hand-copied between the
+BIOS and DOS builds. Its tests are `test_dos_file_api.cpp` (one write/close/reopen/read round
+trip through raw BIOS calls), `test_dos_stream_api.cpp` (multi-cluster files, interleaved
+files, append at sector and cluster boundaries, update and stale-data safety, mode and error
+rules, CR/LF line reads, 8 slots) and `test_dos_dirs.cpp` (directories, paths, growth,
+rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
+`tests/dos_session.hpp`, which boots the real chain and then makes BIOS calls itself, and
+`tests/fat16_reader.hpp`, an independent FAT16 reader that checks what is really on the disk.
 
 ## Test suite
 
@@ -481,14 +490,17 @@ using `tests/dos_session.hpp`, which boots the real chain and then makes BIOS ca
   counts, the dispatch tables and every `TOK_*` constant against the assembled image
   and symbol table, then types every keyword and verifies the token byte stored. Fails on
   an unaudited new `TOK_*` symbol. Needs `basic309/exbasrom309.lst` (`build_basic.bat`).
-- `test_dos_file_api.cpp`, `test_dos_stream_api.cpp` -- the resident DOS file layer (above).
+- `test_dos_file_api.cpp`, `test_dos_stream_api.cpp`, `test_dos_dirs.cpp` -- the resident DOS
+  file layer and directory tree (above).
 - `test_basic309_load_save_golden.cpp`, `test_basic309_files_kill_name.cpp` -- `SAVE` then
   `LOAD` round trip through real keystrokes and the whole disk chain; `FILES`, `KILL`, `NAME`.
 - `test_basic309_seqfiles.cpp`, `test_basic309_randomfiles.cpp` -- BASIC file I/O: the
   GW-BASIC guide's sequential Examples 1-3 and random-access Examples 4-6, `OPEN` in both
   syntaxes, `PRINT#`/`WRITE#`/`INPUT#`/`LINE INPUT#`, `FIELD`/`LSET`/`RSET`/`GET`/`PUT`,
   `MKI$`/`MKS$`/`CVI`/`CVS`, `EOF`/`LOF`/`LOC`, when files are closed, and every error.
-  Shared helpers: `tests/basic309_file_helpers.hpp`. These share `disk.img`, so each test
+  Shared helpers: `tests/basic309_file_helpers.hpp`.
+- `test_basic309_dirs.cpp` -- `MKDIR`/`CHDIR`/`RMDIR`, paths in `LOAD`/`SAVE`/`KILL`/`NAME`/`OPEN`/
+  `FILES`, the directory errors, and the directory statements inside a running program. These share `disk.img`, so each test
   deletes its own files before and after.
 
 `pugputer_tests` takes optional name fragments (`pugputer_tests dos_stream seqfiles`) and

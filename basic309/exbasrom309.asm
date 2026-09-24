@@ -6,21 +6,30 @@ F_STDOUT    equ  $01           ; BIOS fileref: console output (aliased to the UA
 F_STDIN     equ  $02           ; BIOS fileref: console input
 B_PUTC      equ  $09           ; BIOS call: B=fileref, E=char -> blocks if buf full
 B_GETC      equ  $0C           ; BIOS call: B=fileref -> A=char, carry set if none
-; LOAD/SAVE: the resident DOS file API (bios/defines.d, dos/dos.asm).
-B_FOPEN_NAME  equ $13          ; X=11-byte 8.3 name, E=mode -> A=fileref
-B_READLINE    equ $14          ; B=fileref,X=dest,Y=maxlen -> X=actual len (0=EOF)
-B_WRITELINE   equ $15          ; B=fileref,X=src,Y=len -> writes len bytes + CR
-B_FCLOSE_NAME equ $16          ; B=fileref
-B_DIR_FIRST   equ $17          ; X=16-byte dest buf -> fills it, carry=none
-B_DIR_NEXT    equ $18          ; same signature, continues the scan
-B_KILL_NAME   equ $19          ; X=11-byte 8.3 name -> deletes it
-B_RENAME_NAME equ $1A          ; X=old 11-byte name, Y=new 11-byte name
-B_FGETC       equ $1B          ; B=fileref -> A=byte, carry set at EOF/error
-B_FPUTC       equ $1C          ; B=fileref,E=byte
-B_FREAD       equ $1D          ; B=fileref,X=buf,Y=len -> X=bytes read
-B_FWRITE      equ $1E          ; B=fileref,X=buf,Y=len
-B_FSEEK_NAME  equ $1F          ; B=fileref,X=new position (read/update files)
-B_FSTAT_NAME  equ $20          ; B=fileref -> X=size, Y=position
+; LOAD/SAVE and the file statements: the resident DOS calls (bios/defines.d,
+; dos/dos.asm). Names are NUL-terminated paths ("/" separators); handles are DOS
+; file handles.
+B_FOPEN_NAME  equ $13          ; X=path, E=mode -> A=file handle
+B_READLINE    equ $14          ; B=handle,X=dest,Y=maxlen -> X=actual len (0=empty/EOF)
+B_WRITELINE   equ $15          ; B=handle,X=src,Y=len -> writes len bytes + CR
+B_FCLOSE_NAME equ $16          ; B=handle
+B_OPENDIR     equ $17          ; X=path ("" = current directory) -> A=scan handle
+B_READDIR     equ $18          ; B=scan handle,X=16-byte dest -> next entry (carry at end)
+B_KILL_NAME   equ $19          ; X=path -> deletes the file
+B_RENAME_NAME equ $1A          ; X=old path, Y=new NAME (one component)
+B_FGETC       equ $1B          ; B=handle -> A=byte, carry set at EOF/error
+B_FPUTC       equ $1C          ; B=handle,E=byte
+B_FREAD       equ $1D          ; B=handle,X=buf,Y=len -> X=bytes read
+B_FWRITE      equ $1E          ; B=handle,X=buf,Y=len
+B_FSEEK_NAME  equ $1F          ; B=handle,X:Y=32-bit offset,E=whence -> X:Y=new position
+B_FSTAT_NAME  equ $20          ; B=handle,X=16-byte dest: size(4) position(4) attr mode ...
+B_MKDIR       equ $22          ; X=path
+B_RMDIR       equ $23          ; X=path
+B_CHDIR       equ $24          ; X=path
+B_GETCWD      equ $25          ; X=dest,Y=size -> the current directory as a path
+B_CLOSEDIR    equ $26          ; B=scan handle
+SEEK_SET      equ $00
+ATTR_DIR      equ $10
 FOPEN_READ    equ $00
 FOPEN_WRITE   equ $01
 FOPEN_APPEND  equ $02
@@ -32,6 +41,11 @@ ERR_EXISTS    equ $08          ; B_RENAME_NAME: target name already exists
 ERR_EOF       equ $09
 ERR_ISOPEN    equ $0A
 ERR_BADMODE   equ $0B
+ERR_NOTDIR    equ $0C
+ERR_ISDIR     equ $0D
+ERR_NOTEMPTY  equ $0E
+ERR_BADPATH   equ $0F
+ERR_TOOBIG    equ $10
 ; BASIC-level file numbers 1..NFILES map onto DOS filerefs through FT_REF; FT_MODE
 ; holds how each is open. A file's DOS mode is its FM_ code minus 1.
 NFILES        equ 4
@@ -40,12 +54,12 @@ FM_OUT        equ 2            ; OPEN "O" / FOR OUTPUT
 FM_APP        equ 3            ; OPEN "A" / FOR APPEND
 FM_RND        equ 4            ; OPEN "R" / random access
 
-WORKBASE    equ  $2000         ; base of BASIC's relocated fixed workspace. Must
+WORKBASE    equ  $3000         ; base of BASIC's relocated fixed workspace. Must
                                ; stay a multiple of $100 (it's a direct page) and
                                ; above the top of dos/dos.asm's RAM (code, sector
                                ; buffers, variables -- see dos/dos.lst's last
-                               ; symbol; it sat at $1000 before DOS got per-file
-                               ; buffers). DP is derived from this, not hand-typed.
+                               ; symbol; $2AC6 with 8 file buffers). DP is derived
+                               ; from this, not hand-typed.
 TOPRAM_FIXED equ $BFFF         ; fixed top-of-RAM for BASIC's use (interpreter
                                ; code itself is loaded at $C000, just above)
 
@@ -216,13 +230,7 @@ STRBUF    RMB  41             STRING BUFFER
 ; basic309: LOAD/SAVE workspace (see LOAD/SAVE/FMTNAME/FMTNUM below).
 LINEDONE_VEC RMB 2            see LACE9's tail -- defaults to LAC7C
 FILEREF   RMB  1              current LOAD/SAVE fileref
-FNBUF     RMB  11             FMTNAME's 8.3-formatted output
-FN_SRC    RMB  2              FMTNAME scratch: original input pointer
-FN_TOTLEN RMB  1              total input length
-FN_HASDOT RMB  1              nonzero if a '.' was found
-FN_NAMELEN RMB 1              chars before the dot (or whole input)
-FN_EXTSRC RMB  2              pointer just past the dot
-FN_EXTLEN RMB  1              chars after the dot
+FNBUF     RMB  84             FMTNAME/OPENNAME's path: <= 79 characters + NUL (+ room for .BAS)
 FMTVAL    RMB  2              FMTNUM scratch
 FMTPOW    RMB  2
 FMTDIG    RMB  1
@@ -230,8 +238,9 @@ FMTLZ     RMB  1
 SAVECUR   RMB  2              SAVE's "current program line" pointer
 SAVEPOS   RMB  2              SAVE's write-cursor into SAVELINE
 SAVELINE  RMB  LBUFMX+8       SAVE's combined "number text" buffer
-DIRBUF    RMB  16             FILES: one B_DIR_FIRST/NEXT entry (11+1+4)
-NAMEOLD   RMB  11             NAME's "old" filename (FNBUF holds "new")
+DIRBUF    RMB  16             FILES: one B_READDIR entry (11 name, attr, size 4 big-endian)
+NAMEOLD   RMB  84             NAME's "old" path (FNBUF holds "new")
+STATBUF   RMB  16             B_FSTAT_NAME's result (see FSTATXY)
 ; BASIC file I/O state. The per-file tables are indexed by file number (1..NFILES;
 ; entry 0 is unused) and laid out 5 apart so one pointer reaches all of them:
 ; FT_MODE[n], FT_REF[n] = FT_MODE[n]+5, FT_COL[n] = FT_MODE[n]+10.
@@ -759,6 +768,13 @@ TOK_GO    EQU  $81
           FCB  $80+'T'
           FCC  "RSE"           AB
           FCB  $80+'T'
+; Directory statements (MKDIR..CHDIR below).
+          FCC  "MKDI"          AC
+          FCB  $80+'R'
+          FCC  "CHDI"          AD
+          FCB  $80+'R'
+          FCC  "RMDI"          AE
+          FCB  $80+'R'
 * END OF EXECUTABLE COMMANDS. THE REMAINDER OF THE TABLE ARE NON-EXECUTABLE TOKENS
           FCC  "TAB"          A4
           FCB  $80+'('
@@ -937,6 +953,9 @@ TOK_INPUT EQU  (*-CMD_TAB)/2+$7F
           FDB  PUT             A9
           FDB  LSET            AA
           FDB  RSET            AB
+          FDB  MKDIR           AC
+          FDB  CHDIR           AD
+          FDB  RMDIR           AE
 TOK_HIGH_EXEC EQU  (*-CMD_TAB)/2+$7F
                                
 * ERROR MESSAGES AND THEIR NUMBERS AS USED INTERNALLY                      
@@ -970,6 +989,10 @@ L890B     FCC  "UF"           25 UNDEFINED FUNCTION (FN) CALL
 L890D     FCC  "NE"           26 FILE NOT FOUND
 LERRFE    FCC  "FE"           27 FILE ALREADY EXISTS (basic309: NAME's target collision)
           FCC  "DF"           28 DISK FULL (basic309)
+          FCC  "ND"           29 NOT A DIRECTORY
+          FCC  "IS"           30 IS A DIRECTORY (a file operation on one)
+          FCC  "DE"           31 DIRECTORY NOT EMPTY
+          FCC  "BP"           32 BAD PATH OR NAME
 
 LABE1     FCC  " ERROR"
           FCB  $00             
@@ -1198,7 +1221,7 @@ LOAD      JSR  LB156          EVALUATE THE FILENAME EXPRESSION
           TFR  A,E
           LDA  #B_FOPEN_NAME
           SWI2
-          BCS  LOAD_NF        OPEN FAILED -- RAISE "FILE NOT FOUND"
+          LBCS DOSERR         OPEN FAILED -- "NE" NOT FOUND, "IS" A DIRECTORY, "BP" BAD NAME, ... (A = DOS ERROR)
           STA  FILEREF
           JSR  LAD19          CLEAR THE CURRENT PROGRAM (LIKE NEW)
           LDX  #LOAD_CONT
@@ -1243,7 +1266,7 @@ SAVE      JSR  LB156
           TFR  A,E
           LDA  #B_FOPEN_NAME
           SWI2
-          BCS  SAVE_ERR        OPEN FAILED -- RAISE "I/O ERROR"
+          LBCS DOSERR          OPEN FAILED -- "BP" BAD NAME, "AO" FILE IS OPEN, "DF" DISK FULL, ... (A = DOS ERROR)
           STA  FILEREF
           LDX  TXTTAB
 SAVE_LOOP LDD  ,X             ADDRESS OF NEXT LINE (0 = END OF PROGRAM)
@@ -1285,41 +1308,62 @@ SAVE_WRITEERR
           SWI2
 SAVE_ERR  LDB  #20*2          "IO" I/O ERROR (SEE LABAF'S ERROR TABLE) --
           JMP  LAC46          SAME CONVENTION AS UL/OM/NE/ETC ABOVE
-;------------------------------------------------------------------------------
-; FILES [ignored-expr] -- lists the disk's root directory: each entry's
-; name.ext (trimmed, dotted) and byte size, one per line. Any argument
-; (e.g. a "*.BAS" wildcard) is evaluated (so it doesn't syntax-error) and
-; then simply discarded -- wildcard filtering isn't implemented yet.
+; -----------------------------------------------------------------------------
+; FILES ["path"] -- lists a directory (the current one, or the path's): each
+; entry's name.ext (trimmed, dotted) and byte size, or <DIR> for a subdirectory,
+; one per line ("." and ".." are left out). No wildcard filtering yet.
 ;------------------------------------------------------------------------------
 FILES     JSR  GETCCH
-          BEQ  FILES_START
-          JSR  LB156          EVALUATE AND DISCARD THE ARGUMENT
-FILES_START
-          LDX  #DIRBUF
-          LDA  #B_DIR_FIRST
+          BEQ  FILES_CUR
+          JSR  LB156
+          JSR  LB654
+          JSR  OPENNAME
+          BRA  FILES_OPEN
+FILES_CUR CLR  FNBUF          THE EMPTY PATH: THE CURRENT DIRECTORY
+FILES_OPEN
+          LDX  #FNBUF
+          LDA  #B_OPENDIR
           SWI2
-          BCS  FILES_DONE     EMPTY DIRECTORY
+          LBCS DOSERR
+          STA  FILEREF        THE SCAN HANDLE
 FILES_LOOP
+          LDB  FILEREF
+          LDX  #DIRBUF
+          LDA  #B_READDIR
+          SWI2
+          BCS  FILES_END      NO MORE ENTRIES
+          LDA  DIRBUF
+          CMPA #'.
+          BEQ  FILES_LOOP     "." AND ".."
           JSR  PRINTFN
           LDA  #SPACE
           JSR  PUTCHR
-          LDA  DIRBUF+13      SIZE FIELD IS LITTLE-ENDIAN; RECONSTRUCT
-          LDB  DIRBUF+12      THE LOW 16 BITS (FILES ARE CAPPED AT 64K)
+          LDA  DIRBUF+11
+          ANDA #ATTR_DIR
+          BEQ  FILES_SIZE
+          LDX  #FILES_DIRTXT
+FILES_TXT LDA  ,X+
+          BEQ  FILES_EOL
+          JSR  PUTCHR
+          BRA  FILES_TXT
+FILES_SIZE
+          LDD  DIRBUF+14      THE SIZE'S LOW 16 BITS (BIG-ENDIAN; FILES ARE CAPPED AT 64K)
           LDY  #SAVELINE      REUSE SAVE'S SCRATCH LINE BUFFER
           JSR  FMTNUM
           LDX  #SAVELINE
 FILES_PNUM LDA  ,X+
-          BEQ  FILES_PDONE
+          BEQ  FILES_EOL
           JSR  PUTCHR
           BRA  FILES_PNUM
-FILES_PDONE
-          LDA  #CR
+FILES_EOL LDA  #CR
           JSR  PUTCHR
-          LDX  #DIRBUF
-          LDA  #B_DIR_NEXT
+          BRA  FILES_LOOP
+FILES_END LDB  FILEREF
+          LDA  #B_CLOSEDIR
           SWI2
-          BCC  FILES_LOOP
-FILES_DONE JMP  LAC73
+          RTS
+FILES_DIRTXT FCC "<DIR>"
+          FCB  0
 ;------------------------------------------------------------------------------
 ; Prints an 11-byte raw 8.3 name (at DIRBUF) as "NAME.EXT", trimming
 ; trailing spaces from each field and omitting the dot if the extension
@@ -1351,7 +1395,8 @@ PFN_EXT   LDA  ,X
           BNE  PFN_EXT
 PFN_DONE  RTS
 ;------------------------------------------------------------------------------
-; KILL "filename" -- deletes a file.
+; KILL "path" -- deletes a file (a name with no dot in its last component gets
+; ".BAS", like LOAD/SAVE; "NAME." means no extension).
 ;------------------------------------------------------------------------------
 KILL      JSR  LB156
           JSR  LB654
@@ -1360,22 +1405,21 @@ KILL      JSR  LB156
           LDA  #B_KILL_NAME
           SWI2
           BCS  KILL_ERR
-          JMP  LAC73
-KILL_ERR  JMP  DOSERR         "NE" NOT FOUND, "AO" FILE IS OPEN, ... (A = DOS ERROR CODE)
+          RTS
+KILL_ERR  JMP  DOSERR         "NE" NOT FOUND, "AO" FILE IS OPEN, "IS" A DIRECTORY, ...
 ;------------------------------------------------------------------------------
-; NAME "old" AS "new" -- renames a file. "AS" isn't a reserved word in
-; this BASIC's dictionary, so it just sits in the crunched line as two
-; literal characters -- checked for directly rather than via a token.
+; NAME "old" AS "new" -- renames a file or directory (it stays in its directory,
+; so "new" is a single name). "AS" isn't a reserved word in this BASIC's
+; dictionary, so it just sits in the crunched line as two literal characters --
+; checked for directly rather than via a token.
 ;------------------------------------------------------------------------------
-NAME      JSR  LB156          EVALUATE THE OLD FILENAME EXPRESSION
+NAME      JSR  LB156          EVALUATE THE OLD PATH EXPRESSION
           JSR  LB654
           JSR  FMTNAME        -> FNBUF
           LDX  #FNBUF         COPY ASIDE -- FMTNAME WILL REUSE FNBUF BELOW
           LDY  #NAMEOLD
-          LDB  #11
 NAME_CP1  LDA  ,X+
           STA  ,Y+
-          DECB
           BNE  NAME_CP1
 NAME_SKIP JSR  GETCCH
           CMPA #SPACE
@@ -1388,7 +1432,7 @@ NAME_CHKA CMPA #'A
           CMPA #'S
           BNE  NAME_SYNERR
           JSR  GETNCH          ADVANCE PAST "AS"
-          JSR  LB156           EVALUATE THE NEW FILENAME EXPRESSION
+          JSR  LB156           EVALUATE THE NEW NAME EXPRESSION
           JSR  LB654
           JSR  FMTNAME         -> FNBUF (THE NEW NAME)
           LDX  #NAMEOLD
@@ -1396,9 +1440,43 @@ NAME_CHKA CMPA #'A
           LDA  #B_RENAME_NAME
           SWI2
           BCS  NAME_ERR
-          JMP  LAC73
+          RTS
 NAME_SYNERR JMP LB277          SYNTAX ERROR
 NAME_ERR  JMP  DOSERR         "NE" NOT FOUND, "FE" TARGET EXISTS, "AO" FILE IS OPEN, ...
+;------------------------------------------------------------------------------
+; MKDIR "path", RMDIR "path", CHDIR "path" -- make, remove (must be empty) or
+; move into a directory. CHDIR with no argument prints the current directory.
+; Unlike a file name, a directory path never gets a default extension.
+;------------------------------------------------------------------------------
+MKDIR     LDB  #B_MKDIR
+          BRA  DIRCMD
+RMDIR     LDB  #B_RMDIR
+          BRA  DIRCMD
+CHDIR     BEQ  CHDIR_SHOW
+          LDB  #B_CHDIR
+DIRCMD    PSHS B
+          JSR  LB156
+          JSR  LB654
+          JSR  OPENNAME
+          PULS A
+          LDX  #FNBUF
+          SWI2
+          BCS  DIRCMD_ERR
+          RTS
+DIRCMD_ERR JMP DOSERR
+CHDIR_SHOW
+          LDX  #SAVELINE
+          LDY  #LBUFMX
+          LDA  #B_GETCWD
+          SWI2
+          BCS  DIRCMD_ERR
+          LDX  #SAVELINE
+CHDIR_PR  LDA  ,X+
+          BEQ  CHDIR_DONE
+          JSR  PUTCHR
+          BRA  CHDIR_PR
+CHDIR_DONE LDA #CR
+          JMP  PUTCHR
 ;==============================================================================
 ; File I/O for BASIC programs (GW-BASIC style sequential files).
 ;
@@ -1484,6 +1562,11 @@ DOSERRTAB FCB  ERR_NOTFOUND,26*2      "NE" FILE NOT FOUND
           FCB  ERR_BADMODE,21*2       "FM" BAD FILE MODE
           FCB  ERR_EOF,23*2           "IE" INPUT PAST END
           FCB  ERR_EXISTS,27*2        "FE" FILE ALREADY EXISTS
+          FCB  ERR_NOTDIR,29*2        "ND" NOT A DIRECTORY
+          FCB  ERR_ISDIR,30*2         "IS" IS A DIRECTORY
+          FCB  ERR_NOTEMPTY,31*2      "DE" DIRECTORY NOT EMPTY
+          FCB  ERR_BADPATH,32*2       "BP" BAD PATH OR NAME
+          FCB  ERR_TOOBIG,4*2         "FC" A SEEK OR RECORD BEYOND WHAT DOS HANDLES
           FCB  ERR_BADDEV,22*2        "NO" FILE NOT OPEN
           FCB  0,20*2                 anything else: "IO" I/O ERROR
 ;------------------------------------------------------------------------------
@@ -1632,19 +1715,6 @@ OG_RET    RTS
 OPEN_FAIL JMP  DOSERR
 AO_ERR    LDB  #18*2          "AO" FILE ALREADY OPEN
           JMP  LAC46
-;------------------------------------------------------------------------------
-; Formats the file name in X,B into FNBUF like FMTNAME, except that a name with no
-; dot gets a blank extension instead of ".BAS" (data files are usually opened
-; under exactly the name they were given).
-;------------------------------------------------------------------------------
-OPENNAME  JSR  FMTNAME
-          TST  FN_HASDOT
-          BNE  ON_RET
-          LDA  #SPACE
-          STA  FNBUF+8
-          STA  FNBUF+9
-          STA  FNBUF+10
-ON_RET    RTS
 ;------------------------------------------------------------------------------
 ; CLOSE [[#]n [,[#]n ...]] -- closes the files named, or all of them. Closing a
 ; file that isn't open is not an error.
@@ -1803,9 +1873,8 @@ FILEREF_SET
           RTS
 ; Reads one line into LINBUF+1 (NUL-terminated). "IE" if already at end of file.
 FILELINE  BSR  FILEREF_SET
-          LDA  #B_FSTAT_NAME
-          SWI2
-          BCS  FL_ERR
+          JSR  FSTATXY
+          LBCS FL_ERR
           PSHS Y
           CMPX ,S++           FILE SIZE - POSITION
           BHI  FL_READ
@@ -1831,7 +1900,7 @@ FL_ERR    JMP  DOSERR
 ; consumed, plus the LF of a CR LF. "IE" if the file ends before the item starts.
 ;------------------------------------------------------------------------------
 FILEITEM  BSR  FILEREF_SET
-FI_SKIP   BSR  FI_GETC
+FI_SKIP   JSR  FI_GETC
           BCS  FI_IE
           CMPA #SPACE
           BEQ  FI_SKIP
@@ -1850,17 +1919,17 @@ FI_PLOOP  CMPA #',
           BEQ  FI_CR
           CMPA #LF
           BEQ  FI_DONE
-          BSR  FI_STORE
-          BSR  FI_GETC
+          JSR  FI_STORE
+          JSR  FI_GETC
           BCC  FI_PLOOP
           BRA  FI_DONE        END OF FILE ENDS THE ITEM
-FI_QUOTED BSR  FI_STORE
-FI_QLOOP  BSR  FI_GETC
+FI_QUOTED JSR  FI_STORE
+FI_QLOOP  JSR  FI_GETC
           BCS  FI_DONE
-          BSR  FI_STORE
+          JSR  FI_STORE
           CMPA #'"
           BNE  FI_QLOOP
-FI_QTAIL  BSR  FI_GETC        DISCARD ANYTHING UP TO THE TERMINATOR
+FI_QTAIL  JSR  FI_GETC        DISCARD ANYTHING UP TO THE TERMINATOR
           BCS  FI_DONE
           CMPA #',
           BEQ  FI_DONE
@@ -1873,15 +1942,16 @@ FI_DONE   CLR  ,X
           STA  LINBUF
           LDX  #LINBUF
           RTS
-FI_CR     BSR  FI_GETC        A CR TAKES A FOLLOWING LF WITH IT
+FI_CR     JSR  FI_GETC        A CR TAKES A FOLLOWING LF WITH IT
           BCS  FI_DONE
           CMPA #LF
           BEQ  FI_DONE
           PSHS X              ANYTHING ELSE: PUT IT BACK (POSITION - 1)
           LDB  FI_REF
-          LDA  #B_FSTAT_NAME
-          SWI2
-          LEAX -1,Y
+          JSR  FSTATXY
+          LEAY -1,Y
+          LDX  #0
+          LDE  #SEEK_SET
           LDB  FI_REF
           LDA  #B_FSEEK_NAME
           SWI2
@@ -1912,10 +1982,19 @@ FILEFN    JSR  LB3E9          FPA0 -> D (FC ERROR IF NEGATIVE)
           LBEQ NO_ERR
           STA  OPMODE
           LDB  5,X
-          LDA  #B_FSTAT_NAME
-          SWI2
+          JSR  FSTATXY
           LBCS FL_ERR
           RTS
+; B = a DOS handle. -> X = the file's size, Y = its position (low 16 bits of the
+; 32-bit values B_FSTAT_NAME reports; files are capped at 64K). Carry set + A =
+; the DOS error if the call fails.
+FSTATXY   LDX  #STATBUF
+          LDA  #B_FSTAT_NAME
+          SWI2
+          BCS  FST_RET
+          LDX  STATBUF+2
+          LDY  STATBUF+6
+FST_RET   RTS
 ; EOF(n): -1 if the file position is at (or past) its end, else 0.
 EOFFN     BSR  FILEFN
           LDA  OPMODE
@@ -2151,6 +2230,9 @@ GP_HAVE   CMPX #0
           LDB  5,X
           STB  FI_REF
           PULS X
+          TFR  X,Y            THE OFFSET IS 32-BIT NOW: X:Y, X = 0
+          LDX  #0
+          LDE  #SEEK_SET
           LDA  #B_FSEEK_NAME
           SWI2
           LBCS DOSERR
@@ -2235,91 +2317,56 @@ MKSFN     JSR  LB143          "TM" IF A STRING
           LDD  V42
           STD  2,X
           JMP  LB69B
+; IN: B = length, X = address of the string (as LB654 returns it -- not NUL-
+; terminated). OUT: FNBUF = it as a NUL-terminated path, left for DOS to parse
+; and upper-case ("BP" if longer than 79 characters). OPENNAME leaves it at that;
+; FMTNAME also gives a name with no dot in its LAST component the extension
+; ".BAS" (what LOAD/SAVE/KILL/NAME want; "NAME." means no extension). Data
+; files opened with OPEN keep exactly the name given. Trashes A, B, X, Y, U.
 ;------------------------------------------------------------------------------
-; IN: B=length, X=address of raw filename characters (as returned by
-; LB654 -- not null-terminated). OUT: FNBUF = an 11-byte space-padded
-; uppercased name: the first 8 characters of the string as the base name,
-; always ".BAS" as the extension (no support for an explicit extension in
-; the typed name -- a documented v1 simplification). Trashes A, B, X, Y.
-;------------------------------------------------------------------------------
-FMTNAME   PSHS X,B
-          LDY  #FNBUF
-          LDA  #SPACE
-FN_CLR    STA  ,Y+
-          CMPY #FNBUF+11
-          BNE  FN_CLR
-          PULS B,X
-          STX  FN_SRC
-          STB  FN_TOTLEN
-          CLR  FN_HASDOT
-          CLR  FN_NAMELEN
+OPENNAME  CMPB #79
+          BLS  ON_LENOK
+          LDB  #32*2          "BP" BAD PATH: TOO LONG
+          JMP  LAC46
+ON_LENOK  LDY  #FNBUF
           TSTB
-          BEQ  FN_EXT         EMPTY INPUT -- NOTHING TO SCAN OR COPY
-FN_SCAN   LDA  ,X+
+          BEQ  ON_TERM
+ON_COPY   LDA  ,X+
+          STA  ,Y+
+          DECB
+          BNE  ON_COPY
+ON_TERM   CLR  ,Y
+          RTS
+FMTNAME   BSR  OPENNAME
+          LDX  #FNBUF
+          LDY  #FNBUF         Y = START OF THE LAST COMPONENT
+FN_SCAN   LDA  ,X
+          BEQ  FN_SCANNED
+          CMPA #'/
+          BNE  FN_NEXT
+          LEAY 1,X
+FN_NEXT   LEAX 1,X
+          BRA  FN_SCAN
+FN_SCANNED
+          PSHS X
+          CMPY ,S++           AN EMPTY LAST COMPONENT ("" OR "DIR/"): LEAVE IT
+          BEQ  FN_DONE
+          TFR  Y,U
+FN_DOT    LDA  ,U+
+          BEQ  FN_ADD         NO DOT: ADD THE DEFAULT EXTENSION
           CMPA #'.
-          BEQ  FN_FOUNDDOT
-          INC  FN_NAMELEN
-          DECB
-          BNE  FN_SCAN
-          BRA  FN_NAMECOPY    REACHED THE END -- NO DOT FOUND
-FN_FOUNDDOT
-          INC  FN_HASDOT
-          STX  FN_EXTSRC      X IS JUST PAST THE DOT ALREADY (LDA ,X+)
-          LDA  FN_TOTLEN
-          SUBA FN_NAMELEN
-          SUBA #1             -1 FOR THE DOT ITSELF
-          STA  FN_EXTLEN
-FN_NAMECOPY
-          LDX  FN_SRC
-          LDA  FN_NAMELEN
-          CMPA #8
-          BLS  FN_NAMEOK
-          LDA  #8
-FN_NAMEOK STA  FN_NAMELEN
-          TSTA
-          BEQ  FN_EXT
-          LDY  #FNBUF
-          LDB  FN_NAMELEN
-FN_NCOPY  LDA  ,X+
-          CMPA #'a
-          BLO  FN_NSTORE
-          CMPA #'z
-          BHI  FN_NSTORE
-          SUBA #$20           LOWERCASE -> UPPERCASE
-FN_NSTORE STA  ,Y+
-          DECB
-          BNE  FN_NCOPY
-FN_EXT    TST  FN_HASDOT
-          BEQ  FN_EXTDEFAULT  NO DOT TYPED -- DEFAULT EXTENSION IS "BAS"
-          LDA  FN_EXTLEN
-          CMPA #3
-          BLS  FN_EXTOK
-          LDA  #3
-FN_EXTOK  STA  FN_EXTLEN
-          TSTA
-          BEQ  FN_DONE        DOT WITH NOTHING AFTER IT -- LEAVE EXT BLANK
-          LDX  FN_EXTSRC
-          LDY  #FNBUF+8
-          LDB  FN_EXTLEN
-FN_ECOPY  LDA  ,X+
-          CMPA #'a
-          BLO  FN_ESTORE
-          CMPA #'z
-          BHI  FN_ESTORE
-          SUBA #$20
-FN_ESTORE STA  ,Y+
-          DECB
-          BNE  FN_ECOPY
-          BRA  FN_DONE
-FN_EXTDEFAULT
-          LDY  #FNBUF+8
-          LDA  #'B
-          STA  ,Y+
-          LDA  #'A
-          STA  ,Y+
-          LDA  #'S
-          STA  ,Y+
+          BNE  FN_DOT
 FN_DONE   RTS
+FN_ADD    LDA  #'.
+          STA  ,X+
+          LDA  #'B
+          STA  ,X+
+          LDA  #'A
+          STA  ,X+
+          LDA  #'S
+          STA  ,X+
+          CLR  ,X
+          RTS
 ;------------------------------------------------------------------------------
 ; IN: D=16-bit unsigned value, Y=destination buffer. OUT: buffer filled
 ; with decimal digits (no leading zeros; "0" for a zero value), null-

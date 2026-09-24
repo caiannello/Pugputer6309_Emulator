@@ -89,15 +89,15 @@ TEST(basic309_load_save_round_trips_a_program_through_disk) {
 
     received.clear();
     type("10 PRINT \"HELLO FROM DISK\"");
-    type("SAVE \"ROUNDTRIP\"");
-    bus.run(3000000);
+    type("SAVE \"ROUNDTRP\"");
+    bus.run(8000000);
     CHECK(received.find("OK") != std::string::npos);
 
     received.clear();
     type("NEW");
-    type("LOAD \"ROUNDTRIP\"");
+    type("LOAD \"ROUNDTRP\"");
     type("LIST");
-    bus.run(4000000);
+    bus.run(12000000);
 
     hd6309_regs_t regs{};
     hd6309_get_regs(bus.cpu(), &regs);

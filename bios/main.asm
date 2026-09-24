@@ -34,20 +34,7 @@ BIOS_IOCTL      EXTERN
 BIOS_NOTIMPL    EXTERN
 BIOS_BLK_READ   EXTERN      ; sdcard.asm
 BIOS_BLK_WRITE  EXTERN
-BIOS_FOPEN_NAME EXTERN
-BIOS_READLINE   EXTERN
-BIOS_WRITELINE  EXTERN
-BIOS_FCLOSE_NAME EXTERN
-BIOS_DIR_FIRST  EXTERN
-BIOS_DIR_NEXT   EXTERN
-BIOS_KILL_NAME  EXTERN
-BIOS_RENAME_NAME EXTERN
-BIOS_FGETC      EXTERN
-BIOS_FPUTC      EXTERN
-BIOS_FREAD      EXTERN
-BIOS_FWRITE     EXTERN
-BIOS_FSEEK_NAME EXTERN
-BIOS_FSTAT_NAME EXTERN
+BIOS_DOS        EXTERN      ; sdcard.asm: every resident-DOS call (codes B_FOPEN_NAME..)
 SD_BOOT_TRY     EXTERN      ; sdcard.asm - tries an SD disk boot; returns
                              ; (falls through to LOADER_START) if none found
 LOADER_START    EXTERN      ; loader.asm - boot prompt entry point
@@ -55,26 +42,15 @@ LOADER_START    EXTERN      ; loader.asm - boot prompt entry point
 ; Exported for use by other modules
 ;------------------------------------------------------------------------------
 JT_IRQ          EXPORT      ; RAM jump table IRQ slot -- serio.asm hooks it
-; RAM vector table for a resident DOS's file API: 4 plain 2-byte
-; addresses (not JMP instructions -- these are JSR'd indirect and
-; expected to RTS back, unlike RAM_JTAB's hardware-vector slots), which
-; dos/dos.asm patches before jumping to BASIC. Same "ROM template copied
-; to RAM at cold boot, patched at runtime" pattern RAM_JTAB/JT_IRQ
-; already uses for UT_ISR -- see sdcard.asm's BIOS_FOPEN_NAME/etc.
-JT_DOS_OPEN      EXPORT
-JT_DOS_READLINE  EXPORT
-JT_DOS_WRITELINE EXPORT
-JT_DOS_CLOSE     EXPORT
-JT_DOS_DIRFIRST  EXPORT
-JT_DOS_DIRNEXT   EXPORT
-JT_DOS_KILL      EXPORT
-JT_DOS_RENAME    EXPORT
-JT_DOS_FGETC     EXPORT
-JT_DOS_FPUTC     EXPORT
-JT_DOS_FREAD     EXPORT
-JT_DOS_FWRITE    EXPORT
-JT_DOS_FSEEK     EXPORT
-JT_DOS_FSTAT     EXPORT
+; RAM vector table for a resident DOS's calls: NUM_DOS_JT plain 2-byte
+; addresses, in function-code order (not JMP instructions -- BIOS_DOS JSRs
+; indirect through them and the routine RTSes back, unlike RAM_JTAB's
+; hardware-vector slots). SD_BOOT_TRY hands the table's address to DOS in X when
+; it jumps there, and dos/dos.asm patches every slot before starting BASIC.
+; Same "default in RAM at cold boot, patched at runtime" pattern RAM_JTAB/
+; JT_IRQ already uses for UT_ISR.
+JT_DOS          EXPORT
+DOSMASK         EXPORT      ; BIOS_DOS scratch byte (sdcard.asm)
 USER_RAM        EXPORT      ; first byte of RAM the BIOS doesn't use
 BC_OK           EXPORT      ; devio.asm's handlers tail-call these to store
 BC_ERR          EXPORT      ; a result into the SWI2 frame before returning
@@ -102,20 +78,8 @@ JT_SW2           RMB  3      ; BIOS call dispatcher
 JT_FIRQ          RMB  3      ; unused, reserved (future VIA/video)
 JT_IRQ           RMB  3      ; shared IRQ -- UART claims this at init
 JT_SWI           RMB  3      ; software breakpoint -- END RAM JUMP TABLE --
-JT_DOS_OPEN      RMB  2      ; BEGIN DOS FILE-API TABLE: B_FOPEN_NAME
-JT_DOS_READLINE  RMB  2      ; B_READLINE
-JT_DOS_WRITELINE RMB  2      ; B_WRITELINE
-JT_DOS_CLOSE     RMB  2      ; B_FCLOSE_NAME
-JT_DOS_DIRFIRST  RMB  2      ; B_DIR_FIRST
-JT_DOS_DIRNEXT   RMB  2      ; B_DIR_NEXT
-JT_DOS_KILL      RMB  2      ; B_KILL_NAME
-JT_DOS_RENAME    RMB  2      ; B_RENAME_NAME
-JT_DOS_FGETC     RMB  2      ; B_FGETC
-JT_DOS_FPUTC     RMB  2      ; B_FPUTC
-JT_DOS_FREAD     RMB  2      ; B_FREAD
-JT_DOS_FWRITE    RMB  2      ; B_FWRITE
-JT_DOS_FSEEK     RMB  2      ; B_FSEEK_NAME
-JT_DOS_FSTAT     RMB  2      ; B_FSTAT_NAME -- END DOS FILE-API TABLE ----
+JT_DOS          RMB  2*NUM_DOS_JT ; DOS call vectors (see BIOS_DOS in sdcard.asm)
+DOSMASK         RMB  1      ; BIOS_DOS scratch: which results the call returns
     ENDSECT
 ;------------------------------------------------------------------------------
 ; Private variables - Section address $0100
@@ -205,7 +169,9 @@ V_SW2       LDA  SWI2_A,S       ; caller's function code
             BLO  SW2_OK
             LDA  #ERR_BADFN
             JMP  BC_ERR
-SW2_OK      LSLA                ; word index into BIOS_TAB
+SW2_OK      CMPA #B_FOPEN_NAME  ; codes from here up are the resident DOS's:
+            LBHS BIOS_DOS       ; one generic handler, not a table entry each
+            LSLA                ; word index into BIOS_TAB
             LDX  #BIOS_TAB
             JMP  [A,X]          ; indexed-indirect, accumulator offset:
                                 ; dispatch straight into the handler
@@ -246,20 +212,6 @@ BIOS_TAB    FDB  BIOS_DQUERY     ; $00 B_DQUERY
             FDB  BIOS_NOTIMPL    ; $10 B_FSEEK
             FDB  BIOS_BLK_READ   ; $11 B_BLK_READ
             FDB  BIOS_BLK_WRITE  ; $12 B_BLK_WRITE
-            FDB  BIOS_FOPEN_NAME  ; $13 B_FOPEN_NAME
-            FDB  BIOS_READLINE    ; $14 B_READLINE
-            FDB  BIOS_WRITELINE   ; $15 B_WRITELINE
-            FDB  BIOS_FCLOSE_NAME ; $16 B_FCLOSE_NAME
-            FDB  BIOS_DIR_FIRST   ; $17 B_DIR_FIRST
-            FDB  BIOS_DIR_NEXT    ; $18 B_DIR_NEXT
-            FDB  BIOS_KILL_NAME   ; $19 B_KILL_NAME
-            FDB  BIOS_RENAME_NAME ; $1A B_RENAME_NAME
-            FDB  BIOS_FGETC       ; $1B B_FGETC
-            FDB  BIOS_FPUTC       ; $1C B_FPUTC
-            FDB  BIOS_FREAD       ; $1D B_FREAD
-            FDB  BIOS_FWRITE      ; $1E B_FWRITE
-            FDB  BIOS_FSEEK_NAME  ; $1F B_FSEEK_NAME
-            FDB  BIOS_FSTAT_NAME  ; $20 B_FSTAT_NAME
 
 ; -----------------------------------------------------------------------------
 ; This ROM template gets copied to RAM_JTAB during cold start (see V_RESET)
@@ -340,7 +292,7 @@ V_RESET     LDMD #$01       ; Enable 6309 native mode
             TFM  X+,Y+
             ; Point every DOS file-API slot at DOS_NOTPRESENT until a
             ; disk-resident DOS patches them (dos/dos.asm)
-            LDX  #JT_DOS_OPEN
+            LDX  #JT_DOS
             LDY  #NUM_DOS_JT
 DJ_FILL     LDD  #DOS_NOTPRESENT
             STD  ,X++

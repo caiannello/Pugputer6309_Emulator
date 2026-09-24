@@ -21,23 +21,37 @@ only BASIC.
 
 | Range          | What |
 |----------------|------|
-| `$04FE-`       | resident DOS (code, variables, five 512-byte file buffers) -- below `$2000` |
-| `$2000`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$20`); its top, `PROGST`, moves as variables are added |
+| `$04FE-$2AC6`  | resident DOS (code, variables, eight 512-byte file buffers) -- below `WORKBASE` |
+| `$3000`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$30`); its top, `PROGST`, moves as variables are added. Must stay above the end of DOS (`dos/dos.lst`). |
 | `PROGST+1`     | start of the BASIC program, then variables, arrays, free memory |
 | `$BFFF`        | fixed top of string space (`TOPRAM_FIXED`) |
 | `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (DOS, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
 | `$F000-$FFFF`  | BIOS ROM |
 
-The ROM window is nearly full (about 570 bytes left after the file I/O work). Growing
+The ROM window is nearly full (about 480 bytes left after the directory work). Growing
 BASIC further means trimming unused Color BASIC code or moving `BASIC.COM` lower.
 
-## Disk commands
+## Disk commands and directories
 
-`LOAD "name"`, `SAVE "name"` (programs are stored as plain text listings, one line per
-program line), `FILES`, `KILL "name"`, `NAME "old" AS "new"`. A name with no dot gets the
-extension `.BAS` for all of these; `"NAME."` (trailing dot) means "no extension".
-Names are 8.3, upper-cased, in the root directory. `KILL`/`NAME` refuse a file that is
-open (`?AO`).
+`LOAD "path"`, `SAVE "path"` (programs are stored as plain text listings, one line per
+program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
+`MKDIR "path"`, `RMDIR "path"`, `CHDIR "path"` (`CHDIR` alone prints the current directory).
+
+- **Paths** use `/` as the separator: `SAVE "GAMES/CHESS"`. A leading `/` means the root,
+  anything else is relative to the current directory (one, system-wide; it starts at the root
+  on every boot). `.` and `..` work: `CHDIR ".."`, `LOAD "../UTIL/TOOLS"`.
+- **Names** are 8.3: at most 8 characters, a dot, at most 3 more; letters are upper-cased for
+  you. A longer name is `?BP` (older versions silently cut it to 8 characters).
+- **Default extension:** `LOAD`/`SAVE`/`KILL`/`NAME` give a name with no dot in its last
+  component the extension `.BAS`; `"NAME."` (trailing dot) means "no extension". (`OPEN` adds
+  nothing -- see below.)
+- `FILES` lists a directory (the current one, or the path's): name, byte size, or `<DIR>`.
+  `NAME "old" AS "new"` renames a file or directory in place (the new name is a single name).
+- `RMDIR` needs an empty directory that isn't the current one (`?DE`, `?AO`). `KILL` a
+  directory is `?IS`; `CHDIR` to a file is `?ND`.
+- `KILL`, `NAME`, `FILES`, `MKDIR`, `RMDIR` and `CHDIR` are ordinary statements you can use
+  in a program. (`LOAD` and `SAVE` still end the running line, as they always did.)
+- `KILL`/`NAME` refuse a file that is open (`?AO`).
 
 ## File I/O statements (GW-BASIC guide, sections 5.2 and 5.3)
 
@@ -97,7 +111,8 @@ LOF(1)                                    file length in bytes
 
 `?NO` file not open, `?FM` bad file mode, `?AO` file already open, `?DN` bad file number,
 `?IE` input past end, `?FD` bad file data, `?NE` file not found, `?FE` file already exists,
-`?IO` I/O error, `?DF` disk full.
+`?IO` I/O error, `?DF` disk full, `?ND` not a directory, `?IS` is a directory, `?DE` directory
+not empty, `?BP` bad name or path (invalid 8.3 name, or a path over 79 characters).
 
 ## Differences from GW-BASIC you will run into
 
@@ -112,14 +127,19 @@ LOF(1)                                    file length in bytes
 
 ## The DOS interface BASIC uses
 
-BASIC talks to the resident DOS only through BIOS `SWI2` calls (`bios/defines.d`,
-implemented in `dos/dos.asm`, reached through the BIOS's `JT_DOS_*` RAM vectors):
-`B_FOPEN_NAME` (modes read / write / append / update), `B_FCLOSE_NAME`, `B_FGETC`,
-`B_FPUTC`, `B_FREAD`, `B_FWRITE`, `B_FSEEK_NAME`, `B_FSTAT_NAME` (size and position),
-`B_READLINE`, `B_WRITELINE`, `B_DIR_FIRST`/`B_DIR_NEXT`, `B_KILL_NAME`, `B_RENAME_NAME`.
-DOS keeps 5 file slots (4 for BASIC's files, one for `LOAD`/`SAVE`), each with its own
-512-byte sector buffer. Files are at most 65535 bytes; seeking and writing past the end
-zero-fills the gap so stale disk data never shows through.
+BASIC talks to the resident DOS only through BIOS `SWI2` calls (function codes `$13`-`$28`
+in `bios/defines.d`, documented there; implemented in `dos/dos.asm`). Every DOS call goes
+through ONE generic BIOS handler that indexes a table of DOS entry points (`JT_DOS`), so a
+new DOS call is a function code, a table entry and an output-mask byte -- no new BIOS
+wrapper. Names are NUL-terminated path strings that DOS parses itself; handles are small
+numbers (files 0-7, directory scans 0-3, separate spaces); sizes and positions are 32-bit
+in the interface (this DOS handles files up to 65535 bytes and returns `ERR_TOOBIG` beyond).
+Calls: open (read / write / append / update), close, getc/putc, read/write, readline/
+writeline, seek (from start / current / end), stat (by handle or by path), flush, kill,
+rename, mkdir, rmdir, chdir, getcwd, opendir/readdir/closedir, and a version query.
+DOS keeps 8 file slots (BASIC uses 4 for its file numbers and one for `LOAD`/`SAVE`), each
+with its own 512-byte sector buffer. Seeking and writing past the end zero-fills the gap so
+stale disk data never shows through, and both FAT copies are kept in sync.
 
 ## Adding a keyword (the part that has gone wrong before)
 
@@ -149,7 +169,10 @@ From `../simulator/build` (after `reinit_disk.bat`): `pugputer_tests` runs every
   boot chain.
 - `test_basic309_load_save_golden.cpp`, `test_basic309_files_kill_name.cpp`,
   `test_basic309_sdboot_golden.cpp` -- `LOAD`/`SAVE`, `FILES`/`KILL`/`NAME`, and the boot itself.
-- `test_dos_file_api.cpp`, `test_dos_stream_api.cpp` -- the DOS file layer called directly.
+- `test_dos_file_api.cpp`, `test_dos_stream_api.cpp`, `test_dos_dirs.cpp` -- the DOS file
+  layer called directly (the last one checks the directory tree on the disk with an
+  independent FAT16 reader, `fat16_reader.hpp`).
+- `test_basic309_dirs.cpp` -- `MKDIR`/`CHDIR`/`RMDIR` and paths in every disk statement.
 
 The disk-backed tests share `disk.img`, so each one deletes the files it uses before and
 after.

@@ -117,49 +117,74 @@ B_BLK_READ  equ  $11        ; X: 16-bit LBA, Y: RAM buffer adrs -> reads
                              ; 512 bytes from the SD device into [Y..Y+511]
 B_BLK_WRITE equ  $12        ; X: 16-bit LBA, Y: RAM buffer adrs -> writes
                              ; [Y..Y+511] to the SD device
-; Resident DOS file calls (dos/dos.asm) -- these indirect through DOS_JTAB
-; (see main.asm), so they fail cleanly with ERR_NOTSUP if no disk-resident
-; DOS ever patched it (e.g. a boot path with no SD card).
-B_FOPEN_NAME  equ $13        ; X: 8.3 filename, 11 bytes fixed, space-padded,
-                             ; no dot (e.g. "BASIC   COM" -- matches a raw
-                             ; FAT16 directory entry name field exactly),
-                             ; E: mode (0=read, 1=write) -> A: fileref
-B_READLINE    equ $14        ; B: fileref, X: dest buf, Y: max len ->
-                             ; X: actual length read (0 = EOF) -- matches
-                             ; B_GET/B_GETS's existing X-for-actual-length
-                             ; convention
-B_WRITELINE   equ $15        ; B: fileref, X: src buf, Y: len -> writes
+; Resident DOS calls (dos/dos.asm, API version DOS_API_VERSION). All of them are
+; reached through ONE generic handler in sdcard.asm (BIOS_DOS), which loads
+; A=E, B=B, X=X, Y=Y from the caller's frame, calls the routine DOS installed in
+; the JT_DOS table (main.asm) for that function code, and hands back carry, A
+; (status, or the call's value where noted) and X/Y where noted. They fail
+; cleanly with ERR_NOTSUP if no disk-resident DOS ever patched the table (e.g. a
+; boot path with no SD card).
+;
+; Names ("path") are NUL-terminated strings in the caller's memory: components
+; separated by "/", a leading "/" meaning the root directory, otherwise relative
+; to the current directory; "." and ".." are understood; each component is an
+; 8.3 name (letters are folded to upper case). Handles are small numbers: file
+; handles 0..7 (DOS_NFILES) and, separately, directory-scan handles 0..3.
+; Sizes and positions are 32-bit in the API (this DOS handles files up to 64KB-1
+; for now: a larger value is ERR_TOOBIG).
+B_FOPEN_NAME  equ $13        ; X: path, E: mode (FOPEN_*) -> A: file handle
+B_READLINE    equ $14        ; B: handle, X: dest buf, Y: max len ->
+                             ; X: actual length read (0 = empty line or EOF).
+                             ; CR, LF and CR LF all end a line.
+B_WRITELINE   equ $15        ; B: handle, X: src buf, Y: len -> writes
                              ; the line plus a trailing CR
-B_FCLOSE_NAME equ $16        ; B: fileref -> finalizes the file
-B_DIR_FIRST   equ $17        ; X: dest buf (16 bytes: 11 name + 1 attr + 4
-                             ; size) -> fills buf with the first live
-                             ; (non-deleted, non-empty-slot) directory
-                             ; entry; carry set = directory has no entries
-B_DIR_NEXT    equ $18        ; same signature/buffer, continues the scan
-                             ; started by B_DIR_FIRST; carry set = no more
-B_KILL_NAME   equ $19        ; X: 8.3 filename -> deletes it
-B_RENAME_NAME equ $1A        ; X: old 8.3 filename, Y: new 8.3 filename ->
-                             ; renames; fails if old is missing or new
-                             ; already exists
+B_FCLOSE_NAME equ $16        ; B: handle -> flushes and finalizes the file
+B_OPENDIR     equ $17        ; X: path of a directory ("" or "." = the current
+                             ; one) -> A: directory-scan handle
+B_READDIR     equ $18        ; B: scan handle, X: dest buf (16 bytes: 11 name +
+                             ; 1 attr + 4 size, big-endian) -> the next live
+                             ; entry ("." and ".." included); carry set +
+                             ; A=ERR_EOF when there are no more
+B_KILL_NAME   equ $19        ; X: path -> deletes the file
+B_RENAME_NAME equ $1A        ; X: old path, Y: the new NAME (a single component,
+                             ; same directory) -> renames a file or directory;
+                             ; fails if old is missing or new already exists
 ; Byte-level access to open DOS files (mode-dependent; see FOPEN_* below).
 ; Each open file has its own sector buffer, so several can be open and
 ; interleaved freely.
-B_FGETC     equ  $1B         ; B: fileref -> A: next byte, or carry set +
+B_FGETC     equ  $1B         ; B: handle -> A: next byte, or carry set +
                              ; A=ERR_EOF at end of file
-B_FPUTC     equ  $1C         ; B: fileref, E: the byte (write/append/update)
-B_FREAD     equ  $1D         ; B: fileref, X: buf, Y: len -> X: bytes actually
+B_FPUTC     equ  $1C         ; B: handle, E: the byte (write/append/update)
+B_FREAD     equ  $1D         ; B: handle, X: buf, Y: len -> X: bytes actually
                              ; read (short only at end of file)
-B_FWRITE    equ  $1E         ; B: fileref, X: buf, Y: len
-B_FSEEK_NAME equ $1F         ; B: fileref, X: new byte position (read or
-                             ; update mode). Positions past the end read as
-                             ; end-of-file; an update-mode write there
+B_FWRITE    equ  $1E         ; B: handle, X: buf, Y: len
+B_FSEEK_NAME equ $1F         ; B: handle, X:Y: 32-bit offset (X = high word),
+                             ; E: whence (SEEK_*) -> X:Y: the new position
+                             ; (read or update mode). Positions past the end
+                             ; read as end-of-file; an update-mode write there
                              ; zero-fills the gap.
-B_FSTAT_NAME equ $20         ; B: fileref -> X: file size in bytes, Y: current
-                             ; byte position
-NUM_BCALLS  equ  $21
-NUM_DOS_JT  equ  B_FSTAT_NAME-B_FOPEN_NAME+1 ; DOS-resident calls (B_FOPEN_NAME
-                             ; through B_FSTAT_NAME): one JT_DOS_* slot each,
-                             ; in main.asm, in call-code order
+B_FSTAT_NAME equ $20         ; B: handle, X: dest buf (16 bytes: size 4,
+                             ; position 4, attr 1, open mode 1, 6 reserved;
+                             ; 32-bit values big-endian)
+B_FFLUSH    equ  $21         ; B: handle (or $FF = every open file): writes out
+                             ; buffered data and updates the directory entry, so
+                             ; the file survives a crash from here on
+B_MKDIR     equ  $22         ; X: path of the new directory
+B_RMDIR     equ  $23         ; X: path -> removes an empty directory
+B_CHDIR     equ  $24         ; X: path -> makes it the current directory
+B_GETCWD    equ  $25         ; X: dest buf, Y: its size -> the current directory
+                             ; as an absolute path ("/" for the root)
+B_CLOSEDIR  equ  $26         ; B: scan handle
+B_STAT      equ  $27         ; X: path, Y: dest buf (same 16 bytes as FSTAT; the
+                             ; position is 0 and the open mode $FF)
+B_DOS_VERSION equ $28        ; -> A: API version (DOS_API_VERSION)
+NUM_BCALLS  equ  $29
+NUM_DOS_JT  equ  NUM_BCALLS-B_FOPEN_NAME ; DOS-resident calls: one JT_DOS slot
+                             ; each (main.asm), in call-code order
+
+DOS_API_VERSION equ $20      ; major*16 + minor: 2.0
+DOS_NFILES  equ  8           ; open files at once (handles 0..7)
+DOS_NDIRS   equ  4           ; directory scans open at once
 
 ; BIOS call status codes (returned in A; carry set on any non-OK status)
 
@@ -168,13 +193,18 @@ ERR_BADFN   equ  $01        ; unknown BIOS function code
 ERR_BADDEV  equ  $02        ; devref/fileref out of range or not registered
 ERR_NOTSUP  equ  $03        ; operation not supported by this device
 ERR_IOERR   equ  $04        ; block IO failed (no card / bad block, etc.)
-ERR_NOTFOUND equ $05        ; B_FOPEN_NAME: file not found (read mode)
+ERR_NOTFOUND equ $05        ; file or directory not found
 ERR_NOSPACE equ  $06        ; B_WRITELINE: disk full (no free clusters)
 ERR_NOSLOT  equ  $07        ; B_FOPEN_NAME: no free open-file slot
 ERR_EXISTS  equ  $08        ; B_RENAME_NAME: target name already exists
 ERR_EOF     equ  $09        ; B_FGETC: no more data in the file
 ERR_ISOPEN  equ  $0A        ; file is already open (open/kill/rename)
 ERR_BADMODE equ  $0B        ; operation not allowed in the file's open mode
+ERR_NOTDIR  equ  $0C        ; a path component (or the target) isn't a directory
+ERR_ISDIR   equ  $0D        ; the path names a directory where a file is needed
+ERR_NOTEMPTY equ $0E        ; B_RMDIR: the directory still has entries
+ERR_BADPATH equ  $0F        ; a name that isn't a valid 8.3 name / too long
+ERR_TOOBIG  equ  $10        ; a size or position beyond what this DOS handles
 
 ; B_FOPEN_NAME mode values
 FOPEN_READ   equ $00        ; must exist; read (and seek) only
@@ -182,6 +212,14 @@ FOPEN_WRITE  equ $01        ; create, or truncate an existing file; write only
 FOPEN_APPEND equ $02        ; create if missing; writes go at the end
 FOPEN_UPDATE equ $03        ; create if missing; read/write/seek in place,
                             ; existing contents kept
+
+; B_FSEEK_NAME whence values
+SEEK_SET    equ  $00        ; offset from the start of the file
+SEEK_CUR    equ  $01        ; offset added to the current position
+SEEK_END    equ  $02        ; offset added to the end of the file
+
+; Directory-entry attribute bits (as in FAT16)
+ATTR_DIR    equ  $10
 
 ; UART ioctl function codes (used with B_IOCTL on F_UART or aliases)
 

@@ -30,39 +30,14 @@ SD_READ_BLOCK   EXPORT
 SD_WRITE_BLOCK  EXPORT
 BIOS_BLK_READ   EXPORT
 BIOS_BLK_WRITE  EXPORT
-BIOS_FOPEN_NAME  EXPORT
-BIOS_READLINE    EXPORT
-BIOS_WRITELINE   EXPORT
-BIOS_FCLOSE_NAME EXPORT
-BIOS_DIR_FIRST   EXPORT
-BIOS_DIR_NEXT    EXPORT
-BIOS_KILL_NAME   EXPORT
-BIOS_RENAME_NAME EXPORT
-BIOS_FGETC       EXPORT
-BIOS_FPUTC       EXPORT
-BIOS_FREAD       EXPORT
-BIOS_FWRITE      EXPORT
-BIOS_FSEEK_NAME  EXPORT
-BIOS_FSTAT_NAME  EXPORT
+BIOS_DOS        EXPORT
 SD_BOOT_TRY     EXPORT
 ;------------------------------------------------------------------------------
 BC_OK       EXTERN          ; main.asm
 BC_ERR      EXTERN
 USER_RAM    EXTERN
-JT_DOS_OPEN      EXTERN     ; main.asm -- DOS file-API table, patched by
-JT_DOS_READLINE  EXTERN     ; dos/dos.asm at boot (defaults to
-JT_DOS_WRITELINE EXTERN     ; DOS_NOTPRESENT if no disk-resident DOS ever
-JT_DOS_CLOSE     EXTERN     ; ran -- see main.asm)
-JT_DOS_DIRFIRST  EXTERN
-JT_DOS_DIRNEXT   EXTERN
-JT_DOS_KILL      EXTERN
-JT_DOS_RENAME    EXTERN
-JT_DOS_FGETC     EXTERN
-JT_DOS_FPUTC     EXTERN
-JT_DOS_FREAD     EXTERN
-JT_DOS_FWRITE    EXTERN
-JT_DOS_FSEEK     EXTERN
-JT_DOS_FSTAT     EXTERN
+JT_DOS         EXTERN     ; main.asm -- DOS call vectors, patched by dos/dos.asm at boot
+DOSMASK        EXTERN     ; (defaulting to DOS_NOTPRESENT if no disk-resident DOS ever ran)
 ;------------------------------------------------------------------------------
     SECT bss
 ;------------------------------------------------------------------------------
@@ -147,187 +122,79 @@ BIOS_BLK_WRITE
 SDBLK_WRERR LDA  #ERR_IOERR
             JMP  BC_ERR
 ;------------------------------------------------------------------------------
-; Resident DOS file-API handlers. Each JSRs indirect through its JT_DOS_*
-; table slot (main.asm) to whatever dos/dos.asm patched in at boot (or
-; DOS_NOTPRESENT's clean-error stub if no disk-resident DOS ever ran) and
-; expects a plain RTS back -- carry set + A=error code on failure. This
-; file (not the callee) owns finishing the SWI2 frame, same reasoning as
-; BIOS_BLK_READ/WRITE above and every other BIOS_* handler: NEVER let the
-; callee itself RTI, since it has no way to know whether it's reached via
-; a bare JSR (no extra stack frame) or something else -- only the handler
-; that's holding the original SWI2 context is allowed to finish it.
+; Resident DOS calls (function codes B_FOPEN_NAME and up), ALL through this one
+; handler. It loads the registers the DOS routine expects from the caller's SWI2
+; frame -- A = the caller's E, B, X, Y (so a "mode", byte or whence goes in E)
+; -- and JSRs the routine's entry in the JT_DOS table (whatever dos/dos.asm
+; patched in at boot, or DOS_NOTPRESENT's clean-error stub if no disk-resident
+; DOS ever ran). The routine is a plain subroutine: carry clear = success, else
+; carry set and A = an ERR_* code. This file (never the callee) finishes the
+; SWI2 frame -- the callee must never RTI, since only the handler holding the
+; original SWI2 context may -- and DOS_OUTMASK below says which results the call
+; returns to the caller: bit 0 = A (a value, e.g. a handle or byte; otherwise A
+; comes back as ERR_OK), bit 1 = X, bit 2 = Y. Registers a call doesn't return
+; are left exactly as the caller had them.
+;
+; Adding a DOS call: give it the next function code in defines.d, one FDB in
+; dos.asm's DOS_ENTRIES, and one byte here -- nothing else changes.
 ;------------------------------------------------------------------------------
-; X=filename (null-terminated 8.3), E=mode (FOPEN_READ/FOPEN_WRITE), from
-; SWI2_X,S/SWI2_E,S. Success: A=fileref (not a status code -- matches
-; BIOS_GETC's existing precedent for a handler whose success value isn't
-; ERR_OK, so this can't tail-call the generic BC_OK).
-;------------------------------------------------------------------------------
-BIOS_FOPEN_NAME
-            LDX  SWI2_X,S
+BIOS_DOS    LDB  SWI2_A,S       ; the function code ...
+            SUBB #B_FOPEN_NAME  ; ... as an index (0..NUM_DOS_JT-1)
+            LDX  #DOS_OUTMASK
+            LDA  B,X
+            STA  >DOSMASK       ; extended: the caller's DP is not ours
+            ASLB
+            LDU  #JT_DOS
+            LEAU B,U            ; U -> this call's slot
             LDA  SWI2_E,S
-            JSR  [JT_DOS_OPEN]
-            BCS  DOSOPEN_ERR
-            STA  SWI2_A,S
-            AIM  #$FE,SWI2_CC,S
-            RTI
-DOSOPEN_ERR STA  SWI2_A,S
-            OIM  #$01,SWI2_CC,S
-            RTI
-;------------------------------------------------------------------------------
-; B=fileref, X=dest buf, Y=max len, from SWI2_B,S/SWI2_X,S/SWI2_Y,S.
-; Success: X=actual length read (0=EOF) -- matches B_GET/B_GETS's existing
-; X-for-actual-length convention, so this can't tail-call BC_OK either.
-;------------------------------------------------------------------------------
-BIOS_READLINE
             LDB  SWI2_B,S
             LDX  SWI2_X,S
             LDY  SWI2_Y,S
-            JSR  [JT_DOS_READLINE]
-            BCS  DOSRD_ERR
+            JSR  [,U]
+            BCS  BDOS_ERR
+            LDB  >DOSMASK
+            BITB #1
+            BNE  BDOS_A
+            CLRA                ; no value: A = ERR_OK
+BDOS_A      STA  SWI2_A,S
+            BITB #2
+            BEQ  BDOS_NOX
             STX  SWI2_X,S
-            AIM  #$FE,SWI2_CC,S
-            RTI
-DOSRD_ERR   STA  SWI2_A,S
-            OIM  #$01,SWI2_CC,S
-            RTI
-;------------------------------------------------------------------------------
-; B=fileref, X=src buf, Y=len, from SWI2_B,S/SWI2_X,S/SWI2_Y,S. Writes the
-; line plus a trailing CR. Plain status result -- BC_OK/BC_ERR both fit.
-;------------------------------------------------------------------------------
-BIOS_WRITELINE
-            LDB  SWI2_B,S
-            LDX  SWI2_X,S
-            LDY  SWI2_Y,S
-            JSR  [JT_DOS_WRITELINE]
-            BCS  DOSWR_ERR
-            JMP  BC_OK
-DOSWR_ERR   JMP  BC_ERR
-;------------------------------------------------------------------------------
-; B=fileref, from SWI2_B,S. Finalizes the file. Plain status result.
-;------------------------------------------------------------------------------
-BIOS_FCLOSE_NAME
-            LDB  SWI2_B,S
-            JSR  [JT_DOS_CLOSE]
-            BCS  DOSCL_ERR
-            JMP  BC_OK
-DOSCL_ERR   JMP  BC_ERR
-;------------------------------------------------------------------------------
-; X=dest buf (16 bytes), from SWI2_X,S. Fills buf with the first live
-; directory entry, or carry set if the directory is empty. Plain status
-; result (the buffer itself is the "return value") -- BC_OK/BC_ERR fit.
-;------------------------------------------------------------------------------
-BIOS_DIR_FIRST
-            LDX  SWI2_X,S
-            JSR  [JT_DOS_DIRFIRST]
-            BCS  DIRFIRST_ERR
-            JMP  BC_OK
-DIRFIRST_ERR JMP  BC_ERR
-;------------------------------------------------------------------------------
-; Same signature as BIOS_DIR_FIRST; continues the scan it started.
-;------------------------------------------------------------------------------
-BIOS_DIR_NEXT
-            LDX  SWI2_X,S
-            JSR  [JT_DOS_DIRNEXT]
-            BCS  DIRNEXT_ERR
-            JMP  BC_OK
-DIRNEXT_ERR JMP  BC_ERR
-;------------------------------------------------------------------------------
-; X=8.3 filename, from SWI2_X,S. Deletes it. Plain status result.
-;------------------------------------------------------------------------------
-BIOS_KILL_NAME
-            LDX  SWI2_X,S
-            JSR  [JT_DOS_KILL]
-            BCS  DOSKILL_ERR
-            JMP  BC_OK
-DOSKILL_ERR JMP  BC_ERR
-;------------------------------------------------------------------------------
-; X=old 8.3 filename, Y=new 8.3 filename, from SWI2_X,S/SWI2_Y,S. Renames.
-; Plain status result.
-;------------------------------------------------------------------------------
-BIOS_RENAME_NAME
-            LDX  SWI2_X,S
-            LDY  SWI2_Y,S
-            JSR  [JT_DOS_RENAME]
-            BCS  DOSREN_ERR
-            JMP  BC_OK
-DOSREN_ERR  JMP  BC_ERR
-;------------------------------------------------------------------------------
-; B=fileref, from SWI2_B,S. Success: A=the byte read (not a status code --
-; same precedent as BIOS_FOPEN_NAME's fileref); at end of file, or on any
-; error: carry set and A=status (ERR_EOF at end of file).
-;------------------------------------------------------------------------------
-BIOS_FGETC
-            LDB  SWI2_B,S
-            JSR  [JT_DOS_FGETC]
-            BCS  DOSGC_ERR
-            STA  SWI2_A,S
-            AIM  #$FE,SWI2_CC,S
-            RTI
-DOSGC_ERR   STA  SWI2_A,S
-            OIM  #$01,SWI2_CC,S
-            RTI
-;------------------------------------------------------------------------------
-; B=fileref, E=the byte, from SWI2_B,S/SWI2_E,S. Plain status result.
-;------------------------------------------------------------------------------
-BIOS_FPUTC
-            LDB  SWI2_B,S
-            LDA  SWI2_E,S
-            JSR  [JT_DOS_FPUTC]
-            BCS  DOSPC_ERR
-            JMP  BC_OK
-DOSPC_ERR   JMP  BC_ERR
-;------------------------------------------------------------------------------
-; B=fileref, X=dest buf, Y=len. Success: X=bytes actually read (fewer than Y
-; only at end of file) -- same X-for-actual-length convention as BIOS_READLINE.
-;------------------------------------------------------------------------------
-BIOS_FREAD
-            LDB  SWI2_B,S
-            LDX  SWI2_X,S
-            LDY  SWI2_Y,S
-            JSR  [JT_DOS_FREAD]
-            BCS  DOSFR_ERR
-            STX  SWI2_X,S
-            AIM  #$FE,SWI2_CC,S
-            RTI
-DOSFR_ERR   STA  SWI2_A,S
-            OIM  #$01,SWI2_CC,S
-            RTI
-;------------------------------------------------------------------------------
-; B=fileref, X=src buf, Y=len. Plain status result.
-;------------------------------------------------------------------------------
-BIOS_FWRITE
-            LDB  SWI2_B,S
-            LDX  SWI2_X,S
-            LDY  SWI2_Y,S
-            JSR  [JT_DOS_FWRITE]
-            BCS  DOSFW_ERR
-            JMP  BC_OK
-DOSFW_ERR   JMP  BC_ERR
-;------------------------------------------------------------------------------
-; B=fileref, X=new byte position. Plain status result.
-;------------------------------------------------------------------------------
-BIOS_FSEEK_NAME
-            LDB  SWI2_B,S
-            LDX  SWI2_X,S
-            JSR  [JT_DOS_FSEEK]
-            BCS  DOSSK_ERR
-            JMP  BC_OK
-DOSSK_ERR   JMP  BC_ERR
-;------------------------------------------------------------------------------
-; B=fileref. Success: X=file size in bytes, Y=current byte position (both
-; returned through the SWI2 frame, like BIOS_READLINE's X).
-;------------------------------------------------------------------------------
-BIOS_FSTAT_NAME
-            LDB  SWI2_B,S
-            JSR  [JT_DOS_FSTAT]
-            BCS  DOSFS_ERR
-            STX  SWI2_X,S
+BDOS_NOX    BITB #4
+            BEQ  BDOS_NOY
             STY  SWI2_Y,S
-            AIM  #$FE,SWI2_CC,S
+BDOS_NOY    AIM  #$FE,SWI2_CC,S
             RTI
-DOSFS_ERR   STA  SWI2_A,S
+BDOS_ERR    STA  SWI2_A,S
             OIM  #$01,SWI2_CC,S
             RTI
+; Results each DOS call returns, in function-code order (see the byte above).
+DOS_OUTMASK FCB  1              ; $13 B_FOPEN_NAME   A = handle
+            FCB  2              ; $14 B_READLINE     X = length
+            FCB  0              ; $15 B_WRITELINE
+            FCB  0              ; $16 B_FCLOSE_NAME
+            FCB  1              ; $17 B_OPENDIR      A = scan handle
+            FCB  0              ; $18 B_READDIR      (the entry is in the buffer)
+            FCB  0              ; $19 B_KILL_NAME
+            FCB  0              ; $1A B_RENAME_NAME
+            FCB  1              ; $1B B_FGETC        A = byte
+            FCB  0              ; $1C B_FPUTC
+            FCB  2              ; $1D B_FREAD        X = bytes read
+            FCB  0              ; $1E B_FWRITE
+            FCB  6              ; $1F B_FSEEK_NAME   X:Y = new position
+            FCB  0              ; $20 B_FSTAT_NAME   (in the buffer)
+            FCB  0              ; $21 B_FFLUSH
+            FCB  0              ; $22 B_MKDIR
+            FCB  0              ; $23 B_RMDIR
+            FCB  0              ; $24 B_CHDIR
+            FCB  0              ; $25 B_GETCWD       (in the buffer)
+            FCB  0              ; $26 B_CLOSEDIR
+            FCB  0              ; $27 B_STAT         (in the buffer)
+            FCB  1              ; $28 B_DOS_VERSION  A = version
+DOS_OUTMASK_END
+    IFNE (DOS_OUTMASK_END-DOS_OUTMASK)-NUM_DOS_JT
+    ERROR "DOS_OUTMASK must have one byte per DOS call (see defines.d)"
+    ENDC
 ;------------------------------------------------------------------------------
 ; See file header. Called from V_RESET, right before its existing
 ; JMP LOADER_START.
@@ -372,6 +239,7 @@ SDBOOT_LOAD LDD  SDBOOT_CNT
             LEAY 512,Y
             BRA  SDBOOT_LOAD
 SDBOOT_GO   LDX  <USER_RAM
+            LDY  #JT_DOS        ; DOS gets its call table's address in Y (no hand-synced constant)
             JMP  ,X             ; hand off to DOS -- never returns
 SDBOOT_NONE RTS                 ; caller falls through to LOADER_START
 ;------------------------------------------------------------------------------
