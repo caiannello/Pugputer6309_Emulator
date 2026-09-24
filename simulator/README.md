@@ -336,10 +336,14 @@ SPI/SD protocol) rather than a simulated SPI/SD command sequence, since
 the real Pugputer6309's SD/SPI transport hardware isn't decided yet
 (bit-banged via a VIA vs. offloaded to an MCU) -- see `bios/sdcard.asm`'s
 file header. Register window (4 bytes; see `bios/defines.d`'s `SD_LBA`/
-`SD_DATA`/`SD_CMDSTA`): a 16-bit LBA register, a streaming data port with
-an auto-incrementing cursor into a 512-byte sector buffer, and a
-command/status register (write = issue read/write block at the current
-LBA; read = busy/card-present bits). Commands complete synchronously
+`SD_DATA`/`SD_CMDSTA`): a 16-bit LBA register (the low word of a 32-bit
+block number; a third command, SETHI, latches the register's value as the
+high word, which stays until changed and is 0 after reset), a streaming
+data port with an auto-incrementing cursor into a 512-byte sector buffer,
+and a command/status register (write = issue read/write block at the
+current LBA; read = busy/card-present bits). The BIOS exposes the 32-bit
+form as `B_BLK_READ32`/`B_BLK_WRITE32` (the older 16-bit calls always use
+high word 0). Commands complete synchronously
 (BUSY is always immediately clear) since there's no real transport timing
 to model yet.
 
@@ -471,6 +475,17 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   refusals (bank 0, uninstalled pages, the stack's bank), RAM-size probing (4 to 256 pages),
   page copy (unaligned, whole page, callers' remapped banks, stack in any bank, interrupt mask
   kept, bad ranges rejected), and the BIOS/DOS memory layout check.
+- `test_dos_bigfiles.cpp` -- 32-bit sizes/positions and block numbers: a 100MB volume with two
+  33MB files (read at offsets across block 65536 and 131072, so the SD device's high address word
+  is used), new files placed beyond block 131072, files past 64KB appended/updated/gap-filled/
+  truncated/deleted, and a full disk failing cleanly without leaks.
+- `test_dos_model.cpp` -- a randomized model-based test: hundreds of random file and directory
+  operations run through DOS and an in-memory model, compared at every step and against the disk
+  (independent reader) for tree, contents, cluster ownership and leaks. Fixed seeds.
+- `test_dos_crash.cpp` -- crash safety: the SD device logs every block write of a scripted run,
+  and every prefix of the log (a power cut at each write) is checked for a consistent volume
+  (no dangling or shared clusters, no garbage directories, completed work intact, no lost
+  clusters between operations).
 - `test_system_bus.cpp` -- RAM fallback outside any mapping, a mapped
   mock `IDevice` intercepting its address window, IRQ-line OR-ing and
   CPU-mask respecting, and devices receiving the exact cycle count

@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "pugputer/device.hpp"
 
@@ -46,6 +47,15 @@ public:
     bool open(const std::string& path);
     bool is_open() const { return file_.is_open(); }
 
+    // Test hook: every block write the CPU makes is appended, in order, to `log`
+    // (nullptr stops logging). Replaying a prefix of the log onto the original
+    // image gives exactly what a power cut between two block writes would leave.
+    struct WriteRecord {
+        uint32_t lba;
+        std::array<uint8_t, kBlockSize> data;
+    };
+    void record_writes(std::vector<WriteRecord>* log) { write_log_ = log; }
+
     // IDevice
     uint8_t read(uint16_t offset) override;
     void write(uint16_t offset, uint8_t value) override;
@@ -58,6 +68,7 @@ private:
     std::array<uint8_t, kBlockSize> buffer_{};
     uint16_t cursor_ = 0;
     bool last_error_ = false;
+    std::vector<WriteRecord>* write_log_ = nullptr;
 
     void do_command(uint8_t cmd);
 };

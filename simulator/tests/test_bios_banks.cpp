@@ -354,9 +354,23 @@ TEST(bios_layout_bios_ram_ends_below_where_dos_is_loaded) {
     CHECK(dos_load > 0);
     CHECK(end_of_vars <= dos_load); // else the BIOS's variables and DOS overlap
 
-    // ... and DOS must end below BASIC's workspace ($3000, WORKBASE in exbasrom309.asm).
-    std::ifstream dos(DOS_BIN_PATH, std::ios::binary | std::ios::ate);
-    CHECK(dos.good());
-    long dos_end = dos_load + static_cast<long>(dos.tellg());
-    CHECK(dos_end <= 0x3000);
+    // ... and DOS (all of it: code, variables and the sector buffers -- DOS_END in
+    // dos.lst's symbol table) must end below BASIC's workspace (WORKBASE in
+    // exbasrom309.lst's).
+    auto symbol = [](const char* lst, const char* name) {
+        std::ifstream f(lst);
+        std::string l;
+        std::regex r(std::string(R"(^\[ *[A-Z]+\] +)") + name + R"( +([0-9A-Fa-f]+) *$)");
+        long v = -1;
+        while (std::getline(f, l)) {
+            std::smatch m;
+            if (std::regex_match(l, m, r)) v = std::stol(m[1].str(), nullptr, 16);
+        }
+        return v;
+    };
+    long dos_end = symbol(DOS_LST_PATH, "DOS_END");
+    long workbase = symbol(EXBASROM309_LST_PATH, "WORKBASE");
+    CHECK(dos_end > 0 && workbase > 0);
+    CHECK(dos_end <= workbase);
+    CHECK(workbase % 0x100 == 0); // it is a direct page
 }

@@ -511,6 +511,6 @@ void run_model(uint32_t seed, int ops) {
 
 } // namespace
 
-TEST(dos_model_random_operations_seed_1) { run_model(1, 100); }
-TEST(dos_model_random_operations_seed_2) { run_model(2, 100); }
-TEST(dos_model_random_operations_seed_3) { run_model(31337, 100); }
+TEST(dos_model_random_operations_seed_1) { run_model(1, 250); }
+TEST(dos_model_random_operations_seed_2) { run_model(2, 250); }
+TEST(dos_model_random_operations_seed_3) { run_model(31337, 250); }

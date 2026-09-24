@@ -25,16 +25,26 @@ struct Fat16Volume {
     uint32_t fat_lba = 0, root_lba = 0, data_lba = 0, clusters = 0;
 
     bool load(const char* path) {
-        std::ifstream f(path, std::ios::binary);
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
         if (!f) return false;
-        img.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+        img.resize(static_cast<size_t>(f.tellg()));
+        f.seekg(0);
+        f.read(reinterpret_cast<char*>(img.data()), static_cast<std::streamsize>(img.size()));
+        return parse();
+    }
+    // The same for an image already in memory (the crash tests build many).
+    bool load_bytes(std::vector<uint8_t> bytes) {
+        img = std::move(bytes);
+        return parse();
+    }
+    bool parse() {
         if (img.size() < 512 || img[510] != 0x55 || img[511] != 0xAA) return false;
         if (u16(11) != 512) return false;
         sec_per_clus = img[13];
         reserved = u16(14);
         nfats = img[16];
         root_entries = u16(17);
-        total_sectors = u16(19);
+        total_sectors = u16(19) ? u16(19) : u32(32); // the 32-bit field when the 16-bit one is 0
         sec_per_fat = u16(22);
         fat_lba = reserved;
         root_lba = reserved + nfats * sec_per_fat;
@@ -44,8 +54,9 @@ struct Fat16Volume {
     }
 
     uint16_t u16(size_t off) const { return static_cast<uint16_t>(img[off] | (img[off + 1] << 8)); }
+    uint32_t u32(size_t off) const { return u16(off) | (static_cast<uint32_t>(u16(off + 2)) << 16); }
     uint16_t fat(uint32_t cluster, int copy = 0) const {
-        return u16((fat_lba + copy * sec_per_fat) * 512 + cluster * 2);
+        return u16((static_cast<size_t>(fat_lba) + copy * sec_per_fat) * 512 + cluster * 2);
     }
     uint32_t cluster_lba(uint32_t c) const { return data_lba + (c - 2) * sec_per_clus; }
 
@@ -89,7 +100,7 @@ struct Fat16Volume {
         std::vector<Entry> out;
         for (uint32_t lba : sectors) {
             for (int i = 0; i < 16; ++i) {
-                const uint8_t* e = &img[lba * 512 + i * 32];
+                const uint8_t* e = &img[static_cast<size_t>(lba) * 512 + i * 32];
                 if (e[0] == 0) return out; // no more entries
                 if (e[0] == 0xE5 || (e[11] & 0x08)) continue;
                 Entry en;
@@ -139,7 +150,7 @@ struct Fat16Volume {
         std::vector<uint8_t> out;
         for (uint16_t c : chain(e.cluster))
             for (uint32_t s = 0; s < sec_per_clus; ++s) {
-                const uint8_t* p = &img[(cluster_lba(c) + s) * 512];
+                const uint8_t* p = &img[(static_cast<size_t>(cluster_lba(c)) + s) * 512];
                 out.insert(out.end(), p, p + 512);
             }
         if (out.size() > e.size) out.resize(e.size);

@@ -63,6 +63,7 @@ endif()
 set(DISK_IMG "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
 set(PUGBIOS_MAP "${CMAKE_CURRENT_SOURCE_DIR}/../../bios/pugbios.map")
 set(BIOS_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/../../bios/defines.d")
+set(DOS_LST "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.lst")
 set(DOS_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.bin")
 if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_sdboot_golden.cpp)
@@ -83,6 +84,8 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_dos_dirs.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_bios_banks.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_dos_model.cpp)
+    list(APPEND PUGPUTER_TEST_SOURCES test_dos_bigfiles.cpp)
+    list(APPEND PUGPUTER_TEST_SOURCES test_dos_crash.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_seqfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_randomfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_dirs.cpp)
@@ -103,6 +106,7 @@ target_compile_definitions(pugputer_tests PRIVATE
     DISK_IMG_PATH="${DISK_IMG}"
     PUGBIOS_MAP_PATH="${PUGBIOS_MAP}"
     BIOS_DEFINES_PATH="${BIOS_DEFINES}"
+    DOS_LST_PATH="${DOS_LST}"
     DOS_BIN_PATH="${DOS_BIN}"
 )
 

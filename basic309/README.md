@@ -21,8 +21,8 @@ only BASIC.
 
 | Range          | What |
 |----------------|------|
-| `$0600-$2BD8`  | resident DOS (code, variables, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE` |
-| `$3000`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$30`); its top, `PROGST`, moves as variables are added. Must stay above the end of DOS (`dos/dos.lst`). |
+| `$0600-$31B9`  | resident DOS (code, variables, a FAT-sector cache, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE`; only its first ~6KB is on disk, the buffers are just RAM |
+| `$3200`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$32`); its top, `PROGST`, moves as variables are added. Must stay above `DOS_END` (`dos/dos.lst`); `test_bios_layout` checks it. |
 | `PROGST+1`     | start of the BASIC program, then variables, arrays, free memory |
 | `$BFFF`        | fixed top of string space (`TOPRAM_FIXED`) |
 | `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (DOS, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
@@ -133,7 +133,7 @@ through ONE generic BIOS handler that indexes a table of DOS entry points (`JT_D
 new DOS call is a function code, a table entry and an output-mask byte -- no new BIOS
 wrapper. Names are NUL-terminated path strings that DOS parses itself; handles are small
 numbers (files 0-7, directory scans 0-3, separate spaces); sizes and positions are 32-bit
-in the interface (this DOS handles files up to 65535 bytes and returns `ERR_TOOBIG` beyond).
+in the interface and in DOS (files run to 4GB, though a FAT16 volume holds at most 2GB; `ERR_TOOBIG` only for a position past 32 bits).
 Calls: open (read / write / append / update), close, getc/putc, read/write, readline/
 writeline, seek (from start / current / end), stat (by handle or by path), flush, kill,
 rename, mkdir, rmdir, chdir, getcwd, opendir/readdir/closedir, and a version query.

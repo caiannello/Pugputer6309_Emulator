@@ -78,7 +78,9 @@ struct DosSession {
         bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
         uart.set_tx_callback([this](uint8_t b) { console += static_cast<char>(b); });
         bus.reset();
-        bus.run(6000000); // BIOS, disk boot, DOS start, BASIC banner and prompt
+        // BIOS, disk boot, DOS start, BASIC banner and prompt -- in slices, so a boot
+        // that finishes early doesn't run out the clock.
+        for (int slice = 0; slice < 60 && console.find("OK") == std::string::npos; ++slice) bus.run(200000);
         if (console.find("OK") == std::string::npos) return false;
         uint8_t* ram = bus.ram();
         for (uint16_t at : {kStub, kStub0}) {

@@ -380,8 +380,14 @@ TEST(dos_dirs_stat_fstat_seek_whence_and_flush) {
     CHECK(r.ok() && r.y == 15);
     r = d.seek32(o.a, bios::FROM_END, 20);
     CHECK(r.ok() && r.y == 1020);
-    CHECK(d.seek32(o.a, bios::FROM_START, 0x10000).carry && d.seek32(o.a, bios::FROM_START, 0x10000).a == bios::ERR_TOOBIG);
-    CHECK(d.seek32(o.a, bios::FROM_CUR, 0xFFFF).carry);                // 1020 + 65535 overflows
+    r = d.seek32(o.a, bios::FROM_START, 0x10000);                     // positions are 32-bit now
+    CHECK(r.ok() && r.x == 1 && r.y == 0);
+    r = d.seek32(o.a, bios::FROM_CUR, 0xFFFF);
+    CHECK(r.ok() && r.x == 1 && r.y == 0xFFFF);
+    r = d.seek32(o.a, bios::FROM_START, 0xFFFFFFFFu);
+    CHECK(r.ok() && r.x == 0xFFFF && r.y == 0xFFFF);
+    CHECK(d.seek32(o.a, bios::FROM_CUR, 1).carry && d.seek32(o.a, bios::FROM_CUR, 1).a == bios::ERR_TOOBIG); // past 32 bits
+    CHECK(d.seek32(o.a, bios::FROM_END, 0xFFFFFFFFu).carry);              // 1000 + 4G-1 overflows
     CHECK(d.seek32(o.a, 9, 0).carry && d.seek32(o.a, 9, 0).a == bios::ERR_BADMODE);
 
     // FSTAT's 16 bytes.

@@ -95,6 +95,7 @@ void SdCardDevice::do_command(uint8_t cmd) {
                                         // any write failure silently
                                         // looked like success forever
         file_.clear();
+        if (write_log_) write_log_->push_back({(static_cast<uint32_t>(lba_hi_) << 16) | lba_, buffer_});
     }
     // cursor_ resets here too (not just on the LBA write above): after a
     // READ command, the CPU consumes the 512 bytes via SD_DATA reads,

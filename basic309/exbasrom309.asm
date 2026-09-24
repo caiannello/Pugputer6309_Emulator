@@ -54,12 +54,12 @@ FM_OUT        equ 2            ; OPEN "O" / FOR OUTPUT
 FM_APP        equ 3            ; OPEN "A" / FOR APPEND
 FM_RND        equ 4            ; OPEN "R" / random access
 
-WORKBASE    equ  $3000         ; base of BASIC's relocated fixed workspace. Must
+WORKBASE    equ  $3200         ; base of BASIC's relocated fixed workspace. Must
                                ; stay a multiple of $100 (it's a direct page) and
                                ; above the top of dos/dos.asm's RAM (code, sector
-                               ; buffers, variables -- see dos/dos.lst's last
-                               ; symbol; $2AC6 with 8 file buffers). DP is derived
-                               ; from this, not hand-typed.
+                               ; buffers, variables -- DOS_END in dos/dos.lst; $31BA
+                               ; with 8 file buffers). test_bios_layout checks it.
+                               ; DP is derived from this, not hand-typed.
 TOPRAM_FIXED equ $BFFF         ; fixed top-of-RAM for BASIC's use (interpreter
                                ; code itself is loaded at $C000, just above)
 
