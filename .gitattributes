@@ -1,0 +1,3 @@
+# Leave line endings exactly as written (the sources on this Windows machine are
+# a mix, and the assembler sources contain non-ASCII bytes in comments).
+* -text

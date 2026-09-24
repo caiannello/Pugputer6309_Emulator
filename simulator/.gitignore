@@ -1,0 +1,4 @@
+build/
+*.obj
+*.pdb
+tests/test_asm/*.bin

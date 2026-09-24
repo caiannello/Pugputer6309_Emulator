@@ -1,0 +1,388 @@
+;------------------------------------------------------------------------------
+; PROJECT: Pugputer 6309 BIOS
+; VERSION: 0.1.0
+;    FILE: main.asm
+;  AUTHOR: CRAIG IANNELLO, PUGBUTT.COM
+;
+; Reset/init, the RAM-resident ISR jump table, the SWI2 BIOS-call dispatcher,
+; a lightweight TRAP/breakpoint fault handler, and the fixed hardware
+; interrupt vector table.
+;------------------------------------------------------------------------------
+    INCLUDE defines.d
+;------------------------------------------------------------------------------
+; Imported from other modules
+;------------------------------------------------------------------------------
+V_NMI           EXTERN      ; time.asm - real-time interrupt (wired direct)
+UT_INIT         EXTERN      ; serio.asm
+UT_PUTS         EXTERN
+S_HEXA          EXTERN      ; helpers.asm
+S_EOL           EXTERN
+DEV_INIT        EXTERN      ; devio.asm
+DEV_STDIO_ALIAS EXTERN
+BIOS_DQUERY     EXTERN
+BIOS_REG_DEV    EXTERN
+BIOS_DEREG_DEV  EXTERN
+BIOS_FOPEN      EXTERN
+BIOS_FCLOSE     EXTERN
+BIOS_PUTC       EXTERN
+BIOS_PUTS       EXTERN
+BIOS_PUT        EXTERN
+BIOS_GETC       EXTERN
+BIOS_GETS       EXTERN
+BIOS_GET        EXTERN
+BIOS_IOCTL      EXTERN
+BIOS_NOTIMPL    EXTERN
+BIOS_BLK_READ   EXTERN      ; sdcard.asm
+BIOS_BLK_WRITE  EXTERN
+BIOS_FOPEN_NAME EXTERN
+BIOS_READLINE   EXTERN
+BIOS_WRITELINE  EXTERN
+BIOS_FCLOSE_NAME EXTERN
+BIOS_DIR_FIRST  EXTERN
+BIOS_DIR_NEXT   EXTERN
+BIOS_KILL_NAME  EXTERN
+BIOS_RENAME_NAME EXTERN
+BIOS_FGETC      EXTERN
+BIOS_FPUTC      EXTERN
+BIOS_FREAD      EXTERN
+BIOS_FWRITE     EXTERN
+BIOS_FSEEK_NAME EXTERN
+BIOS_FSTAT_NAME EXTERN
+SD_BOOT_TRY     EXTERN      ; sdcard.asm - tries an SD disk boot; returns
+                             ; (falls through to LOADER_START) if none found
+LOADER_START    EXTERN      ; loader.asm - boot prompt entry point
+;------------------------------------------------------------------------------
+; Exported for use by other modules
+;------------------------------------------------------------------------------
+JT_IRQ          EXPORT      ; RAM jump table IRQ slot -- serio.asm hooks it
+; RAM vector table for a resident DOS's file API: 4 plain 2-byte
+; addresses (not JMP instructions -- these are JSR'd indirect and
+; expected to RTS back, unlike RAM_JTAB's hardware-vector slots), which
+; dos/dos.asm patches before jumping to BASIC. Same "ROM template copied
+; to RAM at cold boot, patched at runtime" pattern RAM_JTAB/JT_IRQ
+; already uses for UT_ISR -- see sdcard.asm's BIOS_FOPEN_NAME/etc.
+JT_DOS_OPEN      EXPORT
+JT_DOS_READLINE  EXPORT
+JT_DOS_WRITELINE EXPORT
+JT_DOS_CLOSE     EXPORT
+JT_DOS_DIRFIRST  EXPORT
+JT_DOS_DIRNEXT   EXPORT
+JT_DOS_KILL      EXPORT
+JT_DOS_RENAME    EXPORT
+JT_DOS_FGETC     EXPORT
+JT_DOS_FPUTC     EXPORT
+JT_DOS_FREAD     EXPORT
+JT_DOS_FWRITE    EXPORT
+JT_DOS_FSEEK     EXPORT
+JT_DOS_FSTAT     EXPORT
+USER_RAM        EXPORT      ; first byte of RAM the BIOS doesn't use
+BC_OK           EXPORT      ; devio.asm's handlers tail-call these to store
+BC_ERR          EXPORT      ; a result into the SWI2 frame before returning
+RTC_TICKS       EXPORT      ; time.asm's public tick count + its mutex pair
+RTC_TICKS_PRIV  EXPORT
+RTC_MTX         EXPORT
+RTC_SET         EXPORT
+;------------------------------------------------------------------------------
+; Public variables - Section address $0000 (direct page)
+;------------------------------------------------------------------------------
+    SECT ram_start
+USER_RAM        RMB  2      ; start adrs of free RAM not used by the BIOS
+JTAB_ADRS        RMB  2      ; start adrs of the RAM ISR jump table
+RTC_TICKS        RMB  8      ; number of 1/16 sec ticks since poweron
+RTC_TICKS_PRIV   RMB  8
+RTC_MTX          RMB  1      ; mutex for the above (see time.asm)
+RTC_SET          RMB  1
+SBANK_1          RMB  1      ; readable copies of the write-only bank regs
+SBANK_2          RMB  1
+SBANK_3          RMB  1
+RAM_JTAB                     ; BEGIN RAM ISR JUMP TABLE -------------------
+JT_DZINST        RMB  3      ; TRAP: illegal instruction / divide by zero
+JT_SW3           RMB  3      ; unused, reserved
+JT_SW2           RMB  3      ; BIOS call dispatcher
+JT_FIRQ          RMB  3      ; unused, reserved (future VIA/video)
+JT_IRQ           RMB  3      ; shared IRQ -- UART claims this at init
+JT_SWI           RMB  3      ; software breakpoint -- END RAM JUMP TABLE --
+JT_DOS_OPEN      RMB  2      ; BEGIN DOS FILE-API TABLE: B_FOPEN_NAME
+JT_DOS_READLINE  RMB  2      ; B_READLINE
+JT_DOS_WRITELINE RMB  2      ; B_WRITELINE
+JT_DOS_CLOSE     RMB  2      ; B_FCLOSE_NAME
+JT_DOS_DIRFIRST  RMB  2      ; B_DIR_FIRST
+JT_DOS_DIRNEXT   RMB  2      ; B_DIR_NEXT
+JT_DOS_KILL      RMB  2      ; B_KILL_NAME
+JT_DOS_RENAME    RMB  2      ; B_RENAME_NAME
+JT_DOS_FGETC     RMB  2      ; B_FGETC
+JT_DOS_FPUTC     RMB  2      ; B_FPUTC
+JT_DOS_FREAD     RMB  2      ; B_FREAD
+JT_DOS_FWRITE    RMB  2      ; B_FWRITE
+JT_DOS_FSEEK     RMB  2      ; B_FSEEK_NAME
+JT_DOS_FSTAT     RMB  2      ; B_FSTAT_NAME -- END DOS FILE-API TABLE ----
+    ENDSECT
+;------------------------------------------------------------------------------
+; Private variables - Section address $0100
+;------------------------------------------------------------------------------
+    SECT bss
+FAULTBUF        RMB  8      ; scratch for the fault handler's hex PC + EOL
+    ENDSECT
+;------------------------------------------------------------------------------
+; ROM Code - Section address $F000 - $FF00
+;------------------------------------------------------------------------------
+    SECT code
+
+MSG_HELLO   FCC  "Pugputer 6309 BIOS v0.1.0"
+            FCB  LF,CR,0
+; -----------------------------------------------------------------------------
+; Interrupt Service Routines. RESET and NMI are hard-coded in the fixed
+; hardware vector table below and can't be redirected. The rest are jumped
+; to indirectly through RAM_JTAB (copied from ROM_JTAB below at cold start)
+; so other code can hook or replace a handler at runtime: save the existing
+; target from the jump table before overwriting it, and chain to it if the
+; interrupt turns out not to be yours (serio.asm's SNEXTISR does exactly
+; this for IRQ).
+; -----------------------------------------------------------------------------
+
+; TRAP vector: illegal opcode or divide-by-zero. BITMD distinguishes the two
+; (and, as a side effect of testing it, clears the flag) -- see "Using the
+; TRAP Vector" in the 6309 reference.
+
+V_DZINST    BITMD #%01000000    ; MD.6: illegal opcode trap flag
+            LBEQ FAULT_DIV0     ; clear -- wasn't an illegal opcode
+            LDX  #FAULTMSG_ILL
+            LBRA FAULT_COMMON
+FAULT_DIV0  LDX  #FAULTMSG_DIV0
+            LBRA FAULT_COMMON
+
+; Software breakpoint (SWI). Not a debugger -- just reports where and drops
+; back to the boot prompt. A real monitor can replace this vector later.
+
+V_SWI       LDX  #FAULTMSG_SWI
+            ; fall through
+
+FAULTMSG_ILL  FCC  "*** ILLEGAL OPCODE at $"
+              FCB  0
+FAULTMSG_DIV0 FCC  "*** DIVIDE BY ZERO at $"
+              FCB  0
+FAULTMSG_SWI  FCC  "*** BREAKPOINT at $"
+              FCB  0
+
+FAULT_COMMON
+            TFR  X,Y
+            JSR  UT_PUTS
+            LDX  #FAULTBUF
+            LDA  SWI2_PC,S      ; native-mode frame: PC high byte
+            JSR  S_HEXA
+            LDA  SWI2_PC+1,S    ; PC low byte
+            JSR  S_HEXA
+            JSR  S_EOL
+            LDY  #FAULTBUF
+            JSR  UT_PUTS
+            JMP  LOADER_START   ; not resumable -- back to the boot prompt
+
+; Default stubs for the vectors nothing uses yet
+
+V_SW3       RTI             ; SOFTWARE INTERRUPT 3 - unused
+V_FIRQ      RTI             ; FIRQ - unused (future VIA/video)
+V_IRQ_STUB  RTI             ; default IRQ target before UT_INIT installs
+                             ; its own handler
+; -----------------------------------------------------------------------------
+; BIOS call dispatcher (SWI2). See devio.asm's file header and defines.d's
+; SWI2_* equates for the calling convention: every BIOS_* handler reads its
+; arguments from, and writes its result back into, the SWI2 stack frame
+; that S still points at when it's called (SWI2 pushes all registers but
+; does not disable IRQ/FIRQ, so a handler that needs to poll a device is
+; not blocking anything else that services interrupts).
+; -----------------------------------------------------------------------------
+; NOTE (fixed): this dispatcher and BC_OK/BC_ERR below must never JSR into
+; a handler/epilogue and then RTI at the call site -- a JSR pushes its own
+; 2-byte return address *on top of* the SWI2 register frame, so every
+; SWI2_* offset used inside the callee (and inside BC_OK/BC_ERR, which
+; read/write SWI2_A/SWI2_CC directly) would be off by 2 from that point on.
+; Every step here is JMP (never touches the stack) all the way through to
+; BC_OK/BC_ERR, which RTI directly -- so S is exactly what SWI2 left it at
+; for the whole chain, and the SWI2_* offsets used throughout devio.asm's
+; handlers (as documented, unchanged) are correct as written.
+V_SW2       LDA  SWI2_A,S       ; caller's function code
+            CMPA #NUM_BCALLS
+            BLO  SW2_OK
+            LDA  #ERR_BADFN
+            JMP  BC_ERR
+SW2_OK      LSLA                ; word index into BIOS_TAB
+            LDX  #BIOS_TAB
+            JMP  [A,X]          ; indexed-indirect, accumulator offset:
+                                ; dispatch straight into the handler
+
+; Shared epilogues every BIOS_* handler in devio.asm tail-calls (JMP, not
+; JSR) as its last step. Writing into the stack frame is what actually
+; matters here: in native mode RTI restores registers FROM this frame, so a
+; result left only in a live register would simply be discarded.
+
+BC_OK       LDA  #ERR_OK
+            STA  SWI2_A,S
+            AIM  #$FE,SWI2_CC,S
+            RTI
+BC_ERR      STA  SWI2_A,S       ; caller already put the error code in A
+            OIM  #$01,SWI2_CC,S
+            RTI
+
+; Jump table indexed by BIOS function code * 2 (see defines.d B_* equates).
+; Five reserved, filesystem-shaped calls share one "not supported" stub
+; until an SD driver exists to give them meaning.
+
+BIOS_TAB    FDB  BIOS_DQUERY     ; $00 B_DQUERY
+            FDB  BIOS_REG_DEV    ; $01 B_REG_DEV
+            FDB  BIOS_DEREG_DEV  ; $02 B_DEREG_DEV
+            FDB  BIOS_NOTIMPL    ; $03 B_FSTAT
+            FDB  BIOS_NOTIMPL    ; $04 B_FDIR
+            FDB  BIOS_FOPEN      ; $05 B_FOPEN
+            FDB  BIOS_FCLOSE     ; $06 B_FCLOSE
+            FDB  BIOS_NOTIMPL    ; $07 B_FDELETE
+            FDB  BIOS_NOTIMPL    ; $08 B_FMOVE
+            FDB  BIOS_PUTC       ; $09 B_PUTC
+            FDB  BIOS_PUTS       ; $0A B_PUTS
+            FDB  BIOS_PUT        ; $0B B_PUT
+            FDB  BIOS_GETC       ; $0C B_GETC
+            FDB  BIOS_GETS       ; $0D B_GETS
+            FDB  BIOS_GET        ; $0E B_GET
+            FDB  BIOS_IOCTL      ; $0F B_IOCTL
+            FDB  BIOS_NOTIMPL    ; $10 B_FSEEK
+            FDB  BIOS_BLK_READ   ; $11 B_BLK_READ
+            FDB  BIOS_BLK_WRITE  ; $12 B_BLK_WRITE
+            FDB  BIOS_FOPEN_NAME  ; $13 B_FOPEN_NAME
+            FDB  BIOS_READLINE    ; $14 B_READLINE
+            FDB  BIOS_WRITELINE   ; $15 B_WRITELINE
+            FDB  BIOS_FCLOSE_NAME ; $16 B_FCLOSE_NAME
+            FDB  BIOS_DIR_FIRST   ; $17 B_DIR_FIRST
+            FDB  BIOS_DIR_NEXT    ; $18 B_DIR_NEXT
+            FDB  BIOS_KILL_NAME   ; $19 B_KILL_NAME
+            FDB  BIOS_RENAME_NAME ; $1A B_RENAME_NAME
+            FDB  BIOS_FGETC       ; $1B B_FGETC
+            FDB  BIOS_FPUTC       ; $1C B_FPUTC
+            FDB  BIOS_FREAD       ; $1D B_FREAD
+            FDB  BIOS_FWRITE      ; $1E B_FWRITE
+            FDB  BIOS_FSEEK_NAME  ; $1F B_FSEEK_NAME
+            FDB  BIOS_FSTAT_NAME  ; $20 B_FSTAT_NAME
+
+; -----------------------------------------------------------------------------
+; This ROM template gets copied to RAM_JTAB during cold start (see V_RESET)
+; so the vectors it covers can be hooked/replaced at runtime.
+; -----------------------------------------------------------------------------
+ROM_JTAB    JMP  V_DZINST
+            JMP  V_SW3
+            JMP  V_SW2
+            JMP  V_FIRQ
+            JMP  V_IRQ_STUB
+            JMP  V_SWI
+ROM_JTAB_END
+
+; -----------------------------------------------------------------------------
+; ROM template for the DOS file-API table (JT_DOS_OPEN..JT_DOS_CLOSE),
+; copied to RAM alongside ROM_JTAB during cold start. Defaults every slot
+; to a clean "no DOS present" error rather than an address into whatever
+; garbage happens to be in RAM, so LOAD/SAVE fail with a normal BASIC
+; error on any boot path that never runs dos/dos.asm (e.g. the
+; hijack-based basic309_demo) instead of jumping into nowhere. Plain
+; 2-byte addresses, not JMP instructions -- sdcard.asm's handlers JSR
+; indirect through these and expect a normal RTS back (see DOS_NOTPRESENT
+; below, and its handlers' own comments for why this must never RTI).
+; -----------------------------------------------------------------------------
+; (No literal template table any more: V_RESET fills the NUM_DOS_JT slots with
+; a loop, so adding a DOS call only means adding its JT_DOS_* slot -- there is
+; no hand-counted list of FDBs to keep in sync. NUM_DOS_JT comes from the
+; call-code range in defines.d.)
+
+; A plain subroutine (RTS, not RTI/JMP BC_ERR) -- its caller (sdcard.asm's
+; BIOS_FOPEN_NAME/etc.) is what owns the SWI2 frame and must be the only
+; thing that finishes it, exactly like every other BIOS_* handler.
+DOS_NOTPRESENT
+            LDA  #ERR_NOTSUP
+            ORCC #$01
+            RTS
+; -----------------------------------------------------------------------------
+; Reset Vector Entrypoint - Initialize system
+; -----------------------------------------------------------------------------
+V_RESET     LDMD #$01       ; Enable 6309 native mode
+            ; NOTE (fixed): TFR only moves between named registers -- there
+            ; is no immediate-to-register form, so a literal "TFR 0,DP"
+            ; isn't "transfer the constant zero" but assembles with source
+            ; register code $C, one of the 6309's reserved/unused TFR
+            ; codes (see hd6309_core.cpp's get_reg_by_code): that reads
+            ; back as $FFFF, truncated to $FF for the 8-bit DP destination.
+            ; DP silently ended up $FF instead of $00 on every boot as a
+            ; result -- undetected until now because nothing previously
+            ; depended on a direct-page BIOS variable's actual value
+            ; (basic309 sets its own DP explicitly, masking it downstream).
+            LDA  #$00       ; Map RAM physical adrs $000000
+            TFR  A,DP       ; Set direct page to Public vars (A is known $00)
+            STA  MBANK_0    ; ..to CPU adrs $0000
+                             ; (and keep it that way, else things will break.)
+            LDX  #0         ; Zero all RAM the BIOS uses ($0000..EndOfVars),
+            CLR  ,X         ; using the 6309 block-move instruction to
+            LDY  #0         ; replicate that single zeroed byte forward --
+            LDW  #EndOfVars ; about 4x faster than a byte-at-a-time loop.
+            TFM  X,Y+
+            ; Map memory bank registers 1-3 to the first 4 physical pages
+            LDA  #$01       ; Map RAM $004000
+            STA  MBANK_1    ; ..to CPU adrs $4000
+            STA  <SBANK_1   ; keep a readable copy (the register is W/O)
+            LDA  #$02       ; Map RAM $008000
+            STA  MBANK_2    ; ..at CPU adrs $8000
+            STA  <SBANK_2
+            LDA  #$03       ; Map RAM $00C000
+            STA  MBANK_3    ; ..at CPU adrs $C000
+            STA  <SBANK_3
+            LDX  #EndOfVars ; Note the start of free RAM in a public var
+            STX  <USER_RAM
+            LDX  #RAM_JTAB
+            STX  <JTAB_ADRS
+            ; Copy the ISR jump table template to RAM
+            LDX  #ROM_JTAB
+            LDY  #RAM_JTAB
+            LDW  #(ROM_JTAB_END-ROM_JTAB)
+            TFM  X+,Y+
+            ; Point every DOS file-API slot at DOS_NOTPRESENT until a
+            ; disk-resident DOS patches them (dos/dos.asm)
+            LDX  #JT_DOS_OPEN
+            LDY  #NUM_DOS_JT
+DJ_FILL     LDD  #DOS_NOTPRESENT
+            STD  ,X++
+            LEAY -1,Y
+            BNE  DJ_FILL
+            ; Init stack pointer (must be valid before any interrupt, incl.
+            ; NMI, which is non-maskable and could fire immediately)
+            LDS  #STACK_END
+            JSR  DEV_INIT       ; devio.asm: clear device table, add F_NULL
+            JSR  UT_INIT        ; serio.asm: UART + adds F_UART
+            JSR  DEV_STDIO_ALIAS
+            ANDCC #$AF          ; Enable IRQ and FIRQ interrupts
+            LDY  #MSG_HELLO
+            JSR  UT_PUTS
+            JSR  SD_BOOT_TRY    ; tries a disk boot; only returns if none
+                                 ; found (see sdcard.asm)
+            JMP  LOADER_START
+;------------------------------------------------------------------------------
+    ENDSECT
+;------------------------------------------------------------------------------
+; Private variables (system stack) - deliberately the LAST bss content
+; linked (see linker_script / compile order), so EndOfVars marks the true
+; end of all BIOS-reserved RAM across every module's bss.
+;------------------------------------------------------------------------------
+    SECT bss
+STACK       RMB  512
+STACK_END
+EndOfVars
+    ENDSECT
+;------------------------------------------------------------------------------
+; Interrupt vectors
+;------------------------------------------------------------------------------
+    SECT intvect
+            FDB  JT_DZINST  ; $FFF0 TRAP: illegal instruction / div by zero
+            FDB  JT_SW3     ; $FFF2 SWI3
+            FDB  JT_SW2     ; $FFF4 SWI2 (BIOS call)
+            FDB  JT_FIRQ    ; $FFF6 FIRQ
+            FDB  JT_IRQ     ; $FFF8 IRQ
+            FDB  JT_SWI     ; $FFFA SWI
+            FDB  V_NMI      ; $FFFC NMI -- wired directly, not via RAM_JTAB
+            FDB  V_RESET    ; $FFFE RESET -- wired directly, not via RAM_JTAB
+    ENDSECT
+;------------------------------------------------------------------------------
+; End of main.asm
+;------------------------------------------------------------------------------

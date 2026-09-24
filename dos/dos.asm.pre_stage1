@@ -1,0 +1,1051 @@
+;------------------------------------------------------------------------------
+; PROJECT: Pugputer 6309 DOS
+;    FILE: dos.asm
+;
+; Loaded by bios/sdcard.asm's SD_BOOT_TRY from the FAT16 volume's reserved
+; sectors (not ROM -- this is disk payload, assembled to a flat raw binary
+; and written there by simulator/tools/mkdiskimg.cpp) into RAM at ORG below,
+; which must match wherever bios/main.asm's EndOfVars/USER_RAM currently
+; falls (see bios/pugbios.map after a bios rebuild) -- same kind of fixed,
+; hand-verified cross-module constant as loader.asm's RUN_ADRS or
+; basic309's RESVEC.
+;
+; Two jobs, both against the same FAT16 volume (BPB fields parsed once at
+; boot into resident variables both share):
+;
+; 1. Boot-time: find "BASIC.COM" in the root directory, walk its cluster
+;    chain loading it to $C000, jump to basic309's RESVEC.
+; 2. Resident file API for BASIC's LOAD/SAVE: right before jumping to
+;    BASIC, patches bios/main.asm's JT_DOS_OPEN/READLINE/WRITELINE/CLOSE
+;    (a RAM vector table BIOS's SWI2 B_FOPEN_NAME/etc. indirect through --
+;    same pattern serio.asm's UT_INIT already uses for JT_IRQ) with the
+;    DOS_OPEN/READLINE/WRITELINE/CLOSE routines below, so they stay
+;    reachable for as long as BASIC runs. DOS's own RAM footprint sits
+;    entirely below basic309's WORKBASE ($1000), which BASIC never
+;    touches, so nothing needs to relocate for this to work -- DOS simply
+;    never gets overwritten.
+;
+; No command shell, no long filenames, no subdirectories, files capped at
+; 64KB (the on-disk size field is the real 32-bit FAT16 field, but this
+; DOS only ever reads/writes the low 16 bits of it -- more than enough
+; for a BASIC program listing). Assumes 512-byte sectors throughout
+; (mkdiskimg.cpp always uses that).
+;------------------------------------------------------------------------------
+    INCLUDE defines.d
+;------------------------------------------------------------------------------
+    ORG  $04FE          ; MUST match bios/pugbios.map's EndOfVars/USER_RAM
+;------------------------------------------------------------------------------
+BASIC_ENTRY   equ $C042   ; basic309's RESVEC (see basic309/exbasrom309.lst)
+; bios/main.asm's DOS_JTAB slots (see bios/pugbios.map after a bios
+; rebuild) -- fixed, hand-verified constants, same reasoning as
+; BASIC_ENTRY above; DOS can't EXTERN these since it's assembled and
+; linked completely separately from bios/.
+JT_DOS_OPEN      equ $002B
+JT_DOS_READLINE  equ $002D
+JT_DOS_WRITELINE equ $002F
+JT_DOS_CLOSE     equ $0031
+JT_DOS_DIRFIRST  equ $0033
+JT_DOS_DIRNEXT   equ $0035
+JT_DOS_KILL      equ $0037
+JT_DOS_RENAME    equ $0039
+;------------------------------------------------------------------------------
+fslot       STRUCT
+inuse       rmb 1        ; 0 = free
+mode        rmb 1        ; 0 = read, 1 = write
+curclus     rmb 2        ; cluster backing the sector currently in DOSBUF
+cursec      rmb 1        ; 0..SECPERCLUS-1: which sector of curclus
+bufofs      rmb 2        ; read: next unread byte in DOSBUF (512 = reload
+                         ; needed); write: bytes of DOSBUF filled so far
+startclus   rmb 2        ; file's first cluster
+dirlba      rmb 2        ; sector holding this file's directory entry
+dirofs      rmb 2        ; byte offset of the entry within that sector --
+                         ; 2 bytes: with 16 entries/sector, the 9th-16th
+                         ; entry's offset (256-480) doesn't fit in 1 byte
+filesize    rmb 2        ; read mode: total size, low 16 bits
+bytepos     rmb 2        ; bytes consumed (read) or written (write) so far
+            ENDS
+;------------------------------------------------------------------------------
+DOS_START   LDX  #0             ; LBA 0: the boot sector
+            LDY  #DOSBUF
+            JSR  BLKREAD
+
+            ; Pull the BPB fields we need. Each multi-byte field is stored
+            ; little-endian; reading the high byte then the low byte (in
+            ; the opposite order LDD would) reconstructs it correctly into
+            ; D without a byte-swap step.
+            LDA  DOSBUF+13      ; sectors per cluster, offset $0D (1 byte)
+            STA  SECPERCLUS
+            LDA  DOSBUF+15      ; reserved sector count, offset $0E/$0F
+            LDB  DOSBUF+14
+            STD  RESSEC
+            LDA  DOSBUF+16      ; number of FATs, offset $10 (1 byte)
+            STA  NUMFATS
+            LDA  DOSBUF+18      ; root entry count, offset $11/$12
+            LDB  DOSBUF+17
+            STD  ROOTENTCNT
+            LDA  DOSBUF+20      ; total sectors (16-bit), offset $13/$14
+            LDB  DOSBUF+19
+            STD  TOTALSEC
+            LDA  DOSBUF+23      ; sectors per FAT, offset $16/$17
+            LDB  DOSBUF+22
+            STD  SECPERFAT
+
+            ; FATLBA = RESSEC (the first FAT starts right after the
+            ; reserved sectors).
+            LDD  RESSEC
+            STD  FATLBA
+
+            ; ROOTLBA = RESSEC + NUMFATS*SECPERFAT (NUMFATS is always a
+            ; small integer -- 1 or 2 -- so a counted add-loop is simpler
+            ; than a general multiply). The counter lives in memory
+            ; (FATCNT), not in B, since B is also D's low byte and every
+            ; LDD/ADDD/STD below touches it -- a register-based counter
+            ; here would get silently clobbered by the very accumulator
+            ; arithmetic it's supposed to be counting. FATCNT must be set
+            ; up BEFORE reloading D with RESSEC below -- LDA NUMFATS also
+            ; touches D's high byte (A), so doing it after would clobber
+            ; the very accumulator value it's about to start summing into.
+            LDA  NUMFATS
+            STA  FATCNT
+            LDD  RESSEC         ; D = the running total, seeded with RESSEC
+FATLOOP     TST  FATCNT         ; TST, not LDA -- checking the counter must
+            BEQ  FATDONE        ; not touch D (A specifically), since D is
+            ADDD SECPERFAT      ; the running accumulator here
+            DEC  FATCNT
+            BRA  FATLOOP
+FATDONE     STD  ROOTLBA
+
+            ; ROOTDIRSEC = ROOTENTCNT*32/512 = ROOTENTCNT/16 exactly (a
+            ; 32-byte entry, 512-byte sector) -- four right shifts of the
+            ; 16-bit value instead of a divide.
+            LDD  ROOTENTCNT
+            LSRA
+            RORB
+            LSRA
+            RORB
+            LSRA
+            RORB
+            LSRA
+            RORB
+            STD  ROOTDIRSEC
+
+            ; DATALBA = ROOTLBA + ROOTDIRSEC
+            LDD  ROOTLBA
+            ADDD ROOTDIRSEC
+            STD  DATALBA
+
+            ; TOTALCLUS = (TOTALSEC - DATALBA) / SECPERCLUS, via repeated
+            ; subtraction (SECPERCLUS is small; this runs once, at boot --
+            ; simplicity over speed). MAXCLUS = TOTALCLUS+2 (clusters are
+            ; numbered from 2) is ALLOC_CLUSTER's scan bound.
+            CLRA
+            LDB  SECPERCLUS
+            STD  SECPERCLUS16
+            LDD  TOTALSEC
+            SUBD DATALBA
+            STD  TMPD
+            LDD  #0
+            STD  TOTALCLUS
+TCLOOP      LDD  TMPD
+            CMPD SECPERCLUS16
+            BLO  TCDONE
+            SUBD SECPERCLUS16
+            STD  TMPD
+            LDD  TOTALCLUS
+            ADDD #1
+            STD  TOTALCLUS
+            BRA  TCLOOP
+TCDONE      LDD  TOTALCLUS
+            ADDD #2
+            STD  MAXCLUS
+
+            ; Find BASIC.COM and load its cluster chain to $C000.
+            LDX  #BASICNAME
+            JSR  FIND_DIRENT
+            LBCS NOTFOUND
+            LDD  #$C000
+            STD  DESTPTR
+            LDD  FOUND_CLUSTER
+            STD  CURCLUS
+LOADCLUS    LDD  CURCLUS
+            JSR  CLUS_TO_LBA
+            STD  RDLBA
+            LDA  SECPERCLUS
+            STA  MULCNT
+RDCLUSLOOP  TST  MULCNT
+            BEQ  RDCLUS_DONE
+            LDX  RDLBA
+            LDY  DESTPTR
+            JSR  BLKREAD
+            LDD  RDLBA
+            ADDD #1
+            STD  RDLBA
+            LDD  DESTPTR
+            ADDD #512
+            STD  DESTPTR
+            DEC  MULCNT
+            BRA  RDCLUSLOOP
+RDCLUS_DONE
+            LDD  CURCLUS
+            JSR  NEXT_CLUSTER
+            CMPD #$FFF8         ; $FFF8-$FFFF: end of chain
+            BHS  ALLDONE
+            STD  CURCLUS
+            JMP  LOADCLUS
+
+            ; Patch bios/main.asm's DOS_JTAB so LOAD/SAVE can reach the
+            ; resident file API below for as long as BASIC runs, then
+            ; hand off. Never returns.
+ALLDONE     LDX  #DOS_OPEN
+            STX  JT_DOS_OPEN
+            LDX  #DOS_READLINE
+            STX  JT_DOS_READLINE
+            LDX  #DOS_WRITELINE
+            STX  JT_DOS_WRITELINE
+            LDX  #DOS_CLOSE
+            STX  JT_DOS_CLOSE
+            LDX  #DOS_DIR_FIRST
+            STX  JT_DOS_DIRFIRST
+            LDX  #DOS_DIR_NEXT
+            STX  JT_DOS_DIRNEXT
+            LDX  #DOS_KILL
+            STX  JT_DOS_KILL
+            LDX  #DOS_RENAME
+            STX  JT_DOS_RENAME
+            JMP  BASIC_ENTRY
+
+NOTFOUND    LDX  #MSG_NOBASIC
+            LDB  #F_STDOUT
+            LDA  #B_PUTS
+            SWI2
+HANG        BRA  HANG           ; nothing else to do -- not resumable
+;==============================================================================
+; Low-level block/FAT/directory primitives, shared by the boot-time loader
+; above and the resident file API below.
+;==============================================================================
+; X=16-bit LBA, Y=RAM buffer adrs. See bios/defines.d's B_BLK_READ. X/Y are
+; preserved by SWI2 (interrupt entry stacks them, RTI restores them, and
+; the handler never touches those frame slots) so nothing here needs to
+; save/restore them manually. Returns A=status, carry=error, same as SWI2
+; itself always leaves them.
+;------------------------------------------------------------------------------
+BLKREAD     LDA  #B_BLK_READ
+            SWI2
+            RTS
+;------------------------------------------------------------------------------
+BLKWRITE    LDA  #B_BLK_WRITE
+            SWI2
+            RTS
+;------------------------------------------------------------------------------
+; Zeros all 512 bytes of DOSBUF (same replicate-one-byte-forward TFM idiom
+; bios/main.asm's V_RESET uses to zero its own RAM). Trashes A, X, Y, W.
+;------------------------------------------------------------------------------
+CLEAR_DOSBUF
+            LDX  #DOSBUF
+            CLR  ,X
+            LDY  #DOSBUF
+            LDW  #512
+            TFM  X,Y+
+            RTS
+;------------------------------------------------------------------------------
+; IN: D = cluster number. OUT: D = that cluster's starting LBA. Trashes
+; A, B (via the internal MULCNT-style counted loop -- see FATLOOP above
+; for why the counter lives in memory, not a register).
+;------------------------------------------------------------------------------
+CLUS_TO_LBA STD  CTLCLUS
+            SUBD #2
+            STD  TMPD
+            LDA  SECPERCLUS
+            STA  MULCNT
+            LDD  #0
+CTL_LOOP    TST  MULCNT
+            BEQ  CTL_DONE
+            ADDD TMPD
+            DEC  MULCNT
+            BRA  CTL_LOOP
+CTL_DONE    ADDD DATALBA
+            RTS
+;------------------------------------------------------------------------------
+; IN: D = cluster number. OUT: X = pointer into DOSBUF at this cluster's
+; FAT entry (2 bytes, little-endian); FATSECLBA_CUR = the LBA that sector
+; was loaded from (for a caller that wants to modify and write it back).
+; Trashes A, B.
+;------------------------------------------------------------------------------
+LOAD_FAT_ENTRY
+            STD  LFECLUS
+            CLRA
+            LDB  LFECLUS         ; cluster's high byte, zero-extended
+            ADDD FATLBA
+            STD  FATSECLBA_CUR
+            LDA  LFECLUS+1       ; cluster's low byte
+            LDB  #2
+            MUL                  ; D = low_byte*2 = byte offset within sector
+            STD  LFEOFS
+            LDX  FATSECLBA_CUR
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDX  #DOSBUF
+            LDD  LFEOFS
+            LEAX D,X
+            RTS
+;------------------------------------------------------------------------------
+; IN: D = cluster number. OUT: D = next cluster in the chain ($FFF8-$FFFF
+; = end of chain). Trashes A, B, X.
+;------------------------------------------------------------------------------
+NEXT_CLUSTER
+            JSR  LOAD_FAT_ENTRY
+            LDA  1,X             ; FAT entries are little-endian too
+            LDB  ,X
+            RTS
+;------------------------------------------------------------------------------
+; IN: D = cluster to modify. SETVAL (set by the caller first) = the new
+; value. Trashes A, B, X, Y.
+;------------------------------------------------------------------------------
+SET_FAT_ENTRY
+            JSR  LOAD_FAT_ENTRY
+            LDD  SETVAL
+            STB  ,X              ; little-endian, same reasoning as
+            STA  1,X             ; OPEN_WRITE_INIT's cluster/size writes
+            LDX  FATSECLBA_CUR
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            RTS
+;------------------------------------------------------------------------------
+; Scans the FAT for a free (zero) entry, from cluster 2 up to MAXCLUS.
+; OUT: carry clear + D = the free cluster number, its FAT entry already
+; written as end-of-chain ($FFFF) so it's claimed; carry set = disk full.
+; Trashes A, B, X, Y.
+;------------------------------------------------------------------------------
+ALLOC_CLUSTER
+            LDD  #2
+            STD  ACCLUS
+AC_LOOP     LDD  ACCLUS
+            CMPD MAXCLUS
+            BHS  AC_FULL
+            JSR  LOAD_FAT_ENTRY
+            LDA  1,X
+            LDB  ,X
+            BNE  AC_NEXT
+            LDD  #$FFFF          ; both bytes equal -- byte order is moot
+            STD  ,X
+            LDX  FATSECLBA_CUR
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            LDD  ACCLUS
+            ANDCC #$FE
+            RTS
+AC_NEXT     LDD  ACCLUS
+            ADDD #1
+            STD  ACCLUS
+            BRA  AC_LOOP
+AC_FULL     ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: D = starting cluster. Walks the chain, zeroing every FAT entry
+; (freeing it). Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FREE_CHAIN  STD  FCCLUS
+FC_LOOP     LDD  FCCLUS
+            CMPD #$FFF8
+            BHS  FC_DONE
+            JSR  LOAD_FAT_ENTRY
+            LDA  1,X
+            LDB  ,X
+            STD  FCNEXT
+            LDD  #0
+            STD  ,X
+            LDX  FATSECLBA_CUR
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            LDD  FCNEXT
+            STD  FCCLUS
+            BRA  FC_LOOP
+FC_DONE     RTS
+;------------------------------------------------------------------------------
+; IN: A = slot index (0-3). OUT: X = that slot's base address. Trashes
+; A, B, D.
+;------------------------------------------------------------------------------
+SLOT_ADDR   TFR  A,B
+            LDA  #sizeof{fslot}
+            MUL
+            LDX  #FSLOTS
+            LEAX D,X
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = pointer to an 11-byte name (space-padded 8.3, no dot). OUT:
+; carry clear if found (FOUND_LBA/FOUND_OFS/FOUND_CLUSTER/FOUND_SIZE set);
+; carry set if not found. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FIND_DIRENT STX  FDNAME
+            LDD  ROOTLBA
+            STD  FDLBA
+            LDD  ROOTDIRSEC
+            STD  FDSECLEFT
+FD_SECLOOP  LDD  FDSECLEFT
+            BEQ  FD_NOTFOUND
+            LDX  FDLBA
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDX  #DOSBUF
+            LDB  #16
+FD_ENTLOOP  PSHS B,X
+            LDB  #11
+            LDY  FDNAME
+FD_CMP      LDA  ,X+
+            CMPA ,Y+
+            BNE  FD_NOMATCH
+            DECB
+            BNE  FD_CMP
+            PULS B,X             ; X = start of this 32-byte entry
+            LDD  FDLBA
+            STD  FOUND_LBA
+            TFR  X,D
+            SUBD #DOSBUF
+            STD  FOUND_OFS       ; 0..480 -- doesn't fit in 1 byte (16
+                                 ; entries/sector, entry 9+ is >= 256)
+            LDA  27,X
+            LDB  26,X
+            STD  FOUND_CLUSTER
+            LDA  29,X
+            LDB  28,X
+            STD  FOUND_SIZE
+            ANDCC #$FE
+            RTS
+FD_NOMATCH  PULS B,X
+            LEAX 32,X
+            DECB
+            BNE  FD_ENTLOOP
+            LDD  FDLBA
+            ADDD #1
+            STD  FDLBA
+            LDD  FDSECLEFT
+            SUBD #1
+            STD  FDSECLEFT
+            BRA  FD_SECLOOP
+FD_NOTFOUND ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; Scans the root directory for a free entry (first byte $00=never used or
+; $E5=deleted). OUT: carry clear + FOUND_LBA/FOUND_OFS set; carry set if
+; the root directory is completely full. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FIND_FREE_DIRENT
+            LDD  ROOTLBA
+            STD  FDLBA
+            LDD  ROOTDIRSEC
+            STD  FDSECLEFT
+FFD_SECLOOP LDD  FDSECLEFT
+            BEQ  FD_NOTFOUND     ; reuse FIND_DIRENT's not-found exit
+            LDX  FDLBA
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDX  #DOSBUF
+            LDB  #16
+FFD_ENTLOOP LDA  ,X
+            BEQ  FFD_GOTIT
+            CMPA #$E5
+            BEQ  FFD_GOTIT
+            LEAX 32,X
+            DECB
+            BNE  FFD_ENTLOOP
+            LDD  FDLBA
+            ADDD #1
+            STD  FDLBA
+            LDD  FDSECLEFT
+            SUBD #1
+            STD  FDSECLEFT
+            BRA  FFD_SECLOOP
+FFD_GOTIT   LDD  FDLBA
+            STD  FOUND_LBA
+            TFR  X,D
+            SUBD #DOSBUF
+            STD  FOUND_OFS
+            ANDCC #$FE
+            RTS
+;==============================================================================
+; Resident file API -- see DOS_JTAB patching in ALLDONE above. Each of
+; these is a plain subroutine (RTS, carry=error), called by
+; bios/sdcard.asm's BIOS_FOPEN_NAME/BIOS_READLINE/BIOS_WRITELINE/
+; BIOS_FCLOSE_NAME, which own finishing the SWI2 response.
+;==============================================================================
+; IN: X = 11-byte 8.3 filename, A = mode (FOPEN_READ/FOPEN_WRITE).
+; OUT: carry clear + A = fileref (0-3); carry set + A = error code.
+;------------------------------------------------------------------------------
+DOS_OPEN    STX  OPEN_NAME
+            STA  OPEN_MODE
+            CLR  OPEN_SLOTIDX
+OPEN_FINDSLOT
+            LDA  OPEN_SLOTIDX
+            CMPA #4
+            BLO  OPEN_CHECKSLOT
+            LDA  #ERR_NOSLOT
+            ORCC #1
+            RTS
+OPEN_CHECKSLOT
+            JSR  SLOT_ADDR
+            TST  fslot.inuse,X
+            BEQ  OPEN_GOTSLOT
+            INC  OPEN_SLOTIDX
+            BRA  OPEN_FINDSLOT
+OPEN_GOTSLOT
+            STX  OPEN_SLOTPTR
+            LDX  OPEN_NAME
+            JSR  FIND_DIRENT
+            BCC  OPEN_FOUND
+            LDA  OPEN_MODE
+            BEQ  OPEN_NOTFOUND_READ
+            JSR  FIND_FREE_DIRENT
+            BCS  OPEN_NOSPACE
+            LDD  #0
+            STD  FOUND_CLUSTER   ; no old chain to free -- brand new file
+            BRA  OPEN_WRITE_INIT
+OPEN_NOTFOUND_READ
+            LDA  #ERR_NOTFOUND
+            ORCC #1
+            RTS
+OPEN_NOSPACE
+            LDA  #ERR_NOSPACE
+            ORCC #1
+            RTS
+OPEN_FOUND  LDA  OPEN_MODE
+            BEQ  OPEN_READ_INIT
+            LDD  FOUND_CLUSTER
+            BEQ  OPEN_WRITE_INIT ; cluster 0/1 never valid -- an empty
+                                 ; existing entry has nothing to free
+            JSR  FREE_CHAIN
+OPEN_WRITE_INIT
+            JSR  ALLOC_CLUSTER
+            BCS  OPEN_NOSPACE
+            STD  ALLOCTMP
+            LDX  FOUND_LBA
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDD  FOUND_OFS
+            LDX  #DOSBUF
+            LEAX D,X              ; X = this entry's start within DOSBUF
+            LDY  OPEN_NAME
+            LDB  #11
+OW_COPYNAME LDA  ,Y+
+            STA  ,X+
+            DECB
+            BNE  OW_COPYNAME
+            LDA  #$20              ; ARCHIVE attribute, entry offset 11;
+            STA  ,X                ; X sits there now (11 bytes copied)
+            ; Cluster/size fields are little-endian (real FAT16 fields,
+            ; matching FIND_DIRENT's read and mkdiskimg.cpp's own writer)
+            ; -- STB then STA, not STD, since STD stores big-endian.
+            LDD  ALLOCTMP
+            STB  15,X               ; cluster low byte, abs offset 26 = 11+15
+            STA  16,X               ; cluster high byte, abs offset 27
+            LDD  #0
+            STD  17,X               ; size low word, abs offset 28 (all
+                                    ; zero -- byte order is moot here)
+            STD  19,X               ; size high word, abs offset 30
+            LDX  FOUND_LBA
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            ; DOSBUF still holds the just-written directory sector; the
+            ; freshly-allocated data cluster has no real content on disk
+            ; yet, and FILE_PUTBYTE only pokes the bytes it's actually
+            ; given -- without this, whatever's left over in DOSBUF's
+            ; unpoked tail (the directory sector's own bytes) would get
+            ; written out as part of the file's data.
+            JSR  CLEAR_DOSBUF
+            LDX  OPEN_SLOTPTR
+            LDA  #1
+            STA  fslot.inuse,X
+            LDA  #1
+            STA  fslot.mode,X
+            LDD  ALLOCTMP
+            STD  fslot.curclus,X
+            STD  fslot.startclus,X
+            CLR  fslot.cursec,X
+            LDD  #0
+            STD  fslot.bufofs,X
+            STD  fslot.bytepos,X
+            LDD  FOUND_LBA
+            STD  fslot.dirlba,X
+            LDD  FOUND_OFS
+            STD  fslot.dirofs,X
+            LDA  OPEN_SLOTIDX
+            ANDCC #$FE
+            RTS
+OPEN_READ_INIT
+            LDX  OPEN_SLOTPTR
+            LDA  #1
+            STA  fslot.inuse,X
+            LDA  #0
+            STA  fslot.mode,X
+            LDD  FOUND_CLUSTER
+            STD  fslot.curclus,X
+            STD  fslot.startclus,X
+            ; FGB_LOADSECTOR always increments cursec before loading (it's
+            ; designed for "advance to the next sector," reused here for
+            ; the initial load too) -- starting at $FF makes that first
+            ; increment wrap to 0, landing on the cluster's real first
+            ; sector instead of skipping straight to its second.
+            LDA  #$FF
+            STA  fslot.cursec,X
+            LDD  #512             ; sentinel: no sector cached yet
+            STD  fslot.bufofs,X
+            LDD  #0
+            STD  fslot.bytepos,X
+            LDD  FOUND_SIZE
+            STD  fslot.filesize,X
+            LDA  OPEN_SLOTIDX
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; IN: B = fileref, X = dest buf, Y = max len. OUT: carry clear + X =
+; actual length read (0 = EOF); carry set + A = error. Reads a line,
+; stopping at CR (excluded) or EOF or a full buffer.
+;------------------------------------------------------------------------------
+DOS_READLINE
+            STX  RL_DEST
+            STY  RL_MAX
+            TFR  B,A
+            JSR  SLOT_ADDR
+            STX  CUR_SLOT
+            LDD  #0
+            STD  RL_COUNT
+RL_LOOP     LDD  RL_COUNT
+            CMPD RL_MAX
+            BHS  RL_DONE
+            JSR  FILE_GETBYTE
+            BCS  RL_DONE
+            CMPA #CR
+            BEQ  RL_DONE
+            PSHS A                ; save the byte -- LDD RL_COUNT below
+            LDX  RL_DEST          ; would otherwise clobber A (D = A:B)
+            LDD  RL_COUNT
+            LEAX D,X
+            PULS A
+            STA  ,X
+            LDD  RL_COUNT
+            ADDD #1
+            STD  RL_COUNT
+            BRA  RL_LOOP
+RL_DONE     LDX  RL_COUNT
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; IN: B = fileref, X = src buf, Y = len. OUT: carry clear on success.
+; Writes Y bytes from the buffer plus a trailing CR.
+;------------------------------------------------------------------------------
+DOS_WRITELINE
+            STX  WL_SRC
+            STY  WL_LEN
+            TFR  B,A
+            JSR  SLOT_ADDR
+            STX  CUR_SLOT
+            LDD  #0
+            STD  WL_I
+WL_LOOP     LDD  WL_I
+            CMPD WL_LEN
+            BHS  WL_DOCR
+            LDX  WL_SRC
+            LDD  WL_I
+            LEAX D,X
+            LDA  ,X
+            JSR  FILE_PUTBYTE
+            LDD  WL_I
+            ADDD #1
+            STD  WL_I
+            BRA  WL_LOOP
+WL_DOCR     LDA  #CR
+            JSR  FILE_PUTBYTE
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; IN: B = fileref. Finalizes: write mode flushes any partial sector,
+; marks the last cluster end-of-chain, and writes the final size into the
+; directory entry. Read mode just frees the slot. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+DOS_CLOSE   TFR  B,A
+            JSR  SLOT_ADDR
+            STX  CUR_SLOT
+            LDA  fslot.mode,X
+            BEQ  DC_READMODE
+            LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            BEQ  DC_NOFLUSH
+            JSR  CLUS_TO_LBA_CURSLOT
+            STD  FGBTMP
+            LDX  FGBTMP
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+DC_NOFLUSH  LDD  #$FFFF
+            STD  SETVAL
+            LDX  CUR_SLOT
+            LDD  fslot.curclus,X
+            JSR  SET_FAT_ENTRY
+            LDX  CUR_SLOT
+            LDD  fslot.dirlba,X
+            STD  FGBTMP
+            LDD  fslot.dirofs,X
+            STD  DC_DIROFS
+            LDX  FGBTMP
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDX  CUR_SLOT
+            LDD  fslot.bytepos,X
+            STD  DC_SIZE
+            LDD  DC_DIROFS
+            LDX  #DOSBUF
+            LEAX D,X
+            LEAX 28,X            ; size field, entry offset 28
+            LDD  DC_SIZE          ; little-endian, same reasoning as
+            STB  ,X               ; OPEN_WRITE_INIT's cluster/size writes
+            STA  1,X
+            LDX  FGBTMP
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+DC_READMODE LDX  CUR_SLOT
+            CLR  fslot.inuse,X
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = destination 16-byte buffer (11 name + 1 attr + 4 size). OUT:
+; carry clear + buffer filled with the first live (non-deleted) directory
+; entry; carry set = the directory has no entries at all. Trashes A, B, D,
+; X, Y.
+;------------------------------------------------------------------------------
+DOS_DIR_FIRST
+            STX  DIRDEST
+            LDD  ROOTLBA
+            STD  DIRLBA_CUR
+            LDD  ROOTDIRSEC
+            STD  DIRSECLEFT
+            CLR  DIRENTIDX
+            BRA  DDS_LOADSEC
+;------------------------------------------------------------------------------
+; Same signature as DOS_DIR_FIRST; continues the scan it started (resuming
+; from DIRLBA_CUR/DIRSECLEFT/DIRENTIDX, left where the previous call
+; stopped). Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+DOS_DIR_NEXT
+            STX  DIRDEST
+DDS_LOADSEC LDD  DIRSECLEFT
+            BEQ  DDS_EOF
+            LDX  DIRLBA_CUR
+            LDY  #DOSBUF
+            JSR  BLKREAD
+DDS_ENTLOOP LDB  DIRENTIDX
+            CMPB #16
+            BLO  DDS_CHECKENT
+            LDD  DIRLBA_CUR
+            ADDD #1
+            STD  DIRLBA_CUR
+            LDD  DIRSECLEFT
+            SUBD #1
+            STD  DIRSECLEFT
+            CLR  DIRENTIDX
+            BRA  DDS_LOADSEC
+DDS_CHECKENT
+            LDB  DIRENTIDX
+            LDA  #32
+            MUL                  ; D = DIRENTIDX*32 (max 15*32=480, fits D)
+            LDX  #DOSBUF
+            LEAX D,X             ; X = this entry's address
+            LDA  ,X
+            BEQ  DDS_EOF         ; $00 -- never used, and everything after
+                                 ; it is too (compact-directory convention)
+            INC  DIRENTIDX       ; advance for the NEXT call regardless
+            CMPA #$E5
+            BEQ  DDS_ENTLOOP     ; deleted -- skip, try the next one
+            LDY  DIRDEST
+            LDB  #11
+DDS_CPNAME  LDA  ,X+
+            STA  ,Y+
+            DECB
+            BNE  DDS_CPNAME      ; X now at offset 11 (attribute byte)
+            LDA  ,X
+            STA  ,Y+             ; attribute
+            LEAX 17,X            ; 11+17=28, the size field
+            LDA  ,X+
+            STA  ,Y+
+            LDA  ,X+
+            STA  ,Y+
+            LDA  ,X+
+            STA  ,Y+
+            LDA  ,X
+            STA  ,Y
+            ANDCC #$FE
+            RTS
+DDS_EOF     ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = 11-byte 8.3 filename. Frees its cluster chain (if any) and marks
+; its directory entry deleted ($E5). OUT: carry clear = deleted; carry set
+; + A=ERR_NOTFOUND. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+DOS_KILL    JSR  FIND_DIRENT
+            BCS  DK_NOTFOUND
+            LDD  FOUND_CLUSTER
+            BEQ  DK_MARKDEL      ; cluster 0 -- empty file, nothing to free
+            JSR  FREE_CHAIN
+DK_MARKDEL  LDX  FOUND_LBA
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDD  FOUND_OFS
+            LDX  #DOSBUF
+            LEAX D,X
+            LDA  #$E5
+            STA  ,X
+            LDX  FOUND_LBA
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            ANDCC #$FE
+            RTS
+DK_NOTFOUND LDA  #ERR_NOTFOUND
+            ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; IN: X = 11-byte OLD 8.3 filename, Y = 11-byte NEW 8.3 filename. OUT:
+; carry clear = renamed; carry set + A=ERR_NOTFOUND (old doesn't exist) or
+; A=ERR_EXISTS (new name is already taken). Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+DOS_RENAME  STY  RENAME_NEW
+            JSR  FIND_DIRENT     ; X = old name -- must already exist
+            BCS  DR_NOTFOUND
+            LDD  FOUND_LBA
+            STD  DR_OLDLBA
+            LDD  FOUND_OFS
+            STD  DR_OLDOFS
+            LDX  RENAME_NEW
+            JSR  FIND_DIRENT     ; does the NEW name already exist?
+            BCC  DR_EXISTS       ; found -- refuse to collide
+            LDX  DR_OLDLBA
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDD  DR_OLDOFS
+            LDX  #DOSBUF
+            LEAX D,X
+            LDY  RENAME_NEW
+            LDB  #11
+DR_COPYNAME LDA  ,Y+
+            STA  ,X+
+            DECB
+            BNE  DR_COPYNAME
+            LDX  DR_OLDLBA
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            ANDCC #$FE
+            RTS
+DR_NOTFOUND LDA  #ERR_NOTFOUND
+            ORCC #1
+            RTS
+DR_EXISTS   LDA  #ERR_EXISTS
+            ORCC #1
+            RTS
+;------------------------------------------------------------------------------
+; CUR_SLOT's curclus/cursec -> D = that sector's LBA. Trashes A, B, X.
+;------------------------------------------------------------------------------
+CLUS_TO_LBA_CURSLOT
+            LDX  CUR_SLOT
+            LDD  fslot.curclus,X
+            JSR  CLUS_TO_LBA
+            STD  FGBTMP
+            LDX  CUR_SLOT
+            CLRA
+            LDB  fslot.cursec,X
+            ADDD FGBTMP
+            RTS
+;------------------------------------------------------------------------------
+; Reads the next byte from CUR_SLOT's file. OUT: carry clear + A = byte;
+; carry set = EOF. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FILE_GETBYTE
+            LDX  CUR_SLOT
+            LDD  fslot.bytepos,X
+            CMPD fslot.filesize,X
+            BLO  FGB_OK
+            ORCC #1
+            RTS
+FGB_OK      LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            CMPD #512
+            BLO  FGB_HAVEBUF
+            JSR  FGB_LOADSECTOR
+FGB_HAVEBUF LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            LDX  #DOSBUF
+            LEAX D,X
+            LDA  ,X
+            PSHS A
+            LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            ADDD #1
+            STD  fslot.bufofs,X
+            LDD  fslot.bytepos,X
+            ADDD #1
+            STD  fslot.bytepos,X
+            PULS A
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+; Advances CUR_SLOT to the next sector of its file (crossing into a new
+; cluster via the FAT if needed) and loads it into DOSBUF, resetting
+; bufofs to 0. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FGB_LOADSECTOR
+            LDX  CUR_SLOT
+            LDA  fslot.cursec,X
+            INCA
+            CMPA SECPERCLUS
+            BLO  FGBL_SAMECLUS
+            LDX  CUR_SLOT
+            LDD  fslot.curclus,X
+            JSR  NEXT_CLUSTER
+            LDX  CUR_SLOT
+            STD  fslot.curclus,X
+            CLRA
+            STA  fslot.cursec,X
+            BRA  FGBL_READ
+FGBL_SAMECLUS
+            LDX  CUR_SLOT
+            STA  fslot.cursec,X
+FGBL_READ   JSR  CLUS_TO_LBA_CURSLOT
+            PSHS D                ; D (the LBA) -> X, via the stack (6809
+            PULS X                ; has no direct D-to-X transfer)
+            LDY  #DOSBUF
+            JSR  BLKREAD
+            LDX  CUR_SLOT
+            LDD  #0
+            STD  fslot.bufofs,X
+            RTS
+;------------------------------------------------------------------------------
+; Writes byte in A to CUR_SLOT's file, flushing/advancing to a new sector
+; or cluster as needed. Trashes A, B, D, X, Y.
+;------------------------------------------------------------------------------
+FILE_PUTBYTE
+            PSHS A
+            LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            CMPD #512
+            BLO  FPB_HAVEROOM
+            JSR  FPB_FLUSH_AND_ADVANCE
+FPB_HAVEROOM
+            LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            LDX  #DOSBUF
+            LEAX D,X
+            PULS A
+            STA  ,X
+            LDX  CUR_SLOT
+            LDD  fslot.bufofs,X
+            ADDD #1
+            STD  fslot.bufofs,X
+            LDD  fslot.bytepos,X
+            ADDD #1
+            STD  fslot.bytepos,X
+            RTS
+;------------------------------------------------------------------------------
+FPB_FLUSH_AND_ADVANCE
+            JSR  CLUS_TO_LBA_CURSLOT
+            PSHS D
+            PULS X
+            LDY  #DOSBUF
+            JSR  BLKWRITE
+            LDX  CUR_SLOT
+            LDA  fslot.cursec,X
+            INCA
+            CMPA SECPERCLUS
+            BLO  FPBA_SAMECLUS
+            JSR  ALLOC_CLUSTER
+            BCS  FPBA_FULL
+            STD  ALLOCTMP2
+            STD  SETVAL
+            LDX  CUR_SLOT
+            LDD  fslot.curclus,X
+            JSR  SET_FAT_ENTRY
+            LDX  CUR_SLOT
+            LDD  ALLOCTMP2
+            STD  fslot.curclus,X
+            CLRA
+            STA  fslot.cursec,X
+            BRA  FPBA_DONE
+FPBA_SAMECLUS
+            LDX  CUR_SLOT
+            STA  fslot.cursec,X
+FPBA_DONE   LDX  CUR_SLOT
+            LDD  #0
+            STD  fslot.bufofs,X
+            JSR  CLEAR_DOSBUF     ; same reasoning as OPEN_WRITE_INIT's
+                                  ; call -- this sector (new cluster, or a
+                                  ; not-yet-written later sector of the
+                                  ; current one) has no real content yet
+            RTS
+FPBA_FULL   ; Disk full mid-write: stop advancing rather than corrupt
+            ; anything. The bytes already flushed stay on disk; bytes
+            ; from here on are silently dropped. A documented v1 limit,
+            ; not expected to matter for short BASIC program listings on
+            ; an 8MB volume.
+            RTS
+;------------------------------------------------------------------------------
+BASICNAME   FCC  "BASIC   COM"      ; 8.3 name, space-padded, no dot
+MSG_NOBASIC FCC  "BASIC.COM not found on disk"
+            FCB  LF,CR,0
+;------------------------------------------------------------------------------
+DOSBUF        RMB  512
+RESSEC        RMB  2
+SECPERCLUS    RMB  1
+SECPERCLUS16  RMB  2
+NUMFATS       RMB  1
+FATCNT        RMB  1
+MULCNT        RMB  1
+ROOTENTCNT    RMB  2
+SECPERFAT     RMB  2
+TOTALSEC      RMB  2
+TOTALCLUS     RMB  2
+MAXCLUS       RMB  2
+FATLBA        RMB  2
+ROOTLBA       RMB  2
+ROOTDIRSEC    RMB  2
+DATALBA       RMB  2
+CURCLUS       RMB  2
+TMPD          RMB  2
+RDLBA         RMB  2
+DESTPTR       RMB  2
+FATSECLBA_CUR RMB  2
+LFECLUS       RMB  2
+LFEOFS        RMB  2
+CTLCLUS       RMB  2
+ACCLUS        RMB  2
+FCCLUS        RMB  2
+FCNEXT        RMB  2
+SETVAL        RMB  2
+FDNAME        RMB  2
+FDLBA         RMB  2
+FDSECLEFT     RMB  2
+FOUND_LBA     RMB  2
+FOUND_OFS     RMB  2
+FOUND_CLUSTER RMB  2
+FOUND_SIZE    RMB  2
+FSLOTS        RMB  4*sizeof{fslot}
+OPEN_NAME     RMB  2
+OPEN_MODE     RMB  1
+OPEN_SLOTIDX  RMB  1
+OPEN_SLOTPTR  RMB  2
+ALLOCTMP      RMB  2
+ALLOCTMP2     RMB  2
+CUR_SLOT      RMB  2
+RL_DEST       RMB  2
+RL_MAX        RMB  2
+RL_COUNT      RMB  2
+WL_SRC        RMB  2
+WL_LEN        RMB  2
+WL_I          RMB  2
+FGBTMP        RMB  2
+DC_DIROFS     RMB  2
+DC_SIZE       RMB  2
+DIRLBA_CUR    RMB  2
+DIRSECLEFT    RMB  2
+DIRENTIDX     RMB  1
+DIRDEST       RMB  2
+RENAME_NEW    RMB  2
+DR_OLDLBA     RMB  2
+DR_OLDOFS     RMB  2
+;------------------------------------------------------------------------------
+; End of dos.asm
+;------------------------------------------------------------------------------
