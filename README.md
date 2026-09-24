@@ -1,4 +1,4 @@
-# Pugputer 6309
+# Pugputer 6309 Simulator
 
 A homebrew computer built around the Hitachi **HD6309** CPU, with its complete software stack --
 BIOS, DOS, shell and BASIC -- and a cycle-counted emulator that runs all of it on a PC.
@@ -18,9 +18,12 @@ RUN
 double-click `start-console.bat`. Nothing to install or compile; see the release's `README.md`.
 
 ## Future plans
-Self-hosted assembler/linker
-Text editor
-Simulated graphic display
+- Self-hosted assembler/linker
+- Text editor
+- Simulated graphic display
+
+## Actual Hardware
+[Pugputer6309 on GitHub](https://github.com/caiannello/Pugputer6309)
 
 ## What is in here
 
