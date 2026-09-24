@@ -33,6 +33,7 @@ set(PUGPUTER_TEST_SOURCES
     test_pugputer_main.cpp
     test_uart.cpp
     test_system_bus.cpp
+    test_banking.cpp
     test_srec_loader.cpp
     test_rom_device.cpp
     test_sdcard_device.cpp

@@ -60,6 +60,7 @@ struct DosSession {
         bus.map_device("bios_rom", kBiosBase, static_cast<uint16_t>(kBiosSize), &bios_rom, pugputer::IrqLine::None);
         bus.map_device("sdcard", 0xFFD8, 4, &sd, pugputer::IrqLine::None);
         bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
+        bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
         uart.set_tx_callback([this](uint8_t b) { console += static_cast<char>(b); });
         bus.reset();
         bus.run(6000000); // BIOS, disk boot, DOS start, BASIC banner and prompt

@@ -54,6 +54,7 @@ TEST(basic309_boots_after_bios_and_prints_its_banner_via_bios_console_calls) {
     bus.map_device("bios_rom", kBiosBase, static_cast<uint16_t>(kBiosSize), &bios_rom, IrqLine::None);
     bus.map_device("basic_rom", kBasicBase, static_cast<uint16_t>(kBasicSize), &basic_rom, IrqLine::None);
     bus.map_device("uart", 0xFFE8, 4, &uart, IrqLine::IRQ); // registered last: overrides bios_rom's window here
+    bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
 
     std::string received;
     uart.set_tx_callback([&](uint8_t b) { received += static_cast<char>(b); });

@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
     bus.map_device("bios_rom", kBiosBase, static_cast<uint16_t>(kBiosSize), &bios_rom, IrqLine::None);
     bus.map_device("sdcard", 0xFFD8, 4, &sdcard, IrqLine::None);
     bus.map_device("uart", 0xFFE8, 4, &uart, IrqLine::IRQ);
+    bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
 
     bool use_com = false;
 #ifdef PUGPUTER_HAVE_COM_BRIDGE

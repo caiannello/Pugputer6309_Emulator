@@ -152,8 +152,8 @@ public:
 };
 ```
 
-`SystemBus` (`include/pugputer/system_bus.hpp`) owns an `hd6309_t*`, a
-flat 64KB RAM array as the default backing store, and a list of
+`SystemBus` (`include/pugputer/system_bus.hpp`) owns an `hd6309_t*`, banked
+RAM (below) as the default backing store, and a list of
 `DeviceMapping{name, base, size, IDevice*, IrqLine}` entries -- this list
 *is* the system-level metadata describing how each device is wired in,
 so adding or reconfiguring a device later is a `map_device()` call, not
@@ -166,6 +166,24 @@ bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
 bus.reset();
 bus.run(100000); // steps the CPU, ticks every device, updates IRQ/FIRQ/NMI each step
 ```
+
+**RAM banking.** The Pugputer6309's CPU address space is four 16KB banks; each
+of four write-only 8-bit registers at `$FFEC-$FFEF` supplies physical address
+bits A21..A14 for its bank (CPU A15,A14 pick the register, CPU A13..A0 are the
+offset in the page), so any bank can point at any of 256 pages of a 22-bit
+space. `SystemBus` models exactly that: `SystemBus(ram_pages = 64)` installs
+1MB (pages beyond the installed RAM read `$FF` and drop writes), and
+`bus.map_bank_registers()` makes the registers writable by the CPU. Devices
+(ROM, UART, ...) are decoded from the CPU address alone, so banking never
+affects them. Until `map_bank_registers()` is called, or after `reset()`, the
+banks sit at their reset mapping (banks 0..3 -> pages 0..3), which makes
+`bus.ram()[a]` the CPU's view of address `a`; once a program remaps a bank,
+use `phys_ram()` (physical addresses) or `read_cpu()`/`write_cpu()` (through the
+current banking). The real registers can't be read back -- the BIOS keeps
+shadow copies (`SBANK_1..3` in `bios/main.asm`); `bank_register(n)` is the
+simulator's own view, for tests. The BIOS keeps bank 0 permanently on page 0
+(its variables, and the resident DOS, live there); applications may remap
+banks 1-3. All the BIOS-based harnesses and demos call `map_bank_registers()`.
 
 `IrqLine::IRQ`/`FIRQ` are level-sensitive: `SystemBus::step()` recomputes
 each line every step as the OR of every device mapped to it, and pushes
@@ -415,6 +433,10 @@ using `tests/dos_session.hpp`, which boots the real chain and then makes BIOS ca
   behavior), DTR=0 disabling the receiver (letting an in-flight
   character finish first, per the datasheet), and the baud-rate decode
   table.
+- `test_banking.cpp` -- the bank registers: reset mapping, remapping a bank,
+  the page offset coming from CPU A13..A0, banks sharing a page, reaching all
+  1MB, uninstalled pages floating high, ROM/IO unaffected, and the CPU running
+  code and using a stack through remapped banks.
 - `test_system_bus.cpp` -- RAM fallback outside any mapping, a mapped
   mock `IDevice` intercepting its address window, IRQ-line OR-ing and
   CPU-mask respecting, and devices receiving the exact cycle count
