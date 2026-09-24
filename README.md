@@ -3,16 +3,7 @@
 A homebrew computer built around the Hitachi **HD6309** CPU, with its complete software stack --
 BIOS, DOS, shell and BASIC -- and a cycle-counted emulator that runs all of it on a PC.
 
-```
-/> ver
-Pugputer 6309 DOS 2.1
-/> basic
-6809 EXTENDED BASIC ...
-OK
-LOAD "PRIMES"
-RUN
- 2  3  5  7  11  13  17  19  23  29 ...
-```
+![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/demo.png?raw=true)
 
 **Just want to try it?** Download the Windows demo from the *Releases* page, unzip it and
 double-click `start-console.bat`. Nothing to install or compile; see the release's `README.md`.
