@@ -20,9 +20,9 @@ double-click `start-console.bat`. Nothing to install or compile; see the release
 ## Future plans
 - Self-hosted assembler/linker
 - Text editor
-- Simulated graphic display
+- Emulated Graphical display and OPL3 Sound
 
-## Actual Hardware
+## Real Hardware Here!
 [Pugputer6309 on GitHub](https://github.com/caiannello/Pugputer6309)
 
 ## What is in here
