@@ -32,8 +32,11 @@ every open file and starts the shell again. (On a disk with no `SHELL.COM`, DOS 
 | `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (DOS, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
 | `$F000-$FFFF`  | BIOS ROM |
 
-The ROM window is nearly full (about 480 bytes left after the directory work). Growing
-BASIC further means trimming unused Color BASIC code or moving `BASIC.COM` lower.
+The ROM window is nearly full (about 160 bytes left after error trapping). Growing BASIC
+further means trimming unused Color BASIC code or moving `BASIC.COM` lower: its program
+header (`shell/README.md`) already says where it loads, so the load address is just
+`ORG`, `BASIC_ENTRY` and `TOPRAM_FIXED` in `exbasrom309.asm` plus the constants in
+`mkdiskimg.cpp` and the test sessions.
 
 ## Disk commands and directories
 
@@ -49,7 +52,9 @@ program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
   you. A longer name is `?BP` (older versions silently cut it to 8 characters).
 - **Default extension:** `LOAD`/`SAVE`/`KILL`/`NAME` give a name with no dot in its last
   component the extension `.BAS`; `"NAME."` (trailing dot) means "no extension". (`OPEN` adds
-  nothing -- see below.)
+  nothing -- see below.) `KILL` and `NAME`'s old name have a second chance: if `NAME.BAS`
+  isn't there, `NAME` is tried exactly as typed, so `KILL "DATA"` works on a data file made
+  with `OPEN "O",#1,"DATA"`. A name you typed with its extension is never altered.
 - `FILES` lists a directory (the current one, or the path's): name, byte size, or `<DIR>`.
   `NAME "old" AS "new"` renames a file or directory in place (the new name is a single name).
 - `RMDIR` needs an empty directory that isn't the current one (`?DE`, `?AO`). `KILL` a
@@ -119,12 +124,43 @@ LOF(1)                                    file length in bytes
 `?IO` I/O error, `?DF` disk full, `?ND` not a directory, `?IS` is a directory, `?DE` directory
 not empty, `?BP` bad name or path (invalid 8.3 name, or a path over 79 characters).
 
+## Error trapping
+
+`ON ERROR GOTO line` names a handler. From then on an error in a *running program* (not in a
+direct-mode line, and not while another error is being handled) jumps to that line instead of
+printing the message and stopping. `ON ERROR GOTO 0` turns trapping off; `RUN`, `NEW` and `CLEAR`
+do too. In the handler:
+
+- `ERR` is the error's number -- its position in BASIC's message table, **not** GW-BASIC's
+  numbering -- and `ERL` the line it happened in (line numbers up to 63999 work);
+- `RESUME` runs the statement that failed again, `RESUME NEXT` continues with the statement
+  after it (the rest of the line still runs), `RESUME n` continues at line `n`;
+- the `FOR`/`GOSUB` state is exactly as it was when the statement failed, so a handler can
+  `RESUME NEXT` out of the middle of a subroutine and the `RETURN` still finds its `GOSUB`;
+- an error inside the handler itself, or `RESUME` when nothing is being handled (`?RW`), is an
+  ordinary error.
+
+`ERROR n` raises error `n` (so a program can test its own handler, or make its own errors).
+Numbers: 0 NF, 1 SN, 2 RG, 3 OD, 4 FC, 5 OV, 6 OM, 7 UL, 8 BS, 9 DD, 10 /0, 11 ID, 12 TM, 13 OS,
+14 LS, 15 ST, 16 CN, 17 FD, 18 AO, 19 DN, 20 IO, 21 FM, 22 NO, 23 IE, 24 DS, 25 UF, 26 NE (file
+not found), 27 FE, 28 DF, 29 ND, 30 IS, 31 DE, 32 BP, 33 RW. File and directory errors from DOS
+are trappable like any other: `IF ERR=26 THEN ...` for a missing file.
+
+```
+10 ON ERROR GOTO 100
+20 OPEN "I",#1,"DATA.TXT"
+30 PRINT "CONTINUING": END
+100 IF ERR=26 THEN PRINT "NO DATA FILE": RESUME 30
+110 ON ERROR GOTO 0
+```
+
 ## Differences from GW-BASIC you will run into
 
 - No `%` integer variables (write `CODE` where the guide has `CODE%`), no `MKD$`/`CVD`,
   no `LOCK`/`UNLOCK`.
-- **No error trapping.** `ON ERROR GOTO` is not a statement: it is silently ignored.
-- The default string space is only 200 bytes: programs that read long lines need `CLEAR n`.
+- `ERR` numbers are this BASIC's own (see "Error trapping"), not GW-BASIC's.
+- The default string space is 2000 bytes (Color BASIC's was 200); `CLEAR n` changes it. A
+  single string is still at most 255 characters.
 - Unquoted `INPUT` strings end at a comma (Color BASIC behaviour).
 - The line editor drops characters above `z`, so `|` (and `{ } ~`) can't be typed.
 - Keywords are matched anywhere a word starts, so a variable whose name *begins* with a
@@ -178,6 +214,9 @@ From `../simulator/build` (after `reinit_disk.bat`): `pugputer_tests` runs every
   layer called directly (the last one checks the directory tree on the disk with an
   independent FAT16 reader, `fat16_reader.hpp`).
 - `test_basic309_dirs.cpp` -- `MKDIR`/`CHDIR`/`RMDIR` and paths in every disk statement.
+- `test_basic309_errors.cpp` -- `ON ERROR GOTO`, `RESUME` in its three forms, `ERR`/`ERL`,
+  `ERROR n`, trapping through `GOSUB`/`FOR`, trapped DOS errors, the 2000-byte string space, and
+  `KILL`/`NAME`'s second chance for names without an extension.
 
 The disk-backed tests share `disk.img`, so each one deletes the files it uses before and
 after.

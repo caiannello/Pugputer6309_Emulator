@@ -148,6 +148,7 @@ TEST(basic309_token_tables_are_internally_consistent) {
         {"TOK_TAB", "TAB("},  {"TOK_TO", "TO"},     {"TOK_SUB", "SUB"},     {"TOK_THEN", "THEN"},
         {"TOK_NOT", "NOT"},   {"TOK_STEP", "STEP"}, {"TOK_PLUS", "+"},      {"TOK_MINUS", "-"},
         {"TOK_GREATER", ">"}, {"TOK_EQUALS", "="},  {"TOK_FN", "FN"},       {"TOK_USING", "USING"},
+        {"TOK_NEXT", "NEXT"}, {"TOK_ERROR", "ERROR"},
     };
     const std::map<std::string, std::string> secondary_tokens = {
         {"TOK_USR", "USR"}, {"TOK_LEN", "LEN"}, {"TOK_LEFT", "LEFT$"}, {"TOK_MID", "MID$"}, {"TOK_INKEY", "INKEY$"},

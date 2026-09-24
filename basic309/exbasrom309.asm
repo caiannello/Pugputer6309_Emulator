@@ -266,8 +266,19 @@ FLDL      RMB  1              LSET/RSET: bytes of the source that fit
 FLDPAD    RMB  1              LSET/RSET: spaces to pad with
 RJUST     RMB  1              0 = LSET, 1 = RSET
 RWFLG     RMB  1              0 = GET, 1 = PUT
+; Error trapping (ON ERROR GOTO / RESUME / ERR / ERL)
+ONERRSET  RMB  1              NONZERO: ON ERROR GOTO <line> is in effect
+INHANDLER RMB  1              NONZERO: an error was trapped and RESUME hasn't run yet
+ONERRLIN  RMB  2              the line ON ERROR GOTO names
+ERRNUM    RMB  1              ERR: the number of the last trapped error (its index in the message table)
+ERRLIN    RMB  2              ERL: the line it happened in
+ERRPTR    RMB  2              where in that statement the interpreter was (RESUME NEXT continues after it)
+ERRSTMT   RMB  2              where that statement starts (RESUME runs it again)
+STMTSP    RMB  2              S at the top of the interpreter loop: the level every statement starts at
+FMTADDED  RMB  1              FMTNAME added the default ".BAS" to the name it just formatted
+OLDADDED  RMB  1              NAME: ... to the OLD name
 
-PROGST    RMB  1              START OF PROGRAM SPACE
+PROGST     RMB  1              START OF PROGRAM SPACE
 *         INTERRUPT VECTORS                 
 ;          ORG  $FFF2           
 ;SWI3      RMB  2               
@@ -380,7 +391,7 @@ LA077     CLR  ,--X           MOVE POINTER DOWN TWO-CLEAR BYTE
           STX  TOPRAM         SAVE FIXED TOP OF RAM
           STX  MEMSIZ         SAVE TOP OF STRING SPACE
           STX  STRTAB         SAVE START OF STRING VARIABLES
-          LEAX -200,X         CLEAR 200 - DEFAULT STRING SPACE TO 200 BYTES
+          LEAX -2000,X        basic309: DEFAULT STRING SPACE IS 2000 BYTES (Color BASIC's was 200; CLEAR n changes it)
           STX  FRETOP         SAVE START OF STRING SPACE
           TFR  X,S            PUT STACK THERE
           LDX  #LAC7C         basic309: default LINEDONE_VEC target --
@@ -634,7 +645,9 @@ TOK_MID   EQU  (*-FUNC_TAB)/2+$7F
 * REMAINING FUNCTIONS                      
           FDB  INKEY          INKEY$ 
 TOK_INKEY EQU  (*-FUNC_TAB)/2+$7F  
-          FDB  MEM            MEM 
+          FDB  MEM            MEM
+          FDB  ERRFN          ERR
+          FDB  ERLFN          ERL
           FDB  VARPT          VARPTR 
           FDB  INSTR          INSTR 
           FDB  STRING         STRING$ 
@@ -689,7 +702,8 @@ TOK_GO    EQU  $81
           FCC  "EN"           8A 
           FCB  $80+'D'         
           FCC  "NEX"          8B 
-          FCB  $80+'T'         
+          FCB  $80+'T'
+TOK_NEXT  EQU  $8B
           FCC  "DI"           8C 
           FCB  $80+'M'         
           FCC  "REA"          8D 
@@ -778,6 +792,11 @@ TOK_GO    EQU  $81
           FCB  $80+'R'
           FCC  "SYSTE"         AF
           FCB  $80+'M'
+; Error trapping: ERROR n raises error n; RESUME continues after a trapped error.
+          FCC  "ERRO"          B0
+          FCB  $80+'R'
+          FCC  "RESUM"         B1
+          FCB  $80+'E'
 * END OF EXECUTABLE COMMANDS. THE REMAINDER OF THE TABLE ARE NON-EXECUTABLE TOKENS
           FCC  "TAB"          A4
           FCB  $80+'('
@@ -893,8 +912,12 @@ LAB1A     FCC  "SG"           80
 * REMAINING FUNCTIONS                      
           FCC  "INKEY"        98 
           FCB  $80+'$'         
-          FCC  "ME"           99 
-          FCB  $80+'M'         
+          FCC  "ME"           99
+          FCB  $80+'M'
+          FCC  "ER"           ERR
+          FCB  $80+'R'
+          FCC  "ER"           ERL
+          FCB  $80+'L'
           FCC  "VARPT"        9A 
           FCB  $80+'R'         
           FCC  "INST"         9B 
@@ -960,6 +983,9 @@ TOK_INPUT EQU  (*-CMD_TAB)/2+$7F
           FDB  CHDIR           AD
           FDB  RMDIR           AE
           FDB  SYSTEM          AF
+          FDB  ERRORCMD        B0
+TOK_ERROR EQU  (*-CMD_TAB)/2+$7F
+          FDB  RESUME          B1
 TOK_HIGH_EXEC EQU  (*-CMD_TAB)/2+$7F
                                
 * ERROR MESSAGES AND THEIR NUMBERS AS USED INTERNALLY                      
@@ -997,6 +1023,8 @@ LERRFE    FCC  "FE"           27 FILE ALREADY EXISTS (basic309: NAME's target co
           FCC  "IS"           30 IS A DIRECTORY (a file operation on one)
           FCC  "DE"           31 DIRECTORY NOT EMPTY
           FCC  "BP"           32 BAD PATH OR NAME
+          FCC  "RW"           33 RESUME WITHOUT ERROR
+NUMERRS   EQU  34
 
 LABE1     FCC  " ERROR"
           FCB  $00             
@@ -1069,7 +1097,15 @@ LAC44     LDB  #6*2           OUT OF MEMORY ERROR
                                
 * ERROR SERVICING ROUTINE                      
 LAC46     CLR  DEVNUM         basic309: an error abandons any PRINT#/INPUT# redirect
-          JSR  LAD33          RESET STACK, STRING STACK, CONTINUE POINTER
+          TST  ONERRSET       basic309: ON ERROR GOTO in effect, not already handling one,
+          BEQ  LAC46_NORM     ... and this is a program (not a direct-mode line)?
+          TST  INHANDLER
+          BNE  LAC46_NORM
+          LDX  CURLIN
+          LEAX 1,X
+          LBNE ERRTRAP        THEN THE PROGRAM'S HANDLER GETS IT, NOT THE CONSOLE
+LAC46_NORM CLR  INHANDLER      THE PROGRAM STOPS HERE: NOTHING IS BEING HANDLED ANY MORE
+          JSR  LAD33           RESET STACK, STRING STACK, CONTINUE POINTER
           JSR  LB95C          SEND A CR TO SCREEN 
           JSR  LB9AF          SEND A �?� TO SCREEN 
           LDX  #LABAF         POINT TO ERROR TABLE 
@@ -1184,7 +1220,12 @@ LAD19     JSR  CLOSEALL       basic309: NEW / LOAD CLOSE ANY OPEN DATA FILES
 LAD21     LDX  TXTTAB         GET START OF BASIC 
           JSR  LAEBB          PUT INPUT POINTER ONE BEFORE START OF BASIC 
 * ERASE ALL VARIABLES                      
-LAD26     LDX  MEMSIZ         * RESET START OF STRING VARIABLES 
+LAD26     CLR  ONERRSET       basic309: RUN, NEW and CLEAR end error trapping (and forget the last error)
+          CLR  INHANDLER
+          CLR  ERRNUM
+          CLR  ERRLIN
+          CLR  ERRLIN+1
+          LDX  MEMSIZ         * RESET START OF STRING VARIABLES  
           STX  STRTAB         * TO TOP OF STRING SPACE 
           JSR  RESTOR         RESET �DATA� POINTER TO START OF BASIC 
           LDX  VARTAB         * GET START OF VARIABLES AND USE IT 
@@ -1400,7 +1441,9 @@ PFN_EXT   LDA  ,X
 PFN_DONE  RTS
 ;------------------------------------------------------------------------------
 ; KILL "path" -- deletes a file (a name with no dot in its last component gets
-; ".BAS", like LOAD/SAVE; "NAME." means no extension).
+; ".BAS", like LOAD/SAVE; "NAME." means no extension; and if that isn't found the
+; name is tried exactly as typed, so a data file made with OPEN "O",#1,"DATA" can
+; be KILLed as "DATA").
 ;------------------------------------------------------------------------------
 KILL      JSR  LB156
           JSR  LB654
@@ -1410,7 +1453,24 @@ KILL      JSR  LB156
           SWI2
           BCS  KILL_ERR
           RTS
-KILL_ERR  JMP  DOSERR         "NE" NOT FOUND, "AO" FILE IS OPEN, "IS" A DIRECTORY, ...
+KILL_ERR  CMPA #ERR_NOTFOUND  A NAME WITH ".BAS" ADDED THAT ISN'T THERE: TRY IT AS TYPED
+          BNE  KILL_FAIL         (KILL "DATA" HAS TO WORK ON A FILE MADE BY OPEN "O",#1,"DATA")
+          TST  FMTADDED
+          BEQ  KILL_FAIL
+          LDX  #FNBUF
+          BSR  STRIPBAS
+          LDX  #FNBUF
+          LDA  #B_KILL_NAME
+          SWI2
+          BCS  KILL_FAIL
+          RTS
+KILL_FAIL JMP  DOSERR         "NE" NOT FOUND, "AO" FILE IS OPEN, "IS" A DIRECTORY, ...
+; IN: X -> a NUL-terminated name that ends in the four characters ".BAS" FMTNAME
+; added. Cuts them off again.
+STRIPBAS  LDA  ,X+
+          BNE  STRIPBAS
+          CLR  -5,X
+          RTS
 ;------------------------------------------------------------------------------
 ; NAME "old" AS "new" -- renames a file or directory (it stays in its directory,
 ; so "new" is a single name). "AS" isn't a reserved word in this BASIC's
@@ -1420,6 +1480,8 @@ KILL_ERR  JMP  DOSERR         "NE" NOT FOUND, "AO" FILE IS OPEN, "IS" A DIRECTOR
 NAME      JSR  LB156          EVALUATE THE OLD PATH EXPRESSION
           JSR  LB654
           JSR  FMTNAME        -> FNBUF
+          LDA  FMTADDED
+          STA  OLDADDED
           LDX  #FNBUF         COPY ASIDE -- FMTNAME WILL REUSE FNBUF BELOW
           LDY  #NAMEOLD
 NAME_CP1  LDA  ,X+
@@ -1446,7 +1508,19 @@ NAME_CHKA CMPA #'A
           BCS  NAME_ERR
           RTS
 NAME_SYNERR JMP LB277          SYNTAX ERROR
-NAME_ERR  JMP  DOSERR         "NE" NOT FOUND, "FE" TARGET EXISTS, "AO" FILE IS OPEN, ...
+NAME_ERR  CMPA #ERR_NOTFOUND  THE OLD NAME GETS THE SAME SECOND CHANCE AS KILL'S
+          BNE  NAME_FAIL
+          TST  OLDADDED
+          BEQ  NAME_FAIL
+          LDX  #NAMEOLD
+          BSR  STRIPBAS
+          LDX  #NAMEOLD
+          LDY  #FNBUF
+          LDA  #B_RENAME_NAME
+          SWI2
+          BCS  NAME_FAIL
+          RTS
+NAME_FAIL JMP  DOSERR         "NE" NOT FOUND, "FE" TARGET EXISTS, "AO" FILE IS OPEN, ...
 ;------------------------------------------------------------------------------
 ; MKDIR "path", RMDIR "path", CHDIR "path" -- make, remove (must be empty) or
 ; move into a directory. CHDIR with no argument prints the current directory.
@@ -1488,6 +1562,78 @@ CHDIR_DONE LDA #CR
 SYSTEM    LDA  #B_EXIT
           SWI2
           RTS
+;------------------------------------------------------------------------------
+; Error trapping. ON ERROR GOTO n names a handler line; from then on an error in a
+; running program (not in a direct-mode line, and not while another is being
+; handled) goes to that line instead of stopping the program. ON ERROR GOTO 0
+; turns trapping off. In the handler ERR is the error's number (its index in the
+; message table, 0 = NF ...) and ERL the line it happened in. RESUME runs the
+; statement that failed again, RESUME NEXT continues after it, RESUME n continues
+; at line n. ERROR n raises error n. RUN, NEW and CLEAR end trapping.
+;------------------------------------------------------------------------------
+ON_ERROR  JSR  GETNCH         PAST "ERROR"
+          LDB  #TOK_GO
+          JSR  LB26F          "GO" ...
+          CMPA #TOK_TO
+          LBNE LAED7          ... "TO", else SYNTAX ERROR
+          JSR  GETNCH         THE LINE NUMBER
+          JSR  LAF67
+          LDX  BINVAL
+          STX  ONERRLIN
+          CLR  ONERRSET
+          LDX  BINVAL
+          BEQ  ON_ERR_OFF     LINE 0: TRAPPING OFF
+          INC  ONERRSET
+ON_ERR_OFF RTS
+; Entered from LAC46 with B = 2 * the error number.
+ERRTRAP   LSRB
+          STB  ERRNUM
+          LDX  CURLIN
+          STX  ERRLIN
+          LDX  CHARAD
+          STX  ERRPTR
+          LDX  TINPTR
+          STX  ERRSTMT
+          INC  INHANDLER
+          LDS  STMTSP         UNWIND TO THE LEVEL OF THE STATEMENT THAT FAILED (FOR/GOSUB
+          LDX  #STRSTK        FRAMES BELOW IT STAY, SO RESUME CAN CONTINUE IN THEM)
+          STX  TEMPPT
+          CLR  ARYDIS
+          LDX  ONERRLIN
+          STX  BINVAL
+          JSR  LAEA4B         GOTO THE HANDLER
+          JMP  LAD9E
+RESUME    TST  INHANDLER
+          BEQ  RESUME_ERR
+          JSR  GETCCH         WHAT FOLLOWS: NOTHING (Z), A LINE NUMBER (C) OR NEXT
+          BEQ  RESUME_RETRY
+          BCS  RESUME_LINE
+          CMPA #TOK_NEXT
+          LBNE LAED7
+          JSR  GETNCH
+          CLR  INHANDLER
+          LDX  ERRPTR         RESUME NEXT: SKIP THE REST OF THE STATEMENT THAT FAILED
+          STX  CHARAD
+          JMP  DATA
+RESUME_LINE JSR  LAF67
+          JSR  LAEA4B         RESUME n: GOTO n (an undefined line is an ordinary,
+          CLR  INHANDLER      untrapped error: INHANDLER is only cleared once it is found)
+          RTS
+RESUME_RETRY CLR  INHANDLER
+          LDX  ERRSTMT        RESUME: THE STATEMENT THAT FAILED, AGAIN
+          STX  CHARAD
+          RTS
+RESUME_ERR LDB  #33*2         "RW" RESUME WITHOUT ERROR
+          JMP  LAC46
+ERRORCMD  JSR  LB70B          THE ERROR NUMBER
+          CMPB #NUMERRS
+          LBHS LB44A          NO SUCH ERROR: "FC"
+          ASLB
+          JMP  LAC46
+ERRFN     LDB  ERRNUM
+          JMP  LB4F3
+ERLFN     LDD  ERRLIN
+          JMP  GIVABU
 ;==============================================================================
 ; File I/O for BASIC programs (GW-BASIC style sequential files).
 ;
@@ -2348,7 +2494,8 @@ ON_COPY   LDA  ,X+
           BNE  ON_COPY
 ON_TERM   CLR  ,Y
           RTS
-FMTNAME   BSR  OPENNAME
+FMTNAME   CLR  FMTADDED
+          BSR  OPENNAME
           LDX  #FNBUF
           LDY  #FNBUF         Y = START OF THE LAST COMPONENT
 FN_SCAN   LDA  ,X
@@ -2368,7 +2515,8 @@ FN_DOT    LDA  ,U+
           CMPA #'.
           BNE  FN_DOT
 FN_DONE   RTS
-FN_ADD    LDA  #'.
+FN_ADD    INC  FMTADDED
+          LDA  #'.
           STA  ,X+
           LDA  #'B
           STA  ,X+
@@ -2472,8 +2620,9 @@ LAD90     JSR  LBC6D          CHECK STATUS OF FPA0
           PSHS A              = SAVE IT ON THE STACK 
 *                              
 * MAIN COMMAND INTERPRETATION LOOP                      
-LAD9E     ANDCC #$AF           ENABLE IRQ,FIRQ 
-          BSR  LADEB          CHECK FOR KEYBOARD BREAK 
+LAD9E     ANDCC #$AF           ENABLE IRQ,FIRQ
+          STS  STMTSP         basic309: every statement starts at this stack level (ON ERROR unwinds to it)
+          BSR  LADEB           CHECK FOR KEYBOARD BREAK 
           LDX  CHARAD         GET BASIC�S INPUT POINTER 
           STX  TINPTR         SAVE IT 
           LDA  ,X+            GET CURRENT INPUT CHAR & MOVE POINTER 
@@ -2557,7 +2706,8 @@ LAE0B     BNE  LAE40          BRANCH IF ARGUMENT EXISTS
           STX  TINPTR         * BASIC�S INPUT POINTER 
 LAE11     ROR  ENDFLG         ROTATE CARRY INTO BIT 7 OF STOP/END FLAG 
           LEAS 2,S            PURGE RETURN ADDRESS OFF STACK 
-LAE15     LDX  CURLIN         GET CURRENT LINE NUMBER 
+LAE15     CLR  INHANDLER      basic309: a program that ends inside its handler isn't handling anything
+          LDX  CURLIN         GET CURRENT LINE NUMBER 
           CMPX #$FFFF         DIRECT MODE? 
           BEQ  LAE22          YES 
           STX  OLDTXT         SAVE CURRENT LINE NUMBER 
@@ -2635,9 +2785,9 @@ LAE88     JSR  GETNCH         GET A CHARACTER FROM BASIC
 LAE9F     BSR  LAEA4          GO DO A �GOTO� 
           JMP  LAD9E          JUMP BACK TO BASIC�S MAIN LOOP 
 * GOTO                         
-LAEA4     JSR  GETCCH         GET CURRENT INPUT CHAR 
-          JSR  LAF67          GET LINE NUMBER TO BINARY IN BINVAL 
-          BSR  LAEEB          ADVANCE BASIC�S POINTER TO END OF LINE 
+LAEA4     JSR  GETCCH         GET CURRENT INPUT CHAR
+          JSR  LAF67          GET LINE NUMBER TO BINARY IN BINVAL
+LAEA4B    BSR  LAEEB           ADVANCE BASIC�S POINTER TO END OF LINE 
           LEAX $01,X          POINT TO START OF NEXT LINE 
           LDD  BINVAL         GET THE LINE NUMBER TO RUN 
           CMPD CURLIN         COMPARE TO CURRENT LINE NUMBER 
@@ -2735,14 +2885,16 @@ LAF39     JSR  GETCCH         GET CURRENT INPUT CHARACTER
           JMP  LADC6          RETURN TO MAIN INTERPRETATION LOOP 
                                
 * ON                           
-ON        JSR  LB70B          EVALUATE EXPRESSION 
+ON        CMPA #TOK_ERROR     basic309: ON ERROR GOTO <line>
+          LBEQ ON_ERROR
+          JSR  LB70B          EVALUATE EXPRESSION
           LDB  #TOK_GO        TOKEN FOR GO 
           JSR  LB26F          SYNTAX CHECK FOR GO 
           PSHS A              SAVE NEW TOKEN (TO,SUB) 
           CMPA #TOK_SUB       TOKEN FOR SUB? 
           BEQ  LAF54          YES 
           CMPA #TOK_TO        TOKEN FOR TO? 
-LAF52     BNE  LAED7          �SYNTAX� ERROR IF NOT �SUB� OR �TO� 
+LAF52     LBNE LAED7          �SYNTAX� ERROR IF NOT �SUB� OR �TO� 
 LAF54     DEC  FPA0+3         DECREMENT IS BYTE OF MANTISSA OF FPA0 - THIS 
 *                             IS THE ARGUMENT OF THE �ON� STATEMENT 
           BNE  LAF5D          BRANCH IF NOT AT THE PROPER GOTO OR GOSUB LINE NUMBER 

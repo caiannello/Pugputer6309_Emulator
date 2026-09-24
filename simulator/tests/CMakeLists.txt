@@ -92,6 +92,7 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_seqfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_randomfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_dirs.cpp)
+    list(APPEND PUGPUTER_TEST_SOURCES test_basic309_errors.cpp)
 endif()
 
 add_executable(pugputer_tests ${PUGPUTER_TEST_SOURCES})
