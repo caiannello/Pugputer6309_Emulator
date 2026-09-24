@@ -56,6 +56,21 @@ public:
     };
     void record_writes(std::vector<WriteRecord>* log) { write_log_ = log; }
 
+    // Test hooks that make the card misbehave, for the BIOS's error handling:
+    //   set_card_present(false)  -- the CARD_PRESENT status bit reads 0 (card pulled out)
+    //   set_stuck_busy(true)     -- BUSY never clears (a card that hangs)
+    //   fail_next_reads(n) / fail_next_writes(n)
+    //                            -- the next n read / write COMMANDS report ERROR and do
+    //                               nothing (a transient failure a retry can get past)
+    // commands_issued() counts every read/write command the CPU has issued, retries included.
+    void set_card_present(bool present) { card_present_ = present; }
+    void set_stuck_busy(bool stuck) { stuck_busy_ = stuck; }
+    void fail_next_reads(int n) { fail_reads_ = n; }
+    void fail_next_writes(int n) { fail_writes_ = n; }
+    // Every read command after the first `n` fails (a card that dies partway through).
+    void fail_reads_after(int64_t n) { fail_reads_after_ = n; }
+    uint64_t commands_issued() const { return commands_; }
+
     // IDevice
     uint8_t read(uint16_t offset) override;
     void write(uint16_t offset, uint8_t value) override;
@@ -69,6 +84,12 @@ private:
     uint16_t cursor_ = 0;
     bool last_error_ = false;
     std::vector<WriteRecord>* write_log_ = nullptr;
+    bool card_present_ = true;
+    bool stuck_busy_ = false;
+    int fail_reads_ = 0;
+    int fail_writes_ = 0;
+    int64_t fail_reads_after_ = -1;
+    uint64_t commands_ = 0;
 
     void do_command(uint8_t cmd);
 };

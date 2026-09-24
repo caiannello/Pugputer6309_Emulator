@@ -45,6 +45,8 @@ STXIE       RMB  1          ; 0 = transmitter idle, 1 = transmitting
 SNEXTISR    RMB  2          ; prior IRQ handler, for chaining if not our irq
 TSTA        RMB  1          ; temp copy of UART status during ISR
 GETC1_SCRATCH RMB 1         ; UT_GETC's 1-byte scratch
+SERR        RMB  1          ; UART error flags accumulated by the ISR (UT_ERR_*)
+UTR_MASKED  RMB  1          ; UT_READ: the caller's interrupt mask was set
     ENDSECT
 ;------------------------------------------------------------------------------
     SECT code
@@ -54,6 +56,7 @@ UT_INIT     LDX  #SRXBUF
             LDX  #STXBUF
             JSR  CBUF_INIT
             CLR  STXIE
+            CLR  SERR
             LDX  JT_IRQ+1   ; preserve whatever IRQ handler was already
             STX  SNEXTISR   ; installed, so we can chain to it if a future
                              ; IRQ turns out not to be ours.
@@ -74,14 +77,23 @@ UT_ISR      LDA  UT_STA
             STA  TSTA
             TIM  #128,TSTA  ; bit 7 clear: this IRQ wasn't the UART's doing
             BEQ  NOT_UART
+            LDA  TSTA       ; remember parity / framing / overrun errors (status
+            ANDA #$07       ; bits 0-2) until the next UT_IOC_GETERR
+            BEQ  CHK_RX
+            ORA  SERR
+            STA  SERR
 CHK_RX      TIM  #8,TSTA    ; bit 3: Receiver Data Register Full
             BEQ  CHK_TX
 HANDL_RX    LDA  UT_DAT     ; pull the byte, freeing the UART's holding
             LDX  #SRXBUF    ; register, regardless of buffer room -- an
-            JSR  CBUF_PUT   ; overrun here just means the oldest unread byte
-                             ; gets silently dropped rather than the UART
+            JSR  CBUF_PUT   ; overflow here just means this byte is dropped
+                             ; (and noted in SERR) rather than the UART
                              ; itself locking up. (X is interrupt-context
                              ; scratch here -- RTI restores the caller's X.)
+            BCC  CHK_TX
+            LDA  SERR
+            ORA  #UT_ERR_RXFULL
+            STA  SERR
 CHK_TX      TIM  #16,TSTA   ; bit 4: Transmitter Data Register Empty
             BEQ  IQ_DONE
 HANDL_TX    LDX  #STXBUF
@@ -99,7 +111,7 @@ NOT_UART    JMP  [SNEXTISR]
 ; the TX ring buffer. Kicks the transmitter if it's currently idle. See the
 ; file header for why this never touches UT_DAT itself.
 ;------------------------------------------------------------------------------
-UT_PUTC1    PSHS X
+UT_PUTC1    PSHS X,CC       ; CC: the caller's interrupt mask, put back at the end
 UTP1_WAIT   ORCC #$10       ; guard the buffer check+push against the ISR
             LDX  #STXBUF
             JSR  CBUF_PUT
@@ -113,8 +125,7 @@ UTP1_GOTROOM
             STB  STXIE
             LDB  #$05       ; RTS low, TX interrupt enabled
             STB  UT_CMD     ; TDRE is already set on an idle UART, so this
-UTP1_DONE   ANDCC #$EF      ; enable fires the IRQ that sends the byte.
-            PULS X,PC
+UTP1_DONE   PULS CC,X,PC    ; enable fires the IRQ that sends the byte.
 ;------------------------------------------------------------------------------
 ; devdrv.write: X=source buf, Y=byte count. Always accepts and sends all of
 ; it (blocking on buffer room as needed); there's nothing meaningful to
@@ -160,38 +171,55 @@ UGC_NONE    ORCC #$01
 ; whatever is already sitting in the RX ring buffer, up to Y bytes, and
 ; returns immediately. Returns actual count copied in Y (0 if none ready).
 ;------------------------------------------------------------------------------
-UT_READ     PSHS A,B,U
-            TFR  Y,U        ; U = remaining room in caller's buffer
-            CLRB            ; B = count copied so far
-UTR_LOOP    CMPU #0
+UT_READ     PSHS A,B,U,CC
+            TFR  CC,A
+            ANDA #$10       ; was the caller running with IRQ masked? then it stays so
+            STA  UTR_MASKED
+            TFR  Y,U        ; U = remaining room in caller's buffer (Y stays: the
+UTR_LOOP    CMPU #0         ; count asked for, so the count read is Y - U)
             BEQ  UTR_DONE
             PSHS X
             ORCC #$10
             LDX  #SRXBUF
             JSR  CBUF_GET
+            TST  UTR_MASKED ; (TST leaves the carry from CBUF_GET alone)
+            BNE  UTR_KEPT
             ANDCC #$EF
-            PULS X
+UTR_KEPT    PULS X
             BCS  UTR_DONE   ; ring buffer empty -- stop, don't block
             STA  ,X+
             LEAU -1,U
-            INCB
             BRA  UTR_LOOP
-UTR_DONE    CLRA
-            TFR  D,Y        ; Y = zero-extended B (actual byte count)
-            PULS A,B,U,PC
+UTR_DONE    TFR  Y,D
+            PSHS U
+            SUBD ,S++
+            TFR  D,Y        ; Y = bytes actually copied (any count, not just < 256)
+            PULS CC,A,B,U,PC
 ;------------------------------------------------------------------------------
 ; devdrv.ioctl: A=func code, B=param byte. Only UT_IOC_SETCTL exists today
 ; (raw R65C51 Control Register value -- baud rate / word length / stop
 ; bits). Waits for the transmitter to go idle first so a baud change can't
 ; corrupt a byte already in flight.
 ;------------------------------------------------------------------------------
-UT_IOCTL    CMPA #UT_IOC_SETCTL
+UT_IOCTL    CMPA #UT_IOC_GETERR
+            BEQ  UTIOC_GETERR
+            CMPA #UT_IOC_SETCTL
             BNE  UTIOC_BADFN
-            PSHS B
-UTIOC_WAIT  LDA  STXIE
+            PSHS B,CC
+            ANDCC #$EF      ; the ISR has to be able to run for the transmitter to
+UTIOC_WAIT  LDA  STXIE      ; finish, whatever the caller's mask was
             BNE  UTIOC_WAIT
-            PULS B
+            PULS CC,B
             STB  UT_CTL
+            LDA  #ERR_OK
+            ANDCC #$FE
+            RTS
+UTIOC_GETERR
+            PSHS CC
+            ORCC #$10       ; read-and-clear must not race the ISR
+            LDB  SERR
+            CLR  SERR
+            PULS CC
             LDA  #ERR_OK
             ANDCC #$FE
             RTS

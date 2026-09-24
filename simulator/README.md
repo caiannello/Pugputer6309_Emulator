@@ -477,6 +477,12 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   refusals (bank 0, uninstalled pages, the stack's bank), RAM-size probing (4 to 256 pages),
   page copy (unaligned, whole page, callers' remapped banks, stack in any bank, interrupt mask
   kept, bad ranges rejected), and the BIOS/DOS memory layout check.
+- `test_bios_audit.cpp` -- BIOS robustness (see `../bios/README.md`): SD retries, no card, a
+  card stuck BUSY, block buffers reaching the ROM, UART error flags, the S-record loader fed
+  malformed and dangerous records, corrupt boot sectors and a card dying mid-load, crashing
+  programs recovering to the shell (illegal opcode, bad stack, divide by zero, SWI), and the
+  stack the calls need. The SD device has fault-injection hooks for this
+  (`set_card_present`, `set_stuck_busy`, `fail_next_reads/writes`, `fail_reads_after`).
 - `test_shell.cpp` -- the program loader and the shell, with real keystrokes through the
   whole boot chain (each test on its own small disk image): the built-in commands (DIR, CD,
   MD, RD, DEL, REN, TYPE, COPY, VER, MEM, HELP) and their errors, line editing, running

@@ -71,6 +71,8 @@ SD_CMDSTA   equ  SD_BASE+3  ; WRITE: command (1=READ block at LBA into
 
 SD_CMD_READ  equ  1
 SD_CMD_WRITE equ  2
+SD_TRIES    equ  3           ; attempts at a block command the card reports as failed
+SD_TIMEOUT  equ  $FFFF       ; polls of BUSY before a command is declared timed out
 SD_CMD_SETHI equ  3          ; latch SD_LBA's current value as block-number
                              ; bits 31..16 (see above)
 SD_STA_BUSY  equ  %00000001
@@ -117,12 +119,18 @@ B_GETS      equ  $0D        ; B: fileref, X: buf adrs, Y: buf len (raw, no
                              ; echo, stops at CR or full) -> X: strlen
 B_GET       equ  $0E        ; B: fileref, X: buf adrs, Y: max len (non-
                              ; blocking) -> X: actual len read
-B_IOCTL     equ  $0F        ; B: fileref, E: func code, F: param byte
+B_IOCTL     equ  $0F        ; B: fileref, E: func code, F: param byte -> B: the
+                             ; function's result, where it has one
 B_FSEEK     equ  $10        ; (reserved; not implemented until SD exists)
 B_BLK_READ  equ  $11        ; X: 16-bit LBA, Y: RAM buffer adrs -> reads
                              ; 512 bytes from the SD device into [Y..Y+511]
 B_BLK_WRITE equ  $12        ; X: 16-bit LBA, Y: RAM buffer adrs -> writes
                              ; [Y..Y+511] to the SD device
+                             ; Both (and the 32-bit forms) retry a command the card
+                             ; reports as failed (SD_TRIES attempts) and fail with
+                             ; ERR_NOCARD, ERR_TIMEOUT (BUSY for SD_TIMEOUT polls) or
+                             ; ERR_IOERR; ERR_BADPARAM if the 512-byte buffer isn't
+                             ; entirely below the ROM ($F000).
                              ; (Both address only the first 64K blocks = 32MB;
                              ; see B_BLK_READ32/B_BLK_WRITE32 below.)
 ; Resident DOS calls (dos/dos.asm, API version DOS_API_VERSION). All of them are
@@ -227,6 +235,8 @@ B_BLK_READ32  equ B_DOS_END+6 ; X: LBA low word, W: LBA high word, Y: RAM buffer
 B_BLK_WRITE32 equ B_DOS_END+7 ; same arguments; writes [Y..Y+511]
 NUM_BCALLS  equ  B_DOS_END+8
 
+DOS_MAXSECT equ  ($4000-DOS_LOAD)/512 ; the most sectors SD_BOOT_TRY will load for DOS:
+                             ; it has to fit in bank 0
 DOS_LOAD    equ  $0600       ; where SD_BOOT_TRY loads dos/dos.asm and jumps to it
                              ; (dos.asm ORGs here too, so nothing is hand-synced).
                              ; Must be above the BIOS's RAM (EndOfVars in
@@ -269,6 +279,8 @@ ERR_BADPATH equ  $0F        ; a name that isn't a valid 8.3 name / too long
 ERR_TOOBIG  equ  $10        ; a size or position beyond what this DOS handles
 ERR_BADPARAM equ $11        ; an argument out of range (bank, page, offset, length)
 ERR_BADEXE  equ  $12        ; B_EXEC: not a valid program file (magic, flags, addresses)
+ERR_NOCARD  equ  $13        ; block calls: no SD card present
+ERR_TIMEOUT equ  $14        ; block calls: the card stayed BUSY (SD_TIMEOUT polls)
 
 ; B_FOPEN_NAME mode values
 FOPEN_READ   equ $00        ; must exist; read (and seek) only
@@ -291,6 +303,15 @@ UT_IOC_SETCTL equ $00       ; F: new UART Control Register value (raw HW
                              ; encoding -- baud rate / word length / stop
                              ; bits, see R65C51 datasheet Control Register).
                              ; Waits for TX idle before applying.
+UT_IOC_GETERR equ $01       ; -> B: the UART error flags seen since the last call
+                             ; (then cleared): bit 0 parity, bit 1 framing, bit 2
+                             ; receiver overrun (the R65C51's own status bits), bit 3
+                             ; the RX ring buffer overflowed (a received byte was
+                             ; dropped because nobody read the buffer in time)
+UT_ERR_PARITY equ $01
+UT_ERR_FRAMING equ $02
+UT_ERR_OVERRUN equ $04
+UT_ERR_RXFULL equ $08
 
 ; -----------------------------------------------------------------------------
 ; Native-mode interrupt/SWI stack frame offsets, relative to S immediately

@@ -334,6 +334,7 @@ BIOS_IOCTL  LDB  SWI2_B,S
             LDB  SWI2_F,S
             JSR  ,U
             BCS  BIO_IOC_ERR
+            STB  SWI2_B,S    ; the function's result, if it has one
             JMP  BC_OK
 BIO_IOC_ERR STA  SWI2_A,S
             OIM  #$01,SWI2_CC,S

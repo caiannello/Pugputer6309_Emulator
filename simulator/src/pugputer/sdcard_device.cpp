@@ -28,8 +28,9 @@ uint8_t SdCardDevice::read(uint16_t offset) {
             return b;
         }
         case 3: {
-            uint8_t status = 0; // BUSY always clear -- synchronous model
-            if (is_open()) status |= kStaCard;
+            uint8_t status = 0; // BUSY always clear -- synchronous model (unless stuck)
+            if (stuck_busy_) status |= kStaBusy;
+            if (is_open() && card_present_) status |= kStaCard;
             if (last_error_) status |= kStaError;
             return status;
         }
@@ -67,8 +68,20 @@ void SdCardDevice::do_command(uint8_t cmd) {
         cursor_ = 0;
         return;
     }
-    if (!is_open()) {
+    if (!is_open() || !card_present_) {
         last_error_ = true;
+        cursor_ = 0;
+        return;
+    }
+    if (cmd == kCmdRead || cmd == kCmdWrite) ++commands_;
+    if (cmd == kCmdRead && fail_reads_after_ >= 0 && static_cast<int64_t>(commands_) > fail_reads_after_) {
+        last_error_ = true; // dead from here on
+        cursor_ = 0;
+        return;
+    }
+    if ((cmd == kCmdRead && fail_reads_ > 0) || (cmd == kCmdWrite && fail_writes_ > 0)) {
+        --(cmd == kCmdRead ? fail_reads_ : fail_writes_);
+        last_error_ = true; // a transient failure: the command did nothing
         cursor_ = 0;
         return;
     }

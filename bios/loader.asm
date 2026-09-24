@@ -17,6 +17,7 @@ LOADER_START EXPORT
 ;------------------------------------------------------------------------------
 UT_PUTS     EXTERN          ; serio.asm
 UT_GETC     EXTERN
+USER_RAM    EXTERN          ; main.asm: the start of RAM the BIOS doesn't own
 S_LEN       EXTERN          ; helpers.asm
 S_HEXA      EXTERN
 ;------------------------------------------------------------------------------
@@ -31,6 +32,7 @@ SRECCHK     RMB  1          ; running checksum of the current S-record line
 SRECBC      RMB  1          ; byte count of the current S-record line
 SRECBUF     RMB  40         ; decoded binary: addr(2), data, checksum(1)
 HEXTMP      RMB  1
+SRECLEN     RMB  2          ; length of the line being parsed
     ENDSECT
 ;------------------------------------------------------------------------------
     SECT code
@@ -58,6 +60,8 @@ KLOOP       JSR  UT_GETC
             BEQ  GOTCR
             CMPA #'.
             BEQ  GOTDOT
+            CMPX #LINBUF+95     ; a full line buffer: drop the rest (the record
+            BHS  KLOOP          ; then fails its checksum rather than overrunning)
             STA  ,X+
             BRA  KLOOP
 L_CANCEL    LDY  #MSG_CANCEL
@@ -76,20 +80,32 @@ GOTDOT      LDY  #MSG_RUN
 GOTCR       CLR  ,X
             LDX  #LINBUF
             JSR  S_LEN          ; D = length
+            STD  SRECLEN
             CMPD #4
-            BLO  ENDPARSE       ; too short to be a real record
+            LBLO ENDPARSE       ; too short to be a real record
             LDA  ,X+
             CMPA #'S
-            BNE  ENDPARSE
+            LBNE ENDPARSE
             LDA  ,X+
             CMPA #'9
-            BEQ  GOT_SEOF
+            LBEQ GOT_SEOF
             CMPA #'1
-            BNE  ENDPARSE
+            LBNE ENDPARSE
             CLRA
             STA  SRECCHK
             JSR  SRECREAD       ; byte count octet
             STA  SRECBC
+            CMPA #4             ; address + checksum + at least one data byte ...
+            LBLO REJECT
+            CMPA #40            ; ... and no more than SRECBUF holds
+            LBHI REJECT
+            CLRB                ; the line must be long enough to hold them all:
+            TFR  A,B            ; "S1" + count digits + 2 hex digits per byte
+            CLRA
+            ASLD
+            ADDD #4
+            CMPD SRECLEN
+            LBHI REJECT
             LDY  #SRECBUF
             LDB  SRECBC
 OCTLOOP     JSR  SRECREAD
@@ -111,15 +127,25 @@ BADLINE     LDX  #LINBUF        ; report the (possibly partial) address
             JSR  UT_PUTS
             BRA  ENDPARSE
 GOODLINE    LDY  SRECBUF        ; destination address
-            LDX  #(SRECBUF+2)   ; source: the data bytes just after it
+            CMPY <USER_RAM      ; never over the BIOS's own RAM ...
+            LBLO REJECT
+            CMPY #EXE_MAXTOP    ; ... nor the ROM / I/O registers
+            LBHS REJECT
             LDB  SRECBC
-            SUBB #3             ; minus address(2) and checksum(1)
+            SUBB #3             ; minus address(2) and checksum(1): the data bytes
+            LEAX B,Y
+            CMPX #EXE_MAXTOP
+            LBHI REJECT         ; (the data must end below the ROM)
+            LDX  #(SRECBUF+2)   ; source: the data bytes just after the address
 XWRLOOP     LDA  ,X+
             STA  ,Y+
             DECB
             BNE  XWRLOOP
 ENDPARSE    LDX  #LINBUF
             LBRA KLOOP
+REJECT      LDY  #MSG_BADREC    ; a record that can't be right (or can't be put where
+            JSR  UT_PUTS        ; it says): say so, load nothing
+            BRA  ENDPARSE
 GOT_SEOF    LDY  #MSG_COMPLETE
             JSR  UT_PUTS
             LDX  #LINBUF
@@ -153,6 +179,8 @@ READHEXDIGIT
             CMPA #9
             BLE  READHEX_OK
             SUBA #7
+            CMPA #10            ; (":" .. "@" are not digits)
+            BLO  READHEX_ERR
             CMPA #$F
             BLE  READHEX_OK
 READHEX_ERR PULS A

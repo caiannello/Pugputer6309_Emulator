@@ -72,6 +72,25 @@ struct Basic309Session {
         return wait_for("> ", 20000000);
     }
 
+    // Boots the BIOS (from the reset vector) with or without a disk (`disk_img` null:
+    // no SD device mapped at all) and runs until the console shows `needle`. For
+    // the boot prompt / boot-failure tests.
+    bool boot_raw(const char* bios_s19, const char* disk_img, const std::string& needle, uint64_t budget = 30000000) {
+        std::vector<uint8_t> bios_image(65536, 0);
+        if (!pugputer::load_srec_file(bios_s19, bios_image.data(), bios_image.size()).ok) return false;
+        bios_rom.load(bios_image.data() + kBiosBase, kBiosSize);
+        bus.map_device("bios_rom", kBiosBase, static_cast<uint16_t>(kBiosSize), &bios_rom, pugputer::IrqLine::None);
+        if (disk_img) {
+            if (!sd.open(disk_img)) return false;
+            bus.map_device("sdcard", 0xFFD8, 4, &sd, pugputer::IrqLine::None);
+        }
+        bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
+        bus.map_bank_registers();
+        uart.set_tx_callback([this](uint8_t b) { received += static_cast<char>(b); });
+        bus.reset();
+        return wait_for(needle, budget);
+    }
+
     // The same, then starts BASIC from the shell like a user would (type BASIC).
     bool boot_disk(const char* bios_s19, const char* disk_img) {
         if (!boot_shell(bios_s19, disk_img)) return false;

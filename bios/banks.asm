@@ -33,6 +33,7 @@
     INCLUDE defines.d
 ;------------------------------------------------------------------------------
 PAGE_INIT        EXPORT
+BANKS_IDENTITY   EXPORT
 BIOS_BANK_GET    EXPORT
 BIOS_BANK_SET    EXPORT
 BIOS_PAGE_ALLOC  EXPORT
@@ -139,6 +140,21 @@ PGL_DONE    PULS B,PC
 ; caller's SWI2 frame (SWI2_* in defines.d) -- see main.asm's dispatcher notes: no
 ; JSR may be outstanding when they finish (BC_OK/BC_ERR/RTI end them), and BIOS
 ; variables are addressed with ">" (extended) because the caller's DP isn't ours.
+;------------------------------------------------------------------------------
+; Banks 1..3 back at pages 1..3 (the reset mapping), shadows included. Used when a
+; program has crashed: whatever it did to the banks, the BIOS and the next program
+; start from the mapping they expect. Trashes A.
+BANKS_IDENTITY
+            LDA  #1
+            STA  >SBANK_1
+            STA  MBANK_1
+            INCA
+            STA  >SBANK_1+1
+            STA  MBANK_2
+            INCA
+            STA  >SBANK_1+2
+            STA  MBANK_3
+            RTS
 ;------------------------------------------------------------------------------
 BIOS_BANK_GET
             LDB  SWI2_B,S

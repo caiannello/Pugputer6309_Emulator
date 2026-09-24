@@ -44,6 +44,7 @@ BIOS_PAGE_FREE  EXTERN
 BIOS_PAGE_INFO  EXTERN
 BIOS_PAGE_COPY  EXTERN
 PAGE_INIT       EXTERN
+BANKS_IDENTITY  EXTERN
 SD_BOOT_TRY     EXTERN      ; sdcard.asm - tries an SD disk boot; returns
                              ; (falls through to LOADER_START) if none found
 LOADER_START    EXTERN      ; loader.asm - boot prompt entry point
@@ -129,7 +130,8 @@ FAULT_DIV0  LDX  #FAULTMSG_DIV0
 ; back to the boot prompt. A real monitor can replace this vector later.
 
 V_SWI       LDX  #FAULTMSG_SWI
-            ; fall through
+            LBRA FAULT_COMMON   ; (this used to "fall through" -- into the message
+                                 ; strings below, executing them as code)
 
 FAULTMSG_ILL  FCC  "*** ILLEGAL OPCODE at $"
               FCB  0
@@ -139,17 +141,26 @@ FAULTMSG_SWI  FCC  "*** BREAKPOINT at $"
               FCB  0
 
 FAULT_COMMON
+            LDD  SWI2_PC,S      ; where it happened (native-mode frame), taken before
+            LDS  #STACK_END     ; S is replaced: the crashed program's stack, and its
+            PSHS D              ; direct page and bank mapping, may be what broke
             TFR  X,Y
+            CLRA
+            TFR  A,DP
+            JSR  BANKS_IDENTITY
             JSR  UT_PUTS
             LDX  #FAULTBUF
-            LDA  SWI2_PC,S      ; native-mode frame: PC high byte
-            JSR  S_HEXA
-            LDA  SWI2_PC+1,S    ; PC low byte
-            JSR  S_HEXA
+            PULS D
+            JSR  S_HEXA         ; PC high byte
+            TFR  B,A
+            JSR  S_HEXA         ; PC low byte
             JSR  S_EOL
             LDY  #FAULTBUF
             JSR  UT_PUTS
-            JMP  LOADER_START   ; not resumable -- back to the boot prompt
+            ANDCC #$AF          ; interrupts on: the console needs them
+            LDA  #B_EXIT        ; not resumable. With a DOS in RAM, restart the shell
+            SWI2                ; (this doesn't come back) ...
+            JMP  LOADER_START   ; ... else back to the boot prompt
 
 ; Default stubs for the vectors nothing uses yet
 
@@ -302,16 +313,13 @@ V_RESET     LDMD #$01       ; Enable 6309 native mode
             LDY  #0         ; replicate that single zeroed byte forward --
             LDW  #EndOfVars ; about 4x faster than a byte-at-a-time loop.
             TFM  X,Y+
+            ; Init stack pointer (must be valid before any interrupt, incl.
+            ; NMI, which is non-maskable and could fire immediately -- the
+            ; 6309 holds NMI off until S is first loaded)
+            LDS  #STACK_END
             ; Map memory bank registers 1-3 to the first 4 physical pages
-            LDA  #$01       ; Map RAM $004000
-            STA  MBANK_1    ; ..to CPU adrs $4000
-            STA  <SBANK_1   ; keep a readable copy (the register is W/O)
-            LDA  #$02       ; Map RAM $008000
-            STA  MBANK_2    ; ..at CPU adrs $8000
-            STA  <SBANK_2
-            LDA  #$03       ; Map RAM $00C000
-            STA  MBANK_3    ; ..at CPU adrs $C000
-            STA  <SBANK_3
+            ; (and keep readable copies: the registers are write-only)
+            JSR  BANKS_IDENTITY
             LDX  #EndOfVars ; Note the start of free RAM in a public var
             STX  <USER_RAM
             LDX  #RAM_JTAB
@@ -329,9 +337,6 @@ DJ_FILL     LDD  #DOS_NOTPRESENT
             STD  ,X++
             LEAY -1,Y
             BNE  DJ_FILL
-            ; Init stack pointer (must be valid before any interrupt, incl.
-            ; NMI, which is non-maskable and could fire immediately)
-            LDS  #STACK_END
             JSR  PAGE_INIT      ; banks.asm: probe the installed RAM, build the page map
             JSR  DEV_INIT       ; devio.asm: clear device table, add F_NULL
             JSR  UT_INIT        ; serio.asm: UART + adds F_UART

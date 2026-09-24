@@ -30,9 +30,11 @@ constexpr uint8_t B_FGETC = 0x1B, B_FPUTC = 0x1C, B_FREAD = 0x1D, B_FWRITE = 0x1
                   B_EXIT = 0x2B;
 constexpr uint8_t B_BANK_GET = 0x2C, B_BANK_SET = 0x2D, B_PAGE_ALLOC = 0x2E, B_PAGE_FREE = 0x2F,
                   B_PAGE_INFO = 0x30, B_PAGE_COPY = 0x31;
-constexpr uint8_t ERR_BADDEV = 0x02, ERR_NOTFOUND = 0x05, ERR_NOSPACE = 0x06, ERR_NOSLOT = 0x07, ERR_EXISTS = 0x08,
+constexpr uint8_t ERR_BADDEV = 0x02, ERR_IOERR = 0x04, ERR_NOTFOUND = 0x05, ERR_NOSPACE = 0x06, ERR_NOSLOT = 0x07, ERR_EXISTS = 0x08,
                   ERR_EOF = 0x09, ERR_ISOPEN = 0x0A, ERR_BADMODE = 0x0B, ERR_NOTDIR = 0x0C, ERR_ISDIR = 0x0D,
-                  ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10, ERR_BADPARAM = 0x11, ERR_BADEXE = 0x12;
+                  ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10, ERR_BADPARAM = 0x11, ERR_BADEXE = 0x12, ERR_NOCARD = 0x13, ERR_TIMEOUT = 0x14;
+constexpr uint8_t B_IOCTL = 0x0F, B_BLK_READ = 0x11, B_BLK_WRITE = 0x12, B_BLK_READ32 = 0x32, B_BLK_WRITE32 = 0x33;
+constexpr uint8_t F_UART = 0x08, UT_IOC_GETERR = 0x01;
 constexpr uint8_t READ = 0, WRITE = 1, APPEND = 2, UPDATE = 3;
 constexpr uint8_t FROM_START = 0, FROM_CUR = 1, FROM_END = 2; // (SEEK_* are stdio macros)
 constexpr uint8_t ATTR_DIR = 0x10;
@@ -63,6 +65,7 @@ struct DosSession {
 
     struct Result {
         uint8_t a = 0;
+        uint8_t b = 0; // (B_IOCTL hands its result back here)
         uint16_t x = 0, y = 0;
         bool carry = false;
         bool ok() const { return !carry; }
@@ -115,6 +118,7 @@ struct DosSession {
         }
         Result res;
         res.a = r.a;
+        res.b = r.b;
         res.x = r.x;
         res.y = r.y;
         res.carry = (r.cc & 0x01) != 0;
