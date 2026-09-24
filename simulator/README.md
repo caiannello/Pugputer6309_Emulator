@@ -185,6 +185,26 @@ simulator's own view, for tests. The BIOS keeps bank 0 permanently on page 0
 (its variables, and the resident DOS, live there); applications may remap
 banks 1-3. All the BIOS-based harnesses and demos call `map_bank_registers()`.
 
+**The BIOS bank service** (`bios/banks.asm`, function codes `$29`-`$2E` in `bios/defines.d`).
+Applications never write the bank registers directly (that would desynchronize the shadow
+copies); they call the BIOS:
+
+- `B_BANK_GET` / `B_BANK_SET` read and change the page shown in a bank. Bank 0 is refused (it is
+  the system's), as is a page that isn't installed and the bank the caller's own stack is in
+  (remapping it would strand the SWI2 frame the call returns through) -- `ERR_BADPARAM`.
+- `B_PAGE_ALLOC` / `B_PAGE_FREE` / `B_PAGE_INFO` -- an allocator over the 16KB pages: lowest free
+  page first, pages 0-3 never handed out (page 0 is the system's; 1-3 are the reset mapping of
+  banks 1-3, where a 64KB program such as BASIC runs). `B_PAGE_INFO` reports installed and free
+  page counts.
+- `B_PAGE_COPY` copies a byte range between two pages (any pair, whatever the banks show)
+  through temporary mappings in two banks other than the stack's, with interrupts masked only
+  while the mapping differs from the caller's, then restores the caller's mapping.
+
+At reset `PAGE_INIT` probes the RAM (tags at the start of each page, verified ascending) to find
+how many pages are installed (4 to 256), so the same BIOS runs on any populated size.
+The resident DOS is loaded at the fixed address `DOS_LOAD` (`$0600`), which must stay above the
+BIOS's variables (`test_bios_layout` checks it against `pugbios.map`).
+
 `IrqLine::IRQ`/`FIRQ` are level-sensitive: `SystemBus::step()` recomputes
 each line every step as the OR of every device mapped to it, and pushes
 the result to the CPU. `IrqLine::NMI` is edge-pulsed on a device's
@@ -446,6 +466,11 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   the page offset coming from CPU A13..A0, banks sharing a page, reaching all
   1MB, uninstalled pages floating high, ROM/IO unaffected, and the CPU running
   code and using a stack through remapped banks.
+- `test_bios_banks.cpp` -- the BIOS bank service through real SWI2 calls: page info after boot,
+  allocator order/exhaustion/double-free, bank get/set against the hardware registers and their
+  refusals (bank 0, uninstalled pages, the stack's bank), RAM-size probing (4 to 256 pages),
+  page copy (unaligned, whole page, callers' remapped banks, stack in any bank, interrupt mask
+  kept, bad ranges rejected), and the BIOS/DOS memory layout check.
 - `test_system_bus.cpp` -- RAM fallback outside any mapping, a mapped
   mock `IDevice` intercepting its address window, IRQ-line OR-ing and
   CPU-mask respecting, and devices receiving the exact cycle count

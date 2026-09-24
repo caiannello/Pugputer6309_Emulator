@@ -21,7 +21,7 @@ only BASIC.
 
 | Range          | What |
 |----------------|------|
-| `$04FE-$2AC6`  | resident DOS (code, variables, eight 512-byte file buffers) -- below `WORKBASE` |
+| `$0600-$2BD8`  | resident DOS (code, variables, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE` |
 | `$3000`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$30`); its top, `PROGST`, moves as variables are added. Must stay above the end of DOS (`dos/dos.lst`). |
 | `PROGST+1`     | start of the BASIC program, then variables, arrays, free memory |
 | `$BFFF`        | fixed top of string space (`TOPRAM_FIXED`) |

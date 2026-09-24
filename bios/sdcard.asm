@@ -223,11 +223,11 @@ SDBOOT_CHK  LDA  ,X+
             LDB  14,X           ; low byte, offset $0E
             SUBD #1             ; minus the boot sector itself (already read)
             STD  SDBOOT_CNT
-            ; Load the reserved sectors (dos/dos.asm) starting at LBA 1,
-            ; straight into [USER_RAM], overwriting the boot-sector scratch
-            ; now that the fields needed from it have been extracted.
+            ; Load the reserved sectors (dos/dos.asm) starting at LBA 1 to
+            ; DOS_LOAD (which may overlap the boot-sector scratch: the fields
+            ; needed from it have been extracted by now).
             LDX  #1
-            LDY  <USER_RAM
+            LDY  #DOS_LOAD
 SDBOOT_LOAD LDD  SDBOOT_CNT
             BEQ  SDBOOT_GO
             PSHS X,Y,D
@@ -238,7 +238,7 @@ SDBOOT_LOAD LDD  SDBOOT_CNT
             LEAX 1,X
             LEAY 512,Y
             BRA  SDBOOT_LOAD
-SDBOOT_GO   LDX  <USER_RAM
+SDBOOT_GO   LDX  #DOS_LOAD
             LDY  #JT_DOS        ; DOS gets its call table's address in Y (no hand-synced constant)
             JMP  ,X             ; hand off to DOS -- never returns
 SDBOOT_NONE RTS                 ; caller falls through to LOADER_START

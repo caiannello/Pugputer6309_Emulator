@@ -35,6 +35,13 @@ BIOS_NOTIMPL    EXTERN
 BIOS_BLK_READ   EXTERN      ; sdcard.asm
 BIOS_BLK_WRITE  EXTERN
 BIOS_DOS        EXTERN      ; sdcard.asm: every resident-DOS call (codes B_FOPEN_NAME..)
+BIOS_BANK_GET   EXTERN      ; banks.asm
+BIOS_BANK_SET   EXTERN
+BIOS_PAGE_ALLOC EXTERN
+BIOS_PAGE_FREE  EXTERN
+BIOS_PAGE_INFO  EXTERN
+BIOS_PAGE_COPY  EXTERN
+PAGE_INIT       EXTERN
 SD_BOOT_TRY     EXTERN      ; sdcard.asm - tries an SD disk boot; returns
                              ; (falls through to LOADER_START) if none found
 LOADER_START    EXTERN      ; loader.asm - boot prompt entry point
@@ -51,6 +58,7 @@ JT_IRQ          EXPORT      ; RAM jump table IRQ slot -- serio.asm hooks it
 ; JT_IRQ already uses for UT_ISR.
 JT_DOS          EXPORT
 DOSMASK         EXPORT      ; BIOS_DOS scratch byte (sdcard.asm)
+SBANK_1         EXPORT      ; the readable copies of bank registers 1..3 (banks.asm)
 USER_RAM        EXPORT      ; first byte of RAM the BIOS doesn't use
 BC_OK           EXPORT      ; devio.asm's handlers tail-call these to store
 BC_ERR          EXPORT      ; a result into the SWI2 frame before returning
@@ -169,12 +177,18 @@ V_SW2       LDA  SWI2_A,S       ; caller's function code
             BLO  SW2_OK
             LDA  #ERR_BADFN
             JMP  BC_ERR
-SW2_OK      CMPA #B_FOPEN_NAME  ; codes from here up are the resident DOS's:
+SW2_OK      CMPA #B_BANK_GET
+            BHS  SW2_BANK       ; the banking calls: BANK_TAB
+            CMPA #B_FOPEN_NAME  ; codes from here up to there are the resident DOS's:
             LBHS BIOS_DOS       ; one generic handler, not a table entry each
             LSLA                ; word index into BIOS_TAB
             LDX  #BIOS_TAB
             JMP  [A,X]          ; indexed-indirect, accumulator offset:
                                 ; dispatch straight into the handler
+SW2_BANK    SUBA #B_BANK_GET
+            LSLA
+            LDX  #BANK_TAB
+            JMP  [A,X]
 
 ; Shared epilogues every BIOS_* handler in devio.asm tail-calls (JMP, not
 ; JSR) as its last step. Writing into the stack frame is what actually
@@ -212,6 +226,18 @@ BIOS_TAB    FDB  BIOS_DQUERY     ; $00 B_DQUERY
             FDB  BIOS_NOTIMPL    ; $10 B_FSEEK
             FDB  BIOS_BLK_READ   ; $11 B_BLK_READ
             FDB  BIOS_BLK_WRITE  ; $12 B_BLK_WRITE
+
+; The banking calls (banks.asm), from B_BANK_GET up.
+BANK_TAB    FDB  BIOS_BANK_GET    ; $29 B_BANK_GET
+            FDB  BIOS_BANK_SET    ; $2A B_BANK_SET
+            FDB  BIOS_PAGE_ALLOC  ; $2B B_PAGE_ALLOC
+            FDB  BIOS_PAGE_FREE   ; $2C B_PAGE_FREE
+            FDB  BIOS_PAGE_INFO   ; $2D B_PAGE_INFO
+            FDB  BIOS_PAGE_COPY   ; $2E B_PAGE_COPY
+BANK_TAB_END
+    IFNE (BANK_TAB_END-BANK_TAB)-2*(NUM_BCALLS-B_BANK_GET)
+    ERROR "BANK_TAB must have one entry per banking call (see defines.d)"
+    ENDC
 
 ; -----------------------------------------------------------------------------
 ; This ROM template gets copied to RAM_JTAB during cold start (see V_RESET)
@@ -301,6 +327,7 @@ DJ_FILL     LDD  #DOS_NOTPRESENT
             ; Init stack pointer (must be valid before any interrupt, incl.
             ; NMI, which is non-maskable and could fire immediately)
             LDS  #STACK_END
+            JSR  PAGE_INIT      ; banks.asm: probe the installed RAM, build the page map
             JSR  DEV_INIT       ; devio.asm: clear device table, add F_NULL
             JSR  UT_INIT        ; serio.asm: UART + adds F_UART
             JSR  DEV_STDIO_ALIAS

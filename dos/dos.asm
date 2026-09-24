@@ -4,10 +4,9 @@
 ;
 ; Loaded by bios/sdcard.asm's SD_BOOT_TRY from the FAT16 volume's reserved
 ; sectors (not ROM -- this is disk payload, assembled to a flat raw binary
-; and written there by simulator/tools/mkdiskimg.cpp) into RAM at ORG below,
-; which must match wherever bios/main.asm's EndOfVars/USER_RAM currently
-; falls (see bios/pugbios.map after a bios rebuild) -- the one remaining
-; hand-verified cross-module constant, like basic309's BASIC_ENTRY.
+; and written there by simulator/tools/mkdiskimg.cpp) into RAM at DOS_LOAD
+; (bios/defines.d, shared by the BIOS's loader and this ORG, so it can't
+; drift; it just has to be above the BIOS's RAM, which test_bios_layout checks).
 ;
 ; Two jobs, both against the same FAT16 volume (BPB fields parsed once at
 ; boot into resident variables both share):
@@ -40,7 +39,7 @@
 ;------------------------------------------------------------------------------
     INCLUDE defines.d
 ;------------------------------------------------------------------------------
-    ORG  $04FE          ; MUST match bios/pugbios.map's EndOfVars/USER_RAM
+    ORG  DOS_LOAD       ; where the BIOS loads and starts us (defines.d)
 ;------------------------------------------------------------------------------
 BASIC_ENTRY   equ $C000   ; basic309's fixed entry: a JMP RESVEC at the start of its image
 ;------------------------------------------------------------------------------

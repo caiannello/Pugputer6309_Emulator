@@ -27,9 +27,11 @@ constexpr uint8_t B_OPENDIR = 0x17, B_READDIR = 0x18, B_KILL_NAME = 0x19, B_RENA
 constexpr uint8_t B_FGETC = 0x1B, B_FPUTC = 0x1C, B_FREAD = 0x1D, B_FWRITE = 0x1E, B_FSEEK_NAME = 0x1F,
                   B_FSTAT_NAME = 0x20, B_FFLUSH = 0x21, B_MKDIR = 0x22, B_RMDIR = 0x23, B_CHDIR = 0x24,
                   B_GETCWD = 0x25, B_CLOSEDIR = 0x26, B_STAT = 0x27, B_DOS_VERSION = 0x28;
+constexpr uint8_t B_BANK_GET = 0x29, B_BANK_SET = 0x2A, B_PAGE_ALLOC = 0x2B, B_PAGE_FREE = 0x2C,
+                  B_PAGE_INFO = 0x2D, B_PAGE_COPY = 0x2E;
 constexpr uint8_t ERR_BADDEV = 0x02, ERR_NOTFOUND = 0x05, ERR_NOSPACE = 0x06, ERR_NOSLOT = 0x07, ERR_EXISTS = 0x08,
                   ERR_EOF = 0x09, ERR_ISOPEN = 0x0A, ERR_BADMODE = 0x0B, ERR_NOTDIR = 0x0C, ERR_ISDIR = 0x0D,
-                  ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10;
+                  ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10, ERR_BADPARAM = 0x11;
 constexpr uint8_t READ = 0, WRITE = 1, APPEND = 2, UPDATE = 3;
 constexpr uint8_t FROM_START = 0, FROM_CUR = 1, FROM_END = 2; // (SEEK_* are stdio macros)
 constexpr uint8_t ATTR_DIR = 0x10;
@@ -40,6 +42,7 @@ struct DosSession {
     static constexpr uint16_t kBiosBase = 0xF000;
     static constexpr uint32_t kBiosSize = 0x1000;
     static constexpr uint16_t kStub = 0x9F00;     // SWI2 ; BRA *
+    static constexpr uint16_t kStub0 = 0x3F00;    // the same stub in bank 0, which banking tests never remap
     static constexpr uint16_t kNameBuf = 0x9E00;  // paths for open/kill/mkdir/... (NUL-terminated)
     static constexpr uint16_t kNameBuf2 = 0x9E60; // a second name (rename's new name)
     static constexpr uint16_t kStatBuf = 0x9EC0;  // 16-byte FSTAT/STAT/READDIR results
@@ -50,6 +53,12 @@ struct DosSession {
     pugputer::SystemBus bus;
     pugputer::UartR65C51 uart;
     std::string console;
+
+    // Banking tests: run the stub in bank 0 and/or put the stack somewhere specific.
+    uint16_t stub = kStub;
+    int stack = -1; // -1: leave S as BASIC had it
+
+    explicit DosSession(size_t ram_pages = 64) : bus(ram_pages) {}
 
     struct Result {
         uint8_t a = 0;
@@ -72,14 +81,16 @@ struct DosSession {
         bus.run(6000000); // BIOS, disk boot, DOS start, BASIC banner and prompt
         if (console.find("OK") == std::string::npos) return false;
         uint8_t* ram = bus.ram();
-        ram[kStub] = 0x10; // SWI2
-        ram[kStub + 1] = 0x3F;
-        ram[kStub + 2] = 0x20; // BRA *
-        ram[kStub + 3] = 0xFE;
+        for (uint16_t at : {kStub, kStub0}) {
+            ram[at] = 0x10; // SWI2
+            ram[at + 1] = 0x3F;
+            ram[at + 2] = 0x20; // BRA *
+            ram[at + 3] = 0xFE;
+        }
         return true;
     }
 
-    Result call(uint8_t fn, uint8_t b = 0, uint8_t e = 0, uint16_t x = 0, uint16_t y = 0) {
+    Result call(uint8_t fn, uint8_t b = 0, uint8_t e = 0, uint16_t x = 0, uint16_t y = 0, uint16_t u = 0) {
         hd6309_regs_t r{};
         hd6309_get_regs(bus.cpu(), &r);
         r.a = fn;
@@ -88,13 +99,15 @@ struct DosSession {
         r.f = 0;
         r.x = x;
         r.y = y;
+        r.u = u;
+        if (stack >= 0) r.s = static_cast<uint16_t>(stack);
         r.cc = static_cast<uint8_t>(r.cc & ~0x01); // carry clear going in
-        r.pc = kStub;
+        r.pc = stub;
         hd6309_set_regs(bus.cpu(), &r);
         for (uint64_t spent = 0; spent < 200000000;) {
             spent += bus.step();
             hd6309_get_regs(bus.cpu(), &r);
-            if (r.pc == kStub + 2) break;
+            if (r.pc == stub + 2) break;
         }
         Result res;
         res.a = r.a;

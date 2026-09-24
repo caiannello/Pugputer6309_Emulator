@@ -178,9 +178,34 @@ B_CLOSEDIR  equ  $26         ; B: scan handle
 B_STAT      equ  $27         ; X: path, Y: dest buf (same 16 bytes as FSTAT; the
                              ; position is 0 and the open mode $FF)
 B_DOS_VERSION equ $28        ; -> A: API version (DOS_API_VERSION)
-NUM_BCALLS  equ  $29
-NUM_DOS_JT  equ  NUM_BCALLS-B_FOPEN_NAME ; DOS-resident calls: one JT_DOS slot
+B_DOS_END   equ  $29         ; the DOS calls are B_FOPEN_NAME up to (not including) this
+NUM_DOS_JT  equ  B_DOS_END-B_FOPEN_NAME ; DOS-resident calls: one JT_DOS slot
                              ; each (main.asm), in call-code order
+
+; RAM banking (banks.asm). Bank 0 is always page 0 (the system's); banks 1..3
+; belong to applications. Every bank change must go through B_BANK_SET, which
+; keeps the BIOS's readable shadow copies right (the registers are write-only).
+B_BANK_GET  equ  $29         ; B: bank (0..3) -> A: the page mapped there
+B_BANK_SET  equ  $2A         ; B: bank (1..3), E: page -> maps it. ERR_BADPARAM for
+                             ; bank 0, a page that isn't installed, or the bank the
+                             ; caller's stack is in (remapping that would strand the
+                             ; frame the call returns through)
+B_PAGE_ALLOC equ $2B         ; -> A: a free 16KB RAM page (pages 0..3 are never
+                             ; handed out); ERR_NOSPACE when none are left
+B_PAGE_FREE equ  $2C         ; B: a page from B_PAGE_ALLOC (ERR_BADPARAM otherwise)
+B_PAGE_INFO equ  $2D         ; -> X: installed pages, Y: pages still free
+B_PAGE_COPY equ  $2E         ; B: source page, E: destination page, X: source
+                             ; offset, Y: destination offset, U: length -- copies
+                             ; between two pages regardless of the current banks,
+                             ; leaving the caller's mapping alone. Ranges must stay
+                             ; inside their 16KB page, and inside one page may not
+                             ; overlap (ERR_BADPARAM).
+NUM_BCALLS  equ  $2F
+
+DOS_LOAD    equ  $0600       ; where SD_BOOT_TRY loads dos/dos.asm and jumps to it
+                             ; (dos.asm ORGs here too, so nothing is hand-synced).
+                             ; Must be above the BIOS's RAM (EndOfVars in
+                             ; pugbios.map); test_bios_layout checks that.
 
 DOS_API_VERSION equ $20      ; major*16 + minor: 2.0
 DOS_NFILES  equ  8           ; open files at once (handles 0..7)
@@ -205,6 +230,7 @@ ERR_ISDIR   equ  $0D        ; the path names a directory where a file is needed
 ERR_NOTEMPTY equ $0E        ; B_RMDIR: the directory still has entries
 ERR_BADPATH equ  $0F        ; a name that isn't a valid 8.3 name / too long
 ERR_TOOBIG  equ  $10        ; a size or position beyond what this DOS handles
+ERR_BADPARAM equ $11        ; an argument out of range (bank, page, offset, length)
 
 ; B_FOPEN_NAME mode values
 FOPEN_READ   equ $00        ; must exist; read (and seek) only

@@ -10,9 +10,10 @@ set SRECCAT=%LWDIR%\srec_cat.exe
 %LWASM% sdcard.asm  --6309 --format=obj --output=sdcard.o  --list=sdcard.lst  || exit /b 1
 %LWASM% time.asm    --6309 --format=obj --output=time.o    --list=time.lst    || exit /b 1
 %LWASM% loader.asm  --6309 --format=obj --output=loader.o  --list=loader.lst  || exit /b 1
+%LWASM% banks.asm   --6309 --format=obj --output=banks.o   --list=banks.lst   || exit /b 1
 %LWASM% main.asm    --6309 --format=obj --output=main.o    --list=main.lst    || exit /b 1
 
 rem main.o must be linked LAST -- see compile.sh for why.
-%LWLINK% --format=srec --output=pugbios.s19 --map=pugbios.map --script=linker_script helpers.o devio.o serio.o sdcard.o time.o loader.o main.o || exit /b 1
+%LWLINK% --format=srec --output=pugbios.s19 --map=pugbios.map --script=linker_script helpers.o devio.o serio.o sdcard.o time.o loader.o banks.o main.o || exit /b 1
 
 %SRECCAT% pugbios.s19 -Motorola -o pugbios.hex -Intel

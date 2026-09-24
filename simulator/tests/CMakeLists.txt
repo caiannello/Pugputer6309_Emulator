@@ -61,6 +61,9 @@ else()
 endif()
 
 set(DISK_IMG "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
+set(PUGBIOS_MAP "${CMAKE_CURRENT_SOURCE_DIR}/../../bios/pugbios.map")
+set(BIOS_DEFINES "${CMAKE_CURRENT_SOURCE_DIR}/../../bios/defines.d")
+set(DOS_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.bin")
 if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_sdboot_golden.cpp)
     set(PUGPUTER_HAVE_SDBOOT 1)
@@ -78,6 +81,7 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_files_kill_name.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_dos_stream_api.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_dos_dirs.cpp)
+    list(APPEND PUGPUTER_TEST_SOURCES test_bios_banks.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_seqfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_randomfiles.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_dirs.cpp)
@@ -96,6 +100,9 @@ target_compile_definitions(pugputer_tests PRIVATE
     EXBASROM309_LST_PATH="${EXBASROM309_LST}"
     PUGPUTER_HAVE_SDBOOT=${PUGPUTER_HAVE_SDBOOT}
     DISK_IMG_PATH="${DISK_IMG}"
+    PUGBIOS_MAP_PATH="${PUGBIOS_MAP}"
+    BIOS_DEFINES_PATH="${BIOS_DEFINES}"
+    DOS_BIN_PATH="${DOS_BIN}"
 )
 
 add_test(NAME pugputer_tests COMMAND pugputer_tests)
