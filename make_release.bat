@@ -1,9 +1,9 @@
 @echo off
 rem Builds the Windows x64 binary demo release: dist\Pugputer6309-demo-<version>-win64\ and
-rem the zip next to it. Everything is rebuilt from source: the BIOS, DOS, shell and BASIC
+rem the zip next to it. Everything is rebuilt from source: the BIOS, DOS, shell, editor and BASIC
 rem (needs lwtools -- see README.md), then the emulator in Release configuration with the
 rem C++ runtime linked statically (so there are no DLLs to ship), then a disk image holding
-rem the shell, BASIC and the demo programs.
+rem the shell, the editor, BASIC and the demo programs.
 rem
 rem Needs: lwtools, CMake and Visual Studio 2022 (or its Build Tools) with the C++ workload.
 setlocal
@@ -15,8 +15,8 @@ set BUILD=%ROOT%simulator\build-release
 
 call "%ROOT%lwtools_env.bat" || exit /b 1
 
-echo === Assembling the BIOS, DOS, shell and BASIC ===
-for %%D in (bios dos shell) do (
+echo === Assembling the BIOS, DOS, shell, editor and BASIC ===
+for %%D in (bios dos shell edit) do (
     pushd "%ROOT%%%D" || exit /b 1
     call .\compile.bat || (popd & exit /b 1)
     popd

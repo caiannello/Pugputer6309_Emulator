@@ -1,7 +1,7 @@
 # Pugputer 6309 Simulator
 
 A homebrew computer built around the Hitachi **HD6309** CPU, with its complete software stack --
-BIOS, DOS, shell and BASIC -- and a cycle-counted emulator that runs all of it on a PC.
+BIOS, DOS, shell, a text editor and BASIC -- and a cycle-counted emulator that runs all of it on a PC.
 
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/demo.png?raw=true)
 
@@ -10,7 +10,6 @@ double-click `start-console.bat`. Nothing to install or compile; see the release
 
 ## Future plans
 - Self-hosted assembler/linker
-- Text editor
 - Emulated Graphical display and OPL3 Sound
 
 ## Real Hardware Here!
@@ -23,6 +22,7 @@ double-click `start-console.bat`. Nothing to install or compile; see the release
 | `bios/` | The 4KB boot ROM: reset, an interrupt-driven UART driver, an SD block driver, RAM-bank management, and the `SWI2` system-call interface everything else uses. |
 | `dos/` | The resident DOS: a FAT16 file system (8.3 names, subdirectories, 32-bit file sizes and block numbers, a FAT cache, crash-safe write ordering) and the program loader. |
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
+| `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano. |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release. |
@@ -62,6 +62,9 @@ Every folder has its own `README.md` with the details.
   scripted session.
 - **Programs.** A program is a file with an 8-byte header (load address, entry address);
   `B_EXEC` loads and starts it and `B_EXIT` returns to the shell.
+- **Editor.** `EDIT [file]`: nano's keys (`^O` write out, `^X` exit, `^W` search, `^K`/`^U` cut
+  and paste, `M-A` mark, ...), a title bar, a status line, and it fits itself to the terminal's
+  size. See `edit/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
   `basic309/README.md` for the differences from GW-BASIC.
@@ -97,7 +100,7 @@ Then, from a Developer Command Prompt (or any prompt with `cmake` on the PATH):
 build_all.bat
 ```
 
-That assembles the BIOS, DOS, shell and BASIC, builds the emulator and the tools, makes the disk
+That assembles the BIOS, DOS, shell, editor and BASIC, builds the emulator and the tools, makes the disk
 image `basic309\disk.img`, and runs the test suite (about 150 tests, under a minute in the
 default Release configuration; add `notests` to skip it, or `Debug` for a debug build, in which
 the tests take several minutes). To run the result:

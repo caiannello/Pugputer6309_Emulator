@@ -15,6 +15,13 @@
 // Unless --bios / --disk say otherwise, pugbios.s19 and disk.img are looked for
 // next to the executable first (that is how the binary release is laid out), and
 // then at the paths this build was configured with (the source tree).
+//
+// In console mode the console acts as an ANSI terminal both ways, like the ones a
+// real Pugputer is used from: escape sequences the machine sends are carried out
+// (EDIT.COM draws its screen with them, and asks the terminal's size), and keys
+// arrive as a terminal sends them -- arrows and function keys as escape sequences,
+// Alt+key as Esc then the key, Ctrl+C as ^C. Ctrl+Break (or closing the window)
+// quits.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -23,9 +30,8 @@
 #endif
 #include <windows.h>
 
-#include <conio.h>
-
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -77,7 +83,99 @@ void usage() {
         "  --disk FILE      FAT16 disk image (default: disk.img beside this program)\n"
         "  --help           this text\n"
         "\n"
-        "In console mode, type at the prompt; Ctrl+C quits.\n");
+        "In console mode, type at the prompt; Ctrl+Break quits.\n");
+}
+
+// The console as an ANSI terminal (see the top of the file), and put back as it was
+// when the program ends.
+HANDLE g_in = INVALID_HANDLE_VALUE, g_out = INVALID_HANDLE_VALUE;
+DWORD g_in_mode = 0, g_out_mode = 0;
+bool g_modes_saved = false;
+bool g_vt_input = false; // the console sends escape sequences itself (Windows 10 1809 on)
+
+void restore_console() {
+    if (!g_modes_saved) return;
+    std::fputs("\x1b[r\x1b[0m\x1b[?1049l", stdout); // what a program may have left set
+    std::fflush(stdout);
+    SetConsoleMode(g_in, g_in_mode);
+    SetConsoleMode(g_out, g_out_mode);
+    g_modes_saved = false;
+}
+
+BOOL WINAPI on_console_ctrl(DWORD) {
+    restore_console();
+    return FALSE; // and the default handler ends the program
+}
+
+void setup_console() {
+    g_in = GetStdHandle(STD_INPUT_HANDLE);
+    g_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!GetConsoleMode(g_in, &g_in_mode) || !GetConsoleMode(g_out, &g_out_mode)) return; // redirected
+    g_modes_saved = true;
+    SetConsoleMode(g_out, g_out_mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+                              DISABLE_NEWLINE_AUTO_RETURN);
+    // No line editing or echo, and Ctrl+C is a key like any other.
+    // (ENABLE_EXTENDED_FLAGS keeps Quick Edit, mouse selection, as it was.)
+    DWORD in = g_in_mode & ~(ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_MOUSE_INPUT);
+    in |= ENABLE_EXTENDED_FLAGS;
+    g_vt_input = SetConsoleMode(g_in, in | ENABLE_VIRTUAL_TERMINAL_INPUT) != 0;
+    if (!g_vt_input) SetConsoleMode(g_in, in);
+    SetConsoleCtrlHandler(on_console_ctrl, TRUE);
+    std::atexit(restore_console);
+}
+
+// Without the console's own escape sequences (older Windows): the keys EDIT uses.
+const char* key_sequence(WORD vk) {
+    switch (vk) {
+    case VK_UP: return "\x1b[A";
+    case VK_DOWN: return "\x1b[B";
+    case VK_RIGHT: return "\x1b[C";
+    case VK_LEFT: return "\x1b[D";
+    case VK_HOME: return "\x1b[H";
+    case VK_END: return "\x1b[F";
+    case VK_INSERT: return "\x1b[2~";
+    case VK_DELETE: return "\x1b[3~";
+    case VK_PRIOR: return "\x1b[5~";
+    case VK_NEXT: return "\x1b[6~";
+    case VK_F1: return "\x1bOP";
+    case VK_F2: return "\x1bOQ";
+    case VK_F3: return "\x1bOR";
+    case VK_F4: return "\x1bOS";
+    case VK_F5: return "\x1b[15~";
+    case VK_F6: return "\x1b[17~";
+    case VK_F7: return "\x1b[18~";
+    case VK_F8: return "\x1b[19~";
+    case VK_F9: return "\x1b[20~";
+    case VK_F10: return "\x1b[21~";
+    case VK_F11: return "\x1b[23~";
+    case VK_F12: return "\x1b[24~";
+    default: return nullptr;
+    }
+}
+
+// Whatever has been typed (and the console's replies to the machine's queries) -> the UART.
+void poll_console(UartR65C51& uart) {
+    DWORD pending = 0;
+    while (GetNumberOfConsoleInputEvents(g_in, &pending) && pending > 0) {
+        INPUT_RECORD rec[32];
+        DWORD got = 0;
+        if (!ReadConsoleInputA(g_in, rec, 32, &got) || got == 0) return;
+        for (DWORD i = 0; i < got; ++i) {
+            if (rec[i].EventType != KEY_EVENT || !rec[i].Event.KeyEvent.bKeyDown) continue;
+            const KEY_EVENT_RECORD& k = rec[i].Event.KeyEvent;
+            char ch = k.uChar.AsciiChar;
+            for (WORD n = 0; n < (k.wRepeatCount ? k.wRepeatCount : 1); ++n) {
+                if (g_vt_input) {
+                    if (ch) uart.rx_enqueue(static_cast<uint8_t>(ch));
+                } else if (ch) {
+                    if (k.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) uart.rx_enqueue(0x1B);
+                    uart.rx_enqueue(static_cast<uint8_t>(ch));
+                } else if (const char* seq = key_sequence(k.wVirtualKeyCode)) {
+                    while (*seq) uart.rx_enqueue(static_cast<uint8_t>(*seq++));
+                }
+            }
+        }
+    }
 }
 } // namespace
 
@@ -143,8 +241,9 @@ int main(int argc, char** argv) {
 #endif
 
     if (!use_com) {
-        std::printf("Bridging UART to this console. Type to send bytes; Ctrl+C to quit.\n"
+        std::printf("Bridging UART to this console. Type to send bytes; Ctrl+Break to quit.\n"
                     "(At the shell prompt, type BASIC to start BASIC; SYSTEM leaves it.)\n\n");
+        setup_console();
         uart.set_tx_callback([](uint8_t b) {
             std::putchar(b);
             std::fflush(stdout);
@@ -164,14 +263,7 @@ int main(int argc, char** argv) {
             bridge.poll(uart);
 #endif
         } else {
-            while (_kbhit()) {
-                int ch = _getch();
-                if (ch == 0 || ch == 0xE0) { // an arrow / function key: two codes, neither is text
-                    (void)_getch();
-                    continue;
-                }
-                uart.rx_enqueue(static_cast<uint8_t>(ch));
-            }
+            poll_console(uart);
         }
     }
 }

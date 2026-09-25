@@ -1,5 +1,5 @@
 @echo off
-rem Builds everything from source: the BIOS, DOS, shell and BASIC (with lwtools -- see README.md),
+rem Builds everything from source: the BIOS, DOS, shell, editor and BASIC (with lwtools -- see README.md),
 rem the emulator, the tools and the tests (with CMake and Visual Studio 2022), the disk image
 rem basic309\disk.img, and then runs the test suite.
 rem
@@ -18,8 +18,8 @@ for %%A in (%*) do (
 call "%ROOT%lwtools_env.bat" || exit /b 1
 where cmake >nul 2>nul || (echo ERROR: cmake was not found on the PATH. See README.md, "Building from source". & exit /b 1)
 
-echo === Assembling the BIOS, DOS, shell and BASIC ===
-for %%D in (bios dos shell) do (
+echo === Assembling the BIOS, DOS, shell, editor and BASIC ===
+for %%D in (bios dos shell edit) do (
     pushd "%ROOT%%%D" || exit /b 1
     call .\compile.bat || (popd & exit /b 1)
     popd

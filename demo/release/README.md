@@ -1,9 +1,9 @@
 # Pugputer 6309 -- demo release (Windows x64)
 
 This is a complete, self-contained demo of the **Pugputer 6309**, a homebrew computer built
-around the Hitachi HD6309 CPU: an emulator running the real firmware -- BIOS, DOS, shell and
-Microsoft-derived Extended BASIC -- from a virtual SD card. There is nothing to install and no
-DLLs to hunt for.
+around the Hitachi HD6309 CPU: an emulator running the real firmware -- BIOS, DOS, shell, a
+nano-style text editor and Microsoft-derived Extended BASIC -- from a virtual SD card. There is
+nothing to install and no DLLs to hunt for.
 
 ## Quick start
 
@@ -26,8 +26,8 @@ DLLs to hunt for.
    LIST
    ```
 
-6. Leave BASIC with **`SYSTEM`** (back to the shell). Close the window, or press Ctrl+C, to stop
-   the emulator.
+6. Leave BASIC with **`SYSTEM`** (back to the shell). Close the window, or press **Ctrl+Break**,
+   to stop the emulator. (Ctrl+C goes to the Pugputer, like any other key.)
 
 Everything you `SAVE` is kept on `disk.img`. **`reset-disk.bat`** puts the disk back the way it came.
 
@@ -73,7 +73,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `BASIC.COM` and the demos |
+| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `EDIT.COM`, `BASIC.COM` and the demos |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -81,19 +81,28 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 You can also read `disk.img` with ordinary tools (it is a plain FAT16 image with no partition table),
 for instance to copy your BASIC programs out or in.
 
+## The text editor
+
+**`EDIT NAME.TXT`** at the shell prompt opens a file (or starts a new one) in a full-screen editor
+that works like GNU nano: the keys are listed at the bottom of the screen (`^` is Ctrl, `M-` is
+Alt, or Esc then the key). `^O` writes the file, `^X` exits, `^G` shows all the keys. Try
+`EDIT HELLO.BAS`, change it, write it out, then `LOAD` and `RUN` it in BASIC.
+
 ## Good to know
 
 - The emulator has no sound or graphics yet -- the Pugputer's console is a serial terminal.
 - It runs as fast as your PC allows (much faster than the real machine); it uses a full CPU core
   while it is running.
-- The keyboard: Backspace and Enter work; BASIC's own line editor cannot type `|`, `{`, `}` or `~`.
+- The keyboard: the console window acts as an ANSI terminal, so arrows, Home/End, PgUp/PgDn,
+  Delete, F-keys and Alt+key reach the Pugputer as a terminal would send them. BASIC's own line
+  editor cannot type `|`, `{`, `}` or `~`.
 
 ## About the project
 
 The Pugputer 6309 is open source: firmware, emulator and test suite are all in one repository,
 with a much longer README describing the design, how to build everything from source, and where
-the project is going (a self-hosting assembler and linker, a text editor, a graphics
-peripheral, and testing on the real hardware). It's at
+the project is going (a self-hosting assembler and linker, a graphics peripheral, and testing
+on the real hardware). It's at
 <https://github.com/YOUR-GITHUB-NAME/Pugputer6309_Experiments>.
 
 Licensed under the MIT License. BASIC descends from Microsoft's Extended Color BASIC; see

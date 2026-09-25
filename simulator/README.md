@@ -409,10 +409,13 @@ dos/dos.asm (a real BIOS client, talks to BIOS purely via SWI2 block calls)
 `$FFFE` reset vector with no hand-wired PC hijack anywhere -- nothing in
 the test tells the emulator where `SHELL.COM` or `BASIC.COM` is; the disk/DOS chain
 finds them. `tools/mkdiskimg.cpp` builds `basic309/disk.img` (`dos/dos.bin`
-+ `SHELL.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
++ `SHELL.COM` + `EDIT.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
 with a program header, the same bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_demo.cpp`
 is the interactive equivalent of `basic309_demo` for this path
-(`--com`/`--bios`/`--disk` flags).
+(`--com`/`--bios`/`--disk` flags). In console mode it makes the console an ANSI terminal both
+ways: the machine's escape sequences are carried out, and keys arrive as a terminal sends them
+(arrows and F-keys as escape sequences, Alt+key as Esc and the key, Ctrl+C as ^C; Ctrl+Break
+quits).
 
 The resident DOS (`dos/dos.asm`) is a small FAT16 file layer with a directory tree: eight
 file slots each with a private 512-byte sector buffer, byte-level read/write/seek/size calls,
@@ -490,6 +493,12 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   programs with a command tail (hand-assembled test programs), the loader's rejections (bad
   magic/flags/entry, would overwrite DOS or run into the ROM), B_EXIT closing and flushing
   files a program left open, and BASIC starting from the shell and `SYSTEM` returning to it.
+- `test_edit.cpp` -- EDIT.COM (`../edit/`), driven with keystrokes through the whole boot chain.
+  A small VT100 model interprets its output, so the tests check the screen (title bar, text rows,
+  status and shortcut lines, inverse video) as well as the files it writes: editing and writing
+  back, the exit and overwrite questions, search, mark / cut / copy / paste, opening other files,
+  help, scrolling long files and lines, fitting to a terminal size reported (or never reported),
+  a random editing session whose screen must match the file written, and a full memory.
 - `test_dos_bigfiles.cpp` -- 32-bit sizes/positions and block numbers: a 100MB volume with two
   33MB files (read at offsets across block 65536 and 131072, so the SD device's high address word
   is used), new files placed beyond block 131072, files past 64KB appended/updated/gap-filled/
