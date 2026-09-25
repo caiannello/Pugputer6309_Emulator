@@ -6,6 +6,8 @@ rem C++ runtime linked statically (so there are no DLLs to ship), then a disk im
 rem the shell, the editor, BASIC and the demo programs.
 rem
 rem Needs: lwtools, CMake and Visual Studio 2022 (or its Build Tools) with the C++ workload.
+rem Only this Windows release is replaced in dist\; a Linux one there (make_release.sh) is
+rem left alone.
 setlocal
 set VERSION=0.1.0
 set ROOT=%~dp0

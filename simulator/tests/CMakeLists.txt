@@ -1,24 +1,44 @@
-# lwasm (William Astle's lwtools) is only used by the golden assembly tests, which are
-# skipped without it. Same search order as lwtools_env.bat at the repository root.
+# lwasm and lwlink (William Astle's lwtools) are only used by the tests that compare against
+# them, which are skipped without them. Same search order as lwtools_env.bat /
+# lwtools_env.sh at the repository root: the LWTOOLS environment variable's folder, then
+# lwtools/win_bin (Windows) or lwtools/linux_bin (elsewhere); a folder may hold lwasm and
+# lwlink side by side, or be an lwtools source tree built with make (lwasm/lwasm,
+# lwlink/lwlink); then the PATH.
 set(LWASM_EXE "LWASM_EXE-NOTFOUND")
-set(_LW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-foreach(_dir "$ENV{LWTOOLS}" "${_LW_ROOT}/lwtools/bin" "${_LW_ROOT}/lwtools" "${_LW_ROOT}/lwtools-4.20/bin"
-             "${_LW_ROOT}/lwtools-4.25-win64" "${_LW_ROOT}/lwtools-4.20")
-    if(NOT LWASM_EXE AND _dir AND EXISTS "${_dir}/lwasm.exe")
-        set(LWASM_EXE "${_dir}/lwasm.exe")
-    elseif(NOT LWASM_EXE AND _dir AND EXISTS "${_dir}/lwasm")
-        set(LWASM_EXE "${_dir}/lwasm")
-    endif()
-endforeach()
-
-# lwlink sits next to lwasm (PUGLINK is compared with it).
 set(LWLINK_EXE "LWLINK_EXE-NOTFOUND")
-if(EXISTS "${LWASM_EXE}")
-    get_filename_component(_LW_DIR "${LWASM_EXE}" DIRECTORY)
-    if(EXISTS "${_LW_DIR}/lwlink.exe")
-        set(LWLINK_EXE "${_LW_DIR}/lwlink.exe")
-    elseif(EXISTS "${_LW_DIR}/lwlink")
-        set(LWLINK_EXE "${_LW_DIR}/lwlink")
+set(_LW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+if(WIN32)
+    set(_LW_BIN "${_LW_ROOT}/lwtools/win_bin")
+else()
+    set(_LW_BIN "${_LW_ROOT}/lwtools/linux_bin")
+endif()
+foreach(_dir "$ENV{LWTOOLS}" "${_LW_BIN}")
+    foreach(_sub "" "/lwasm")
+        foreach(_ext ".exe" "")
+            if(NOT LWASM_EXE AND _dir AND EXISTS "${_dir}${_sub}/lwasm${_ext}"
+               AND NOT IS_DIRECTORY "${_dir}${_sub}/lwasm${_ext}")
+                set(LWASM_EXE "${_dir}${_sub}/lwasm${_ext}")
+                # lwlink sits next to lwasm (PUGLINK is compared with it), or in the source tree's lwlink/.
+                if(_sub STREQUAL "")
+                    set(_LWLINK_CANDIDATE "${_dir}/lwlink${_ext}")
+                else()
+                    set(_LWLINK_CANDIDATE "${_dir}/lwlink/lwlink${_ext}")
+                endif()
+                if(EXISTS "${_LWLINK_CANDIDATE}")
+                    set(LWLINK_EXE "${_LWLINK_CANDIDATE}")
+                endif()
+            endif()
+        endforeach()
+    endforeach()
+endforeach()
+if(NOT LWASM_EXE)
+    find_program(_LWASM_ON_PATH lwasm)
+    find_program(_LWLINK_ON_PATH lwlink)
+    if(_LWASM_ON_PATH)
+        set(LWASM_EXE "${_LWASM_ON_PATH}")
+        if(_LWLINK_ON_PATH)
+            set(LWLINK_EXE "${_LWLINK_ON_PATH}")
+        endif()
     endif()
 endif()
 
@@ -37,7 +57,7 @@ if(EXISTS "${LWASM_EXE}")
     set(HD6309_HAVE_LWASM 1)
 else()
     set(HD6309_HAVE_LWASM 0)
-    message(STATUS "lwasm.exe not found at ${LWASM_EXE}; golden assembly tests will be skipped")
+    message(STATUS "lwasm not found; golden assembly tests will be skipped")
 endif()
 
 add_executable(hd6309_tests ${HD6309_TEST_SOURCES})

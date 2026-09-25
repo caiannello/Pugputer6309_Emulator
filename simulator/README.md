@@ -46,14 +46,14 @@ Produces:
 - `hd6309.lib` (`hd6309_static` target) -- same sources, linked directly
   by the test suite.
 - `pugputer_system.lib` (`pugputer_system` target) -- `SystemBus` +
-  `IDevice` + `UartR65C51` (+ the Windows COM-port bridge, when
-  `PUGPUTER_BUILD_COM_BRIDGE` is on, the default on Windows), linked on
+  `IDevice` + `UartR65C51` (+ the serial-port bridge, when
+  `PUGPUTER_BUILD_COM_BRIDGE` is on, the default), linked on
   top of `hd6309_static`. Static only for now -- an in-process
   integration layer, not a DLL boundary that needs its own ABI yet.
 - `hd6309_tests` / `pugputer_tests` -- the two test executables, both
   registered with CTest.
-- `uart_demo` / `basic309_demo` / `basic309_sdboot_demo` (Windows only) --
-  small standalone interactive demos; see below.
+- `uart_demo` / `basic309_demo` (Windows only) / `basic309_sdboot_demo`
+  (Windows and Linux) -- small standalone interactive demos; see below.
 
 ## API
 
@@ -251,13 +251,23 @@ the CPU core's own documented gaps):
   "always clears C" pattern isn't relevant either -- this device has no
   analogous gap.
 
-### `ComPortBridge` (Windows) + com0com setup
+### `ComPortBridge` + com0com setup (Windows) / pseudo-terminals (Linux)
 
 `include/pugputer/com_port_bridge.hpp`, built when
-`PUGPUTER_BUILD_COM_BRIDGE` is on (default on Windows), bridges a
+`PUGPUTER_BUILD_COM_BRIDGE` is on (the default), bridges a
 `UartR65C51` to a real Windows COM port using `CreateFileA`/`SetCommState`/
-`ReadFile`/`WriteFile` -- no background thread, just a `poll(uart)`
-method the host calls periodically from its own loop. To use it with a
+`ReadFile`/`WriteFile`, or on Linux to a tty device (termios, raw 8N1) --
+no background thread, just a `poll(uart)` method the host calls
+periodically from its own loop.
+
+On Linux, `open("pty")` needs no extra software: it creates a
+pseudo-terminal and `device_name()` says where it is (e.g. `/dev/pts/3`),
+for `screen /dev/pts/3 19200` or `picocom -b 19200 /dev/pts/3`. The bridge
+keeps the pseudo-terminal's other side open itself, so output waits there
+until a terminal program attaches, and a program that comes and goes does
+no harm. `basic309_sdboot_demo --com pty` does this (it prints the name).
+
+On Windows, to use it with a
 virtual null-modem pair for a real terminal program to connect to:
 
 1. Install [com0com](https://com0com.sourceforge.net/) (a third-party
@@ -367,12 +377,13 @@ well-known/self-defined format, not one calling the other).
 ```
 basic309_sdboot_demo                     # the real thing: BIOS -> SD boot -> DOS -> BASIC.COM, from basic309/disk.img
 basic309_sdboot_demo --com COM10         # bridge the UART to a COM port instead (com0com setup above)
+basic309_sdboot_demo --com pty           # (Linux) ... or to a new pseudo-terminal (or --com /dev/ttyUSB0)
 basic309_sdboot_demo --bios x.s19 --disk y.img
 basic309_demo                            # BASIC copied into RAM and started directly, no disk (LOAD/SAVE/OPEN unavailable)
 ```
 
 `basic309_sdboot_demo` is the one to use: files you `SAVE` or `OPEN` persist in
-`basic309/disk.img` until `reinit_disk.bat` regenerates it. `basic309_demo` skips the disk
+`basic309/disk.img` until `reinit_disk.bat` (`reinit_disk.sh`) regenerates it. `basic309_demo` skips the disk
 (it maps no SD card, so any file statement raises a BASIC error) and exists for quick
 interpreter-only experiments.
 
@@ -459,8 +470,9 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
 - `test_asm_golden.cpp` -- assembles `tests/test_asm/*.asm` with the
   real `lwasm.exe` at test-run time, loads the resulting binary, runs
   it, and checks memory results. Skipped automatically (at CMake
-  configure time) if `lwasm.exe` isn't found (see `tests/CMakeLists.txt`
-  for where it looks; the `LWTOOLS` environment variable works too).
+  configure time) if `lwasm.exe` isn't found (it looks in `lwtools/win_bin` on
+  Windows and `lwtools/linux_bin` elsewhere, see `tests/CMakeLists.txt`; the
+  `LWTOOLS` environment variable works too).
 
 `pugputer_tests` (the `SystemBus`/`UartR65C51` suite):
 - `test_uart.cpp` -- register-level UART behavior direct against

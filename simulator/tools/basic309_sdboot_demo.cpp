@@ -7,7 +7,8 @@
 // first with mkdiskimg.
 //
 //   basic309_sdboot_demo                     -- console bridge, default paths
-//   basic309_sdboot_demo --com COM10         -- COM port bridge
+//   basic309_sdboot_demo --com COM10         -- COM port bridge (Linux: --com /dev/ttyUSB0)
+//   basic309_sdboot_demo --com pty           -- (Linux) bridge to a new pseudo-terminal
 //   basic309_sdboot_demo --bios path\to.s19  -- load a different BIOS image
 //   basic309_sdboot_demo --disk path\to.img  -- load a different disk image
 //   basic309_sdboot_demo --help
@@ -21,7 +22,8 @@
 // (EDIT.COM draws its screen with them, and asks the terminal's size), and keys
 // arrive as a terminal sends them -- arrows and function keys as escape sequences,
 // Alt+key as Esc then the key, Ctrl+C as ^C. Ctrl+Break (or closing the window)
-// quits.
+// quits; on Linux, Ctrl+\ (or closing the terminal) quits.
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -29,6 +31,14 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <climits>
+#include <csignal>
+#include <fcntl.h>
+#include <poll.h>
+#include <termios.h>
+#include <unistd.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -58,17 +68,33 @@ namespace {
 constexpr uint16_t kBiosBase = 0xF000;
 constexpr uint32_t kBiosSize = 0x1000; // $F000-$FFFF
 
-// `name` next to the executable if it is there, else `fallback`.
-std::string find_default(const char* name, const char* fallback) {
+#ifdef _WIN32
+constexpr const char* kQuitKey = "Ctrl+Break";
+#else
+constexpr const char* kQuitKey = "Ctrl+\\";
+#endif
+
+// The full path of this program, or "" if it can't be found.
+std::string exe_path() {
+#ifdef _WIN32
     char path[MAX_PATH] = {0};
     DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    if (n > 0 && n < MAX_PATH) {
-        std::string beside(path, n);
-        size_t slash = beside.find_last_of("\\/");
-        if (slash != std::string::npos) {
-            beside = beside.substr(0, slash + 1) + name;
-            if (std::ifstream(beside, std::ios::binary).good()) return beside;
-        }
+    if (n > 0 && n < MAX_PATH) return std::string(path, n);
+#else
+    char path[PATH_MAX] = {0};
+    ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n > 0) return std::string(path, static_cast<size_t>(n));
+#endif
+    return std::string();
+}
+
+// `name` next to the executable if it is there, else `fallback`.
+std::string find_default(const char* name, const char* fallback) {
+    std::string beside = exe_path();
+    size_t slash = beside.find_last_of("\\/");
+    if (slash != std::string::npos) {
+        beside = beside.substr(0, slash + 1) + name;
+        if (std::ifstream(beside, std::ios::binary).good()) return beside;
     }
     return fallback;
 }
@@ -77,14 +103,24 @@ void usage() {
     std::printf(
         "Pugputer 6309 emulator: boots the BIOS, DOS, the shell and BASIC.\n"
         "\n"
+#ifdef _WIN32
         "  --com COMn       connect the UART to a COM port (e.g. one end of a com0com pair)\n"
         "                   instead of this console\n"
+#else
+        "  --com DEVICE     connect the UART to a serial port (e.g. /dev/ttyUSB0) instead of\n"
+        "                   this terminal\n"
+        "  --com pty        connect the UART to a new pseudo-terminal, and print its name for\n"
+        "                   a terminal program (screen, picocom, minicom, ...) to open\n"
+#endif
         "  --bios FILE      BIOS image, Motorola S-record (default: pugbios.s19 beside this program)\n"
         "  --disk FILE      FAT16 disk image (default: disk.img beside this program)\n"
         "  --help           this text\n"
         "\n"
-        "In console mode, type at the prompt; Ctrl+Break quits.\n");
+        "In console mode, type at the prompt; %s quits.\n",
+        kQuitKey);
 }
+
+#ifdef _WIN32
 
 // The console as an ANSI terminal (see the top of the file), and put back as it was
 // when the program ends.
@@ -177,6 +213,71 @@ void poll_console(UartR65C51& uart) {
         }
     }
 }
+
+#else // POSIX
+
+// The terminal is already an ANSI terminal; it only needs raw mode (no line editing,
+// echo or newline translation), with Ctrl+C and Ctrl+Z passed on as keys. Ctrl+\ is
+// left as the quit key.
+termios g_saved_tio;
+bool g_modes_saved = false;
+bool g_stdin_tty = false;
+bool g_stdin_eof = false;
+
+void restore_console() {
+    if (!g_modes_saved) return;
+    static const char reset[] = "\x1b[r\x1b[0m\x1b[?1049l"; // what a program may have left set
+    ssize_t ignored = write(STDOUT_FILENO, reset, sizeof(reset) - 1);
+    (void)ignored;
+    tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_tio);
+    g_modes_saved = false;
+}
+
+void on_signal(int sig) {
+    restore_console(); // (only async-signal-safe calls in there)
+    if (sig == SIGQUIT) _exit(0); // Ctrl+\ is the way to quit, not a crash (no core dump)
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);
+}
+
+void setup_console() {
+    g_stdin_tty = isatty(STDIN_FILENO) != 0;
+    if (!g_stdin_tty || tcgetattr(STDIN_FILENO, &g_saved_tio) != 0) return; // redirected
+    termios tio = g_saved_tio;
+    tio.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+    tio.c_oflag &= ~OPOST;
+    tio.c_lflag &= ~(ICANON | ECHO | ECHONL | IEXTEN);
+    tio.c_cc[VINTR] = _POSIX_VDISABLE;
+    tio.c_cc[VSUSP] = _POSIX_VDISABLE;
+    tio.c_cc[VMIN] = 0;
+    tio.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &tio) != 0) return;
+    g_modes_saved = true;
+    for (int sig : {SIGQUIT, SIGINT, SIGTERM, SIGHUP}) std::signal(sig, on_signal);
+    std::atexit(restore_console);
+}
+
+// Whatever has been typed (and the terminal's replies to the machine's queries) -> the UART.
+void poll_console(UartR65C51& uart) {
+    if (g_stdin_eof) return;
+    pollfd p{STDIN_FILENO, POLLIN, 0};
+    while (::poll(&p, 1, 0) > 0 && (p.revents & (POLLIN | POLLHUP))) {
+        uint8_t buf[256];
+        ssize_t got = read(STDIN_FILENO, buf, sizeof(buf));
+        if (got <= 0) {
+            if (got == 0 && !g_stdin_tty) g_stdin_eof = true; // end of piped input
+            return;
+        }
+        for (ssize_t i = 0; i < got; ++i) {
+            // Backspace: most terminals send DEL, the Windows console (and a real Pugputer's
+            // usual terminal setting) BS -- the one BASIC's line editor knows.
+            uint8_t b = buf[i];
+            if (g_stdin_tty && b == 0x7F) b = 0x08;
+            uart.rx_enqueue(b);
+        }
+    }
+}
+#endif
 } // namespace
 
 int main(int argc, char** argv) {
@@ -227,8 +328,15 @@ int main(int argc, char** argv) {
     if (!com_port.empty()) {
         if (bridge.open(com_port, uart.current_baud_rate())) {
             use_com = true;
+#ifdef _WIN32
             std::printf("Bridging UART to %s. Connect a terminal to the other end of the com0com pair.\n",
                         com_port.c_str());
+#else
+            std::printf("Bridging UART to %s. Connect a terminal to it at 19200 baud, 8N1, for example:\n"
+                        "    screen %s 19200\n"
+                        "Ctrl+C here stops the emulator.\n",
+                        bridge.device_name().c_str(), bridge.device_name().c_str());
+#endif
         } else {
             std::fprintf(stderr, "Failed to open %s: %s\nFalling back to console.\n", com_port.c_str(),
                          bridge.last_error().c_str());
@@ -241,8 +349,9 @@ int main(int argc, char** argv) {
 #endif
 
     if (!use_com) {
-        std::printf("Bridging UART to this console. Type to send bytes; Ctrl+Break to quit.\n"
-                    "(At the shell prompt, type BASIC to start BASIC; SYSTEM leaves it.)\n\n");
+        std::printf("Bridging UART to this console. Type to send bytes; %s to quit.\n"
+                    "(At the shell prompt, type BASIC to start BASIC; SYSTEM leaves it.)\n\n",
+                    kQuitKey);
         setup_console();
         uart.set_tx_callback([](uint8_t b) {
             std::putchar(b);

@@ -10,7 +10,7 @@ option(PUGPUTER_STATIC_RUNTIME "Link the MSVC C++ runtime statically, so the pro
 if(MSVC AND PUGPUTER_STATIC_RUNTIME)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-option(PUGPUTER_BUILD_COM_BRIDGE "Build the Windows COM-port bridge for the UART device" ${WIN32})
+option(PUGPUTER_BUILD_COM_BRIDGE "Build the serial-port bridge for the UART device (a COM port on Windows, a tty or pseudo-terminal elsewhere)" ON)
 
 if(MSVC)
     add_compile_options(/W4 /permissive-)
@@ -52,8 +52,8 @@ if(PUGPUTER_BUILD_COM_BRIDGE)
     list(APPEND PUGPUTER_SOURCES src/pugputer/com_port_bridge.cpp)
 endif()
 
-# System-level library: SystemBus + IDevice + UartR65C51 (+ the Windows
-# COM-port bridge, when enabled), sitting on top of hd6309_static. Static
+# System-level library: SystemBus + IDevice + UartR65C51 (+ the serial-port
+# bridge, when enabled), sitting on top of hd6309_static. Static
 # only for now -- this is an integration layer consumed in-process, not a
 # DLL boundary that needs its own ABI stability yet.
 add_library(pugputer_system STATIC ${PUGPUTER_SOURCES})

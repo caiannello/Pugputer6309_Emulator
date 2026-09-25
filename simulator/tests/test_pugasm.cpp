@@ -238,7 +238,7 @@ void check_link(const std::string& args, const std::string& out, const std::vect
     CHECK(m.start("puglink_cmp.img", disk));
     std::string said = m.run("PUGLINK @args.rsp");
     CHECK(same(("the output of: " + args).c_str(), host_text(dir + "/" + out), m.file(upper(out))));
-    CHECK(same(("the map of: " + args).c_str(), host_text(dir + "/OUT.MAP"), m.file("OUT.MAP")));
+    CHECK(same(("the map of: " + args).c_str(), no_cr(host_text(dir + "/OUT.MAP")), no_cr(m.file("OUT.MAP"))));
 }
 #endif
 
@@ -432,7 +432,7 @@ TEST(puglink_links_the_bios_like_lwlink) {
     std::string out = m.run("PUGLINK @bios.rsp");
     CHECK(out.find("PUGLINK @bios.rsp\r\n/> ") != std::string::npos || out.find("rror") == std::string::npos);
     CHECK(same("the BIOS's S-records", host_text(PUGBIOS_S19_PATH), m.file("PUGBIOS.S19")));
-    CHECK(same("the BIOS's map", host_text(PUGBIOS_MAP_PATH), m.file("PUGBIOS.MAP")));
+    CHECK(same("the BIOS's map", no_cr(host_text(PUGBIOS_MAP_PATH)), no_cr(m.file("PUGBIOS.MAP"))));
 }
 
 TEST(the_bios_builds_entirely_on_the_pugputer) {
@@ -449,7 +449,7 @@ TEST(the_bios_builds_entirely_on_the_pugputer) {
     }
     m.run("PUGLINK @bios.rsp");
     CHECK(same("the BIOS built here", host_text(PUGBIOS_S19_PATH), m.file("PUGBIOS.S19")));
-    CHECK(same("its map", host_text(PUGBIOS_MAP_PATH), m.file("PUGBIOS.MAP")));
+    CHECK(same("its map", no_cr(host_text(PUGBIOS_MAP_PATH)), no_cr(m.file("PUGBIOS.MAP"))));
 }
 
 TEST(pugasm_assembles_puglink_and_that_copy_links_the_bios) {

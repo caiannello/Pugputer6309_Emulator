@@ -15,6 +15,8 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# (lwtools-4.20/lwasm/instab.c from the lwtools source release, unpacked at the top of the
+# repository or named as the argument; only needed to regenerate pa_itab.asm.)
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "lwtools-4.20", "lwasm", "instab.c")
 
 FLAGBITS = {

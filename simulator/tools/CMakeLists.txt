@@ -1,7 +1,6 @@
-# uart_demo uses <conio.h> for non-blocking console keyboard input in its
-# console-bridge mode, which is Windows/MSVC-specific -- matching this
-# project's current Windows-first scope. A cross-platform console input
-# path can be added later without touching pugputer_system itself.
+# uart_demo and basic309_demo use <conio.h> for non-blocking console keyboard
+# input, which is Windows/MSVC-specific, so they are only built there.
+# basic309_sdboot_demo (the emulator the releases ship) runs everywhere.
 add_executable(cycle_bench cycle_bench.cpp)
 target_link_libraries(cycle_bench PRIVATE pugputer_system)
 
@@ -38,15 +37,16 @@ if(WIN32)
         PUGBIOS_S19_DEFAULT="${PUGBIOS_S19_DEFAULT}"
         EXBASROM309_S19_DEFAULT="${EXBASROM309_S19_DEFAULT}"
     )
-
-    set(DISK_IMG_SDBOOT_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
-    add_executable(basic309_sdboot_demo basic309_sdboot_demo.cpp)
-    target_link_libraries(basic309_sdboot_demo PRIVATE pugputer_system)
-    target_compile_definitions(basic309_sdboot_demo PRIVATE
-        PUGBIOS_S19_DEFAULT="${PUGBIOS_S19_DEFAULT}"
-        DISK_IMG_DEFAULT="${DISK_IMG_SDBOOT_DEFAULT}"
-    )
 endif()
+
+# The emulator itself: has its own console code for both Windows and POSIX terminals.
+set(DISK_IMG_SDBOOT_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
+add_executable(basic309_sdboot_demo basic309_sdboot_demo.cpp)
+target_link_libraries(basic309_sdboot_demo PRIVATE pugputer_system)
+target_compile_definitions(basic309_sdboot_demo PRIVATE
+    PUGBIOS_S19_DEFAULT="${PUGBIOS_S19_DEFAULT}"
+    DISK_IMG_DEFAULT="${DISK_IMG_SDBOOT_DEFAULT}"
+)
 
 # pugrun: runs shell commands on an emulated Pugputer from a host script (see pugrun.cpp).
 add_executable(pugrun pugrun.cpp)

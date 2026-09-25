@@ -6,8 +6,9 @@ it on a PC.
 
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/demo.png?raw=true)
 
-**Just want to try it?** Download the Windows demo from the *Releases* page, unzip it and
-double-click `start-console.bat`. Nothing to install or compile; see the release's `README.md`.
+**Just want to try it?** Download the demo for Windows or Linux from the *Releases* page.
+On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the `.tar.gz` and
+run `./start-console.sh` in a terminal. Nothing to install or compile; see the release's `README.md`.
 
 ## Future plans
 - Emulated Graphical display and OPL3 Sound
@@ -77,28 +78,35 @@ Every folder has its own `README.md` with the details.
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
   `basic309/README.md` for the differences from GW-BASIC.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
-  card and banked RAM modeled to the register. `basic309_sdboot_demo.exe` boots the real chain --
-  BIOS, SD boot, DOS, shell -- from a disk image, with the console on your terminal or on a COM
-  port.
+  card and banked RAM modeled to the register. `basic309_sdboot_demo` boots the real chain --
+  BIOS, SD boot, DOS, shell -- from a disk image, with the console on your terminal or on a
+  serial port (a COM port on Windows; a tty or a pseudo-terminal on Linux).
 
 ## Building from source
 
-You need Windows and:
+Windows and Linux are both supported; the Linux instructions follow the Windows ones.
+
+### Windows
+
+You need:
 
 1. **Visual Studio 2022** (the Build Tools are enough) with the *Desktop development with C++*
    workload, and **CMake** 3.15 or newer.
 2. **lwtools**, the 6809/6309 assembler and linker by **William Astle** -- <https://www.lwtools.ca>.
-   It is not part of this repository. Either:
+   It is not part of this repository. Put its Windows binaries in **`lwtools\win_bin`** at the
+   top of this repository, so that `lwtools\win_bin\lwasm.exe` exists. Either:
    - download the prebuilt Windows package,
      <https://www.lwtools.ca/releases/lwtools/lwtools-4.25-win64.zip> (4.25; it produces exactly the
-     same code for this project as 4.20 does), and unzip it into a folder named `lwtools` at the
-     top of this repository, so that `lwtools\lwasm.exe` exists; or
+     same code for this project as 4.20 does), and copy `lwasm.exe`, `lwlink.exe` and the DLLs
+     beside them into `lwtools\win_bin`; or
    - build the source release, <https://www.lwtools.ca/releases/lwtools/lwtools-4.20.tar.gz>
-     (it includes Visual Studio project files and build instructions), and put the resulting
-     `bin` folder's contents in `lwtools\bin`.
+     (it includes Visual Studio project files and build instructions), and copy the resulting
+     `bin` folder's contents into `lwtools\win_bin`.
 
    Any other place works if you set the `LWTOOLS` environment variable to the folder that
-   holds `lwasm.exe` and `lwlink.exe`. (`lwtools_env.bat` documents the search order.)
+   holds `lwasm.exe` and `lwlink.exe`. (`lwtools_env.bat` documents the search order. The Linux
+   binaries have their own folder, `lwtools\linux_bin`, so one copy of the repository can
+   hold both.)
 3. Optional: **SRecord** (`srec_cat`), only for the Intel-hex copy of the BIOS ROM.
    Optional: **com0com**, for the emulator's COM-port mode (below).
 
@@ -119,6 +127,55 @@ simulator\build\tools\Release\basic309_sdboot_demo.exe
 
 `make_release.bat` builds the binary release (`dist\Pugputer6309-demo-<version>-win64.zip`).
 
+### Linux
+
+You need:
+
+1. A C++17 compiler (g++ or clang++), **CMake** 3.15 or newer, and bash. On Ubuntu/Debian:
+   `sudo apt install build-essential cmake`.
+2. **lwtools** by **William Astle** -- <https://www.lwtools.ca>, built from the source release,
+   <https://www.lwtools.ca/releases/lwtools/lwtools-4.20.tar.gz>:
+
+   ```
+   tar xzf lwtools-4.20.tar.gz
+   cd lwtools-4.20
+   make
+   ```
+
+   Then copy the two programs into **`lwtools/linux_bin`** at the top of this repository:
+
+   ```
+   cp lwasm/lwasm lwlink/lwlink /path/to/Pugputer6309_Emulator/lwtools/linux_bin/
+   ```
+
+   (If they reach that folder through Windows, `chmod +x` them.) Alternatively, `sudo make
+   install` puts them on the PATH, or you can leave the built tree where it is and set the
+   `LWTOOLS` environment variable to it (`export LWTOOLS=$HOME/lwtools-4.20`).
+   (`lwtools_env.sh` documents the search order. The Windows binaries have their own folder,
+   `lwtools/win_bin`, so one copy of the repository can hold both.)
+3. Optional: **SRecord** (`sudo apt install srecord`), only for the Intel-hex copy of the BIOS
+   ROM.
+
+Then:
+
+```
+./build_all.sh
+```
+
+It does what `build_all.bat` does (and takes `notests` and `Debug` the same way). To run the
+result:
+
+```
+simulator/build/tools/basic309_sdboot_demo
+```
+
+In the terminal, **Ctrl+\** quits the emulator (Ctrl+C goes to the Pugputer). `reinit_disk.sh`
+rebuilds the firmware and makes a fresh `basic309/disk.img`, like `reinit_disk.bat`.
+
+`make_release.sh` builds the Linux binary release
+(`dist/Pugputer6309-demo-<version>-linux-x64.tar.gz`, the version taken from `make_release.bat`),
+with the emulator linked fully statically so it runs on any x86-64 Linux.
+
 ### Using a COM port instead of the console
 
 `basic309_sdboot_demo.exe --com COM4` connects the emulated UART to a Windows COM port, so you
@@ -127,10 +184,16 @@ console, or wire the emulator to other software. You need a *virtual serial-port
 [com0com](https://com0com.sourceforge.net): the emulator opens one end (say `COM4`) and the
 terminal program the other (`COM5`), at 19200 baud, 8 data bits, no parity, 1 stop bit.
 
+On Linux, `basic309_sdboot_demo --com pty` needs no extra software: it creates a
+pseudo-terminal and prints its name (say `/dev/pts/3`) for a terminal program to open --
+`screen /dev/pts/3 19200`, or `picocom -b 19200 /dev/pts/3`. `--com /dev/ttyUSB0` uses a real
+serial port.
+
 ## Tests
 
 `simulator\build` after `build_all.bat`: `ctest -C Release`, or run
-`tests\Release\pugputer_tests.exe` directly -- optionally with words to select tests by name
+`tests\Release\pugputer_tests.exe` directly (on Linux, after `build_all.sh`: `ctest`, or
+`tests/pugputer_tests`) -- optionally with words to select tests by name
 (`pugputer_tests shell bios_`). About 150 tests and 3,500 checks cover the CPU core, the devices,
 the BIOS (including hostile input: malformed S-records, a card that dies, a crashing program),
 the DOS (a randomized model-based test compared against an independent FAT16 reader, crash
