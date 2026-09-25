@@ -18,8 +18,8 @@ for %%A in (%*) do (
 call "%ROOT%lwtools_env.bat" || exit /b 1
 where cmake >nul 2>nul || (echo ERROR: cmake was not found on the PATH. See README.md, "Building from source". & exit /b 1)
 
-echo === Assembling the BIOS, DOS, shell, editor and BASIC ===
-for %%D in (bios dos shell edit) do (
+echo === Assembling the BIOS, DOS, shell, editor, assembler and BASIC ===
+for %%D in (bios dos shell edit pugasm) do (
     pushd "%ROOT%%%D" || exit /b 1
     call .\compile.bat || (popd & exit /b 1)
     popd

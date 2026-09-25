@@ -1,8 +1,8 @@
 @echo off
-rem Rebuilds BIOS, dos.asm, the shell, the editor and basic309, then regenerates
-rem basic309\disk.img from scratch (just SHELL.COM, EDIT.COM and BASIC.COM, no other files) -- run this
+rem Rebuilds BIOS, dos.asm, the shell, the editor, pugasm and basic309, then regenerates
+rem basic309\disk.img from scratch (just SHELL.COM, EDIT.COM, PUGASM.COM and BASIC.COM, no other files) -- run this
 rem any time you want a clean slate between test sessions, or after editing bios/,
-rem dos/, shell/, edit/ or basic309/.
+rem dos/, shell/, edit/, pugasm/ or basic309/.
 setlocal
 set ROOT=%~dp0
 set MKDISKIMG=%ROOT%simulator\build\tools\Release\mkdiskimg.exe
@@ -36,11 +36,17 @@ call "%ROOT%edit\compile.bat"
 if errorlevel 1 (popd & exit /b 1)
 popd
 
+echo Rebuilding the assembler...
+pushd "%ROOT%pugasm" || exit /b 1
+call "%ROOT%pugasm\compile.bat"
+if errorlevel 1 (popd & exit /b 1)
+popd
+
 echo Rebuilding basic309...
 call "%ROOT%basic309\build_basic.bat"
 if errorlevel 1 exit /b 1
 
-echo Regenerating disk.img (SHELL.COM, EDIT.COM and BASIC.COM only, clean slate)...
+echo Regenerating disk.img (SHELL.COM, EDIT.COM, PUGASM.COM and BASIC.COM only, clean slate)...
 "%MKDISKIMG%" || exit /b 1
 
 echo Done.

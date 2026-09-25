@@ -409,7 +409,7 @@ dos/dos.asm (a real BIOS client, talks to BIOS purely via SWI2 block calls)
 `$FFFE` reset vector with no hand-wired PC hijack anywhere -- nothing in
 the test tells the emulator where `SHELL.COM` or `BASIC.COM` is; the disk/DOS chain
 finds them. `tools/mkdiskimg.cpp` builds `basic309/disk.img` (`dos/dos.bin`
-+ `SHELL.COM` + `EDIT.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
++ `SHELL.COM` + `EDIT.COM` + `PUGASM.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
 with a program header, the same bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_demo.cpp`
 is the interactive equivalent of `basic309_demo` for this path
 (`--com`/`--bios`/`--disk` flags). In console mode it makes the console an ANSI terminal both
@@ -493,6 +493,11 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   programs with a command tail (hand-assembled test programs), the loader's rejections (bad
   magic/flags/entry, would overwrite DOS or run into the ROM), B_EXIT closing and flushing
   files a program left open, and BASIC starting from the shell and `SYSTEM` returning to it.
+- `test_pugasm.cpp` -- PUGASM.COM (`../pugasm/`) on the emulated machine: it must assemble the shell,
+  the editor, DOS, BASIC (as S-records) and itself to exactly the lwasm build's bytes and listings,
+  its copy of itself must work, the programs it makes must run, and errors must leave no files.
+  With lwasm present, it must also match lwasm on every operation in every operand form (6309 and
+  6809) and on a file of directives, macros and expressions (`test_asm/pugasm`).
 - `test_edit.cpp` -- EDIT.COM (`../edit/`), driven with keystrokes through the whole boot chain.
   A small VT100 model interprets its output, so the tests check the screen (title bar, text rows,
   status and shortcut lines, inverse video) as well as the files it writes: editing and writing

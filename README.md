@@ -1,7 +1,8 @@
 # Pugputer 6309 Simulator
 
 A homebrew computer built around the Hitachi **HD6309** CPU, with its complete software stack --
-BIOS, DOS, shell, a text editor and BASIC -- and a cycle-counted emulator that runs all of it on a PC.
+BIOS, DOS, shell, a text editor, an assembler and BASIC -- and a cycle-counted emulator that runs all of
+it on a PC.
 
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/demo.png?raw=true)
 
@@ -23,6 +24,7 @@ double-click `start-console.bat`. Nothing to install or compile; see the release
 | `dos/` | The resident DOS: a FAT16 file system (8.3 names, subdirectories, 32-bit file sizes and block numbers, a FAT cache, crash-safe write ordering) and the program loader. |
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
 | `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano. |
+| `pugasm/` | `PUGASM.COM`, a 6309/6809 assembler that runs on the Pugputer and produces the same code, listings and symbol tables as lwasm -- it assembles this whole project, itself included. |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release. |
@@ -65,6 +67,9 @@ Every folder has its own `README.md` with the details.
 - **Editor.** `EDIT [file]`: nano's keys (`^O` write out, `^X` exit, `^W` search, `^K`/`^U` cut
   and paste, `M-A` mark, ...), a title bar, a status line, and it fits itself to the terminal's
   size. See `edit/README.md`.
+- **Assembler.** `PUGASM [-f raw|srec|com] [-o out] [-l[list]] [-s] file`: lwasm's syntax,
+  directives, macros, structs and code-size choices, with raw, S-record and `.COM` output. It
+  rebuilds the shell, the editor, DOS, BASIC and itself byte for byte. See `pugasm/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
   `basic309/README.md` for the differences from GW-BASIC.
@@ -100,7 +105,7 @@ Then, from a Developer Command Prompt (or any prompt with `cmake` on the PATH):
 build_all.bat
 ```
 
-That assembles the BIOS, DOS, shell, editor and BASIC, builds the emulator and the tools, makes the disk
+That assembles the BIOS, DOS, shell, editor, assembler and BASIC, builds the emulator and the tools, makes the disk
 image `basic309\disk.img`, and runs the test suite (about 150 tests, under a minute in the
 default Release configuration; add `notests` to skip it, or `Debug` for a debug build, in which
 the tests take several minutes). To run the result:
@@ -131,10 +136,9 @@ tests, a keyword-table audit, file and error-trapping tests driven with real key
 
 ## Where it is going
 
-- **A self-hosted assembler and linker** that runs on the Pugputer itself, `lwasm`-syntax
-  compatible, using the banked RAM for code and symbols -- the system should be able to
-  build its own software.
-- **A text editor** application, also using banked RAM for the text buffer.
+- **The rest of the self-hosted toolchain:** `PUGASM` already assembles everything here
+  except the BIOS, which is built from lwtools object files and a link script; next come object
+  output and `PUGLINK`, an lwlink counterpart, so the system can build all of its own software.
 - **A graphics display peripheral** for the emulator (the memory map already reserves the
   address range of a V9958 video card), and later the same on the real machine.
 - **Testing on the real Pugputer 6309:** the SD transport (SPI or VIA-driven), an SD card

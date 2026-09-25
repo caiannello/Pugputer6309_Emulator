@@ -2163,15 +2163,21 @@ EX_ARGEND   CLR  ,X
             STD  IO_BUF
             LDD  EX_LEN
             STD  IO_LEN
+            LDS  BOOT_SP          ; the body may load over the caller's stack (the
+                                  ; shell's is at $7F00), so from here on DOS runs on
+                                  ; the boot stack: the caller's frame is abandoned,
+                                  ; and a failure can only restart the shell
             JSR  FILE_READ
-            BCS  EX_FAIL
+            BCS  EX_LOADFAIL
             LDD  IO_CNT
             CMPD EX_LEN
-            BNE  EX_BAD
+            BNE  EX_LOADFAIL
             LDB  EX_H
             JSR  DOS_CLOSE
-            LDS  BOOT_SP          ; the caller's frame is abandoned: the program has
-            JMP  [EX_ENTRY]       ; the machine
+            JMP  [EX_ENTRY]       ; the program has the machine
+EX_LOADFAIL LDB  EX_H             ; (the caller's memory may be half overwritten)
+            JSR  DOS_CLOSE
+            JMP  DOS_EXIT
 EX_TOOBIG   LDA  #ERR_TOOBIG
             BRA  EX_FAIL
 EX_BAD      LDA  #ERR_BADEXE

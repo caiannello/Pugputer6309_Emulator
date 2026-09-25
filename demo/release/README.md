@@ -2,7 +2,7 @@
 
 This is a complete, self-contained demo of the **Pugputer 6309**, a homebrew computer built
 around the Hitachi HD6309 CPU: an emulator running the real firmware -- BIOS, DOS, shell, a
-nano-style text editor and Microsoft-derived Extended BASIC -- from a virtual SD card. There is
+nano-style text editor, an assembler and Microsoft-derived Extended BASIC -- from a virtual SD card. There is
 nothing to install and no DLLs to hunt for.
 
 ## Quick start
@@ -73,7 +73,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `EDIT.COM`, `BASIC.COM` and the demos |
+| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `EDIT.COM`, `PUGASM.COM`, `BASIC.COM` and the demos |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -87,6 +87,18 @@ for instance to copy your BASIC programs out or in.
 that works like GNU nano: the keys are listed at the bottom of the screen (`^` is Ctrl, `M-` is
 Alt, or Esc then the key). `^O` writes the file, `^X` exits, `^G` shows all the keys. Try
 `EDIT HELLO.BAS`, change it, write it out, then `LOAD` and `RUN` it in BASIC.
+
+## The assembler
+
+**`PUGASM`** assembles 6309/6809 source on the Pugputer itself (it speaks the same language as
+lwasm, the assembler the whole system is built with). Try the demo:
+
+```
+PUGASM -f com greet.asm
+GREET Ada
+```
+
+`EDIT GREET.ASM` shows how it works; `PUGASM` alone lists the options (`-l` makes a listing).
 
 ## Good to know
 

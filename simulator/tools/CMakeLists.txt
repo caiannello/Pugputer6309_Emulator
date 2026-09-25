@@ -10,6 +10,7 @@ set(EXBASROM309_S19_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/exbasrom
 set(DOS_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.bin")
 set(SHELL_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../shell/shell.bin")
 set(EDIT_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.bin")
+set(PUGASM_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../pugasm/pugasm.bin")
 set(DISK_IMG_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
 
 # mkdiskimg is plain, cross-platform file I/O -- no conio.h/Windows
@@ -20,6 +21,7 @@ target_compile_definitions(mkdiskimg PRIVATE
     DOS_BIN_DEFAULT="${DOS_BIN_DEFAULT}"
     SHELL_BIN_DEFAULT="${SHELL_BIN_DEFAULT}"
     EDIT_BIN_DEFAULT="${EDIT_BIN_DEFAULT}"
+    PUGASM_BIN_DEFAULT="${PUGASM_BIN_DEFAULT}"
     EXBASROM309_S19_DEFAULT="${EXBASROM309_S19_DEFAULT}"
     DISK_IMG_DEFAULT="${DISK_IMG_DEFAULT}"
 )
@@ -43,3 +45,13 @@ if(WIN32)
         DISK_IMG_DEFAULT="${DISK_IMG_SDBOOT_DEFAULT}"
     )
 endif()
+
+# pugrun: runs shell commands on an emulated Pugputer from a host script (see pugrun.cpp).
+add_executable(pugrun pugrun.cpp)
+target_link_libraries(pugrun PRIVATE pugputer_system)
+target_include_directories(pugrun PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
+target_compile_definitions(pugrun PRIVATE
+    PUGBIOS_S19_DEFAULT="${PUGBIOS_S19_DEFAULT}"
+    DOS_BIN_DEFAULT="${DOS_BIN_DEFAULT}"
+    SHELL_BIN_DEFAULT="${SHELL_BIN_DEFAULT}"
+)
