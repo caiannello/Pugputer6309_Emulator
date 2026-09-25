@@ -31,7 +31,7 @@ double-click `start-console.bat`. Nothing to install or compile; see the release
 
 Every folder has its own `README.md` with the details.
 
-[Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/nano.png?raw=true)
+![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/nano.png?raw=true)
 
 ## The machine
 
