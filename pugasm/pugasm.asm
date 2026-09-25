@@ -218,6 +218,7 @@ EF_INEXACT  equ  $02               ; depends on an address that pass 1 can't fix
 EF_NORANGE  equ  $04               ; ... through something other than + and -
 EF_UNDEF    equ  $08               ; an undefined symbol (VALUE mode)
 EF_COMPLEX  equ  $10               ; (obj) relocatable in a way that can't be kept
+EF_RELOC    equ  $20               ; (obj) relocatable: terms (see pa_obj.asm)
 ; Listing prefix kinds (LSHOW)
 LS_NONE     equ  0                 ; 22 blanks
 LS_ADDR     equ  1                 ; the address and the bytes
@@ -311,12 +312,14 @@ DP_DONE     RTS
     INCLUDE pa_util.asm
     INCLUDE pa_heap.asm
     INCLUDE pa_io.asm
+    INCLUDE pa_strm.asm
     INCLUDE pa_sym.asm
     INCLUDE pa_expr.asm
     INCLUDE pa_line.asm
     INCLUDE pa_insn.asm
     INCLUDE pa_dir.asm
     INCLUDE pa_out.asm
+    INCLUDE pa_obj.asm
     INCLUDE pa_itab.asm
 ;------------------------------------------------------------------------------
 PA_END      equ  *
@@ -350,6 +353,23 @@ VP          SET  VARS
             VAR  NUMBUF,16
             VAR  SRECBUF,40
             VAR  EVSTACK,4
+            VAR  EVNT,1                ; the value's terms (pa_obj.asm): how many,
+            VAR  EVTERMS,MAXTERMS*TSZ  ; then the terms (these two together)
+            VAR  TTMP,1+MAXTERMS*TSZ   ; (a copy of them, while combining)
+            VAR  TNEW,TSZ              ; a term to add
+            VAR  SUBPC,1               ; PC-relative: take the section's base off
+            VAR  NSECT,1               ; sections
+            VAR  SECTAB,MAXSECT*SE_SIZE
+            VAR  IMPORTS,3             ; the import and export lists
+            VAR  EXPORTS,3
+            VAR  TFAR,3
+            VAR  TMPF,1
+            VAR  WOSECT,1              ; writing the object file
+            VAR  WOENT,2
+            VAR  WOI,2
+            VAR  WOP,3
+            VAR  WOCNT,1
+            VAR  RLBUF,RL_TERMS+MAXTERMS*TSZ
 VARSEND     equ  VP
 ;------------------------------------------------------------------------------
 ; End of pugasm.asm

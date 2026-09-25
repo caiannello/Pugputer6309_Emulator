@@ -214,6 +214,8 @@ DL_NOADD    TST  <SKIPCOND
 DL_LEXACT   STA  <EVFLAGS
             LDD  <LPCADJ
             STD  <EVADJ
+            CLR  EVNT                  ; (in a section: relative to it)
+            JSR  TSECT1
             CLRA
             JSR  SYMDEF
 DL_NEXT     LDA  <PASS
@@ -468,7 +470,16 @@ EB_PC       LDD  <PC
             STD  <PC
             PULS D,X,PC
 RESERVE     PSHS D
-            TST  <FIRSTOUT             ; before the first byte: counted (raw
+            LDA  <FORMAT               ; object output: zeros in the section
+            CMPA #FMT_OBJ
+            BNE  RS_ABS
+            LDB  <PASS
+            CMPB #2
+            BNE  RS_PC
+            LDD  ,S
+            JSR  SECTSKIP
+            BRA  RS_PC
+RS_ABS      TST  <FIRSTOUT             ; before the first byte: counted (raw
             BEQ  RS_AFTER              ; output writes zeros for it then)
             LDD  <RAWZERO
             ADDD ,S
@@ -508,6 +519,11 @@ OPL_ONE     LDB  #1
 EMITVAL     PSHS A
             JSR  CHKVAL
             PULS A
+            PSHS B
+            LDB  <EVFLAGS
+            BITB #EF_RELOC
+            PULS B
+            LBNE RELEMIT               ; (object output: for the linker)
             LDX  #EVAL+4
             NEGA
             LEAX A,X
@@ -530,14 +546,21 @@ CK_DEF      BITA #EF_KNOWN
 CK_ZERO     CLRD
             CLRW
             STQ  <EVAL
+            LDA  <EVFLAGS
+            ANDA #~EF_RELOC
+            STA  <EVFLAGS
 CK_OK       RTS
 ; Evaluate the expression at EXP in SIZE mode (known = defined before this
 ; line) / in VALUE mode (everything there is). Carry set: no expression.
 EVALS       CLR  <EVMODE
-            JMP  EXPR
+            BRA  EVGO
 EVALV       LDA  #1
             STA  <EVMODE
-            JMP  EXPR
+EVGO        JSR  EXPR
+            BCS  EVG_FAIL
+            JMP  RELFIN                ; (object output: relocatable?)
+EVG_FAIL    CLR  SUBPC
+            RTS
 ;------------------------------------------------------------------------------
 ; Errors. Pass 1 says nothing (pass 2 finds the same problems on the same lines).
 ;------------------------------------------------------------------------------

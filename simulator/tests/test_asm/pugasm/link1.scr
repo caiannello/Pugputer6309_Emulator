@@ -1,0 +1,11 @@
+# a test script
+define basesympat B_%s
+define lensympat L_%s
+section init load 1000
+section code
+; comment
+section tab high 8000
+section .data
+section *,!bss
+section *,bss load 0100
+entry 1234

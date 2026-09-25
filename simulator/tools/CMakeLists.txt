@@ -11,6 +11,7 @@ set(DOS_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.bin")
 set(SHELL_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../shell/shell.bin")
 set(EDIT_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.bin")
 set(PUGASM_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../pugasm/pugasm.bin")
+set(PUGLINK_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../pugasm/puglink.bin")
 set(DISK_IMG_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
 
 # mkdiskimg is plain, cross-platform file I/O -- no conio.h/Windows
@@ -22,6 +23,7 @@ target_compile_definitions(mkdiskimg PRIVATE
     SHELL_BIN_DEFAULT="${SHELL_BIN_DEFAULT}"
     EDIT_BIN_DEFAULT="${EDIT_BIN_DEFAULT}"
     PUGASM_BIN_DEFAULT="${PUGASM_BIN_DEFAULT}"
+    PUGLINK_BIN_DEFAULT="${PUGLINK_BIN_DEFAULT}"
     EXBASROM309_S19_DEFAULT="${EXBASROM309_S19_DEFAULT}"
     DISK_IMG_DEFAULT="${DISK_IMG_DEFAULT}"
 )

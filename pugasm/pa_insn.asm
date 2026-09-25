@@ -225,6 +225,8 @@ ID_5OK      LDA  <EVAL+3
 ; The offset (VALUE mode) -> EVAL; for PCR, relative to the end of the line.
 IDXVALUE    LDX  <IDXEXPR
             STX  <EXP
+            LDA  <IDXPCR               ; (PCR: less the section's base)
+            STA  SUBPC
             JSR  EVALV
             TST  <IDXPCR
             BEQ  IV_RET
@@ -570,6 +572,8 @@ IR4_YES     ANDCC #$FE
 ; from the value if it's known and exact, else 16 bits.
 IDXRESOLVE  LDX  <IDXEXPR
             STX  <EXP
+            LDA  <IDXPCR
+            STA  SUBPC
             JSR  EVALS
             LDA  <EVFLAGS
             BITA #EF_KNOWN
@@ -712,7 +716,9 @@ H_REL       LDX  <EXP                  ; branches: the size is in the mnemonic
             BNE  HR_1
             LEAX 1,X
             STX  <EXP
-HR_1        JSR  EVALV
+HR_1        LDA  #1                    ; (less the section's base)
+            STA  SUBPC
+            JSR  EVALV
             LBCS BADOPND
             LDB  #1
             JSR  GETOP
@@ -740,7 +746,12 @@ HR_KNOWN    LDX  #128
             JSR  CHKRANGE
 HR_EMIT8    LDD  <TMP2
             JSR  EMITOP
-            LDA  <EVAL+3
+            LDA  <EVFLAGS
+            BITA #EF_RELOC
+            BEQ  HR_PLAIN8
+            LDA  #1
+            JMP  EMITVAL
+HR_PLAIN8   LDA  <EVAL+3
             JMP  EMITB
 HR_LONG     LDB  #3                    ; 16 bits
             JSR  GETOP
@@ -1208,6 +1219,8 @@ IR2_OUT     PULS D
 CHKRANGE    LDA  <EVFLAGS
             BITA #EF_KNOWN
             BEQ  CR_RET
+            BITA #EF_RELOC             ; (the linker's business)
+            BNE  CR_RET
             JSR  INRANGE
             BCC  CR_RET
             LDA  #ER_BYTEOVF

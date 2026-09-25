@@ -210,8 +210,27 @@ SD_NEW      LDA  <PASS                 ; (pass 2 finds pass 1's record above)
             JMP  ERROR
 SD_MAKE     LDA  <EVFLAGS
             BITA #EF_KNOWN
-            BNE  SD_KNOWN
-            JSR  SAVEEXPR              ; -> FARP
+            BEQ  SD_SAVE
+            BITA #EF_COMPLEX
+            BNE  SD_SAVE
+            LDA  EVNT                  ; (object output) relative to a section?
+            BEQ  SD_KNOWN
+            CMPA #1                    ; to the current one, once: an address
+            BNE  SD_SAVE               ; in it; anything else is kept as its text
+            LDA  EVTERMS+T_KIND
+            CMPA #TK_SECT
+            BNE  SD_SAVE
+            LDA  EVTERMS+T_ID+2
+            CMPA <SECTNUM
+            BNE  SD_SAVE
+            LDD  EVTERMS+T_COEF
+            CMPD #1
+            BNE  SD_SAVE
+            LDA  <TMPB2
+            ORA  #SF_SECTREL
+            STA  <TMPB2
+            BRA  SD_KNOWN
+SD_SAVE     JSR  SAVEEXPR              ; -> FARP
             LDA  <TMPB2
             ORA  #SF_EXPR
             JMP  SYMNEW
@@ -255,34 +274,57 @@ SX_END      CLR  ,Y
 ; The value of the symbol in NAMEBUF, for an expression: -> EVAL, EVFLAGS, EVADJ.
 ; Unknown if it isn't defined, or (SIZE mode) is defined at or after CUTSEQ.
 ;------------------------------------------------------------------------------
-SYMVALUE    JSR  SYMFIND
-            BCS  SV_UNDEF
+SYMVALUE    CLR  EVNT
+            JSR  SYMFIND
+            BCS  SV_NOSYM
 ; The same for a record already found: SYMP (mapped, X).
-SYMVALREC   LDA  <EVMODE
+SYMVALREC   CLR  EVNT
+            LDA  <EVMODE
             BNE  SV_ANY
             LDD  SR_SEQ,X
             CMPD <CUTSEQ
             BHS  SV_UNKNOWN
 SV_ANY      LDA  SR_FLAGS,X
-            BITA #SF_IMPORT
-            LBNE SV_IMPORT
             BITA #SF_EXPR
-            BNE  SV_EXPR
+            LBNE SV_EXPR
             LDQ  SR_VAL,X
             STQ  <EVAL
             LDD  SR_ADJ,X
             STD  <EVADJ
-            LDB  #EF_KNOWN
-            BITA #SF_INEXACT
-            BEQ  SV_FLAGS
-            ORB  #EF_INEXACT
-SV_FLAGS    STB  <EVFLAGS
+            LDB  #EF_KNOWN             ; (a reference is exact: what lwasm's
+            STB  <EVFLAGS              ; choices come out as, for every source
+            LDA  SR_FLAGS,X            ; compared)
             BITA #SF_SECTREL
             LBNE SV_SECT
             RTS
-; Symbols from other files and section-relative ones: object output (not yet).
-SV_IMPORT   BRA  SV_UNKNOWN
-SV_SECT     RTS
+; An address in a section (object output): + the section's base.
+SV_SECT     LDD  #1
+            STD  TNEW+T_COEF
+            LDA  #TK_SECT
+            STA  TNEW+T_KIND
+            CLR  TNEW+T_ID
+            CLR  TNEW+T_ID+1
+            LDA  SR_SECT,X
+            STA  TNEW+T_ID+2
+            JMP  TADD
+; Not a symbol: an import (object output), or undefined.
+SV_NOSYM    JSR  IMPFIND
+            BCS  SV_UNDEF
+            CLRD
+            CLRW
+            STQ  <EVAL
+            STD  <EVADJ
+            LDA  #EF_KNOWN
+            STA  <EVFLAGS
+            LDD  #1
+            STD  TNEW+T_COEF
+            LDA  #TK_IMP
+            STA  TNEW+T_KIND
+            LDD  <FARP
+            STD  TNEW+T_ID
+            LDA  <FARP+2
+            STA  TNEW+T_ID+2
+            JMP  TADD
 SV_UNDEF    LDA  <EVMODE               ; (pass 2, VALUE: truly undefined)
             BEQ  SV_UNKNOWN
             LDA  <PASS

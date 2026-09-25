@@ -20,6 +20,8 @@ OP_LOR      equ  8
 OP_BAND     equ  9
 OP_BOR      equ  10
 OP_BXOR     equ  11
+EPTERMS     equ  7                 ; an operand on the stack: value 0-3, flags 4,
+EPOPER      equ  8+MAXTERMS*TSZ    ; adj 5-6, terms; then the operator
 ;------------------------------------------------------------------------------
 EXPR        LDD  <EXP
             STD  <EXPSTART
@@ -41,6 +43,11 @@ EP_LOOP     LDX  <EXP
             STY  <EXP
             CLR  <EVLIT
             PSHS D                     ; the operator, then the left operand
+            LEAS -(1+MAXTERMS*TSZ),S   ; (its terms: 7-31 below)
+            LDX  #EVNT
+            LEAY ,S
+            LDW  #1+MAXTERMS*TSZ
+            TFM  X+,Y+
             LDD  <EVADJ
             PSHS D
             LDB  <EVFLAGS
@@ -48,18 +55,18 @@ EP_LOOP     LDX  <EXP
             LDQ  <EVAL
             PSHSW
             PSHS D
-            LDA  7,S                   ; the right operand, at the operator's level
+            LDA  EPOPER,S              ; the right operand, at the operator's level
             JSR  EXPRP
             BCS  EP_FAIL9
-            LEAX ,S                    ; X = the left operand, 8,S = the operator
-            LDB  8,S
+            LEAX ,S                    ; X = the left operand, then the operator
+            LDB  EPOPER+1,S
             JSR  APPLYOP
-            LEAS 9,S
+            LEAS EPOPER+2,S
             BRA  EP_LOOP
 EP_DONE     LEAS 1,S
             ANDCC #$FE
             RTS
-EP_FAIL9    LEAS 9,S
+EP_FAIL9    LEAS EPOPER+2,S
 EP_FAIL     LEAS 1,S
             ORCC #1
             RTS
@@ -173,7 +180,11 @@ AO_XLEFT    LDA  4,X
             STD  <EVADJ
 AO_EXACT    PULS A
             STA  <EVFLAGS
-            LDB  <TMPB2                ; now the value
+            LDA  EPTERMS,X             ; (object output) relocatable terms
+            ORA  EVNT
+            BEQ  AO_VALUE
+            JSR  AOTERMS
+AO_VALUE    LDB  <TMPB2                ; now the value
             CMPB #OP_PLUS
             BEQ  AO_PLUS
             CMPB #OP_MINUS
@@ -285,6 +296,72 @@ AO_BXOR     LDD  ,X
             EORD <EVAL+2
             STD  <EVAL+2
             RTS
+; The terms of X's value (the left) and EVAL's (the right), for the operator
+; TMPB2: + and - combine them, * with a constant scales them; anything else
+; with terms is too complex for a relocation.
+AOTERMS     PSHS X
+            LDB  <TMPB2
+            CMPB #OP_PLUS
+            BEQ  AT_ADD
+            CMPB #OP_MINUS
+            BEQ  AT_SUB
+            CMPB #OP_TIMES
+            BEQ  AT_MUL
+AT_CPLX     LDA  <EVFLAGS
+            ORA  #EF_COMPLEX
+            STA  <EVFLAGS
+            CLR  EVNT
+            PULS X,PC
+AT_ADD      CLR  TMPF
+            BRA  AT_MERGE
+AT_SUB      LDA  #1
+            STA  TMPF
+AT_MERGE    LDX  #EVNT                 ; the right's terms aside, the left's in
+            LDY  #TTMP
+            LDW  #1+MAXTERMS*TSZ
+            TFM  X+,Y+
+            LDX  ,S
+            LEAX EPTERMS,X
+            LDY  #EVNT
+            LDW  #1+MAXTERMS*TSZ
+            TFM  X+,Y+
+            LDX  #TTMP+1               ; then the right's added (or taken off)
+            LDB  TTMP
+AM_LOOP     TSTB
+            BEQ  AM_DONE
+            LDY  #TNEW
+            LDW  #TSZ
+            PSHS X
+            TFM  X+,Y+
+            PULS X
+            TST  TMPF
+            BEQ  AM_ADD
+            PSHS B                     ; (the count)
+            LDD  TNEW+T_COEF
+            NEGD
+            STD  TNEW+T_COEF
+            PULS B
+AM_ADD      JSR  TADD
+            LEAX TSZ,X
+            DECB
+            BRA  AM_LOOP
+AM_DONE     PULS X,PC
+AT_MUL      LDA  EPTERMS,X
+            BEQ  AT_RSC
+            TST  EVNT
+            BNE  AT_CPLX               ; terms times terms
+            LDD  <EVAL+2               ; the left's terms, times the right
+            PSHS D
+            LEAX EPTERMS,X
+            LDY  #EVNT
+            LDW  #1+MAXTERMS*TSZ
+            TFM  X+,Y+
+            PULS D
+            JSR  TSCALE
+            PULS X,PC
+AT_RSC      LDD  2,X                   ; the right's terms, times the left
+            JSR  TSCALE
+            PULS X,PC
 ;------------------------------------------------------------------------------
 ; A term: parentheses, unary + - ~ ^, or lwasm's own terms (PTERM).
 ;------------------------------------------------------------------------------
@@ -292,11 +369,11 @@ TERM        LDX  <EXP
 TM_AGAIN    LDA  ,X
             LBEQ TM_FAIL
             JSR  ISSPACE
-            BCC  TM_FAIL
+            LBCC TM_FAIL
             CMPA #')'
-            BEQ  TM_FAIL
+            LBEQ TM_FAIL
             CMPA #']'
-            BEQ  TM_FAIL
+            LBEQ TM_FAIL
             CMPA #'('
             BEQ  TM_PAREN
             CMPA #'+'
@@ -331,6 +408,8 @@ TM_NEG      LEAX 1,X
             BCS  TM_FAIL
             LDX  #EVAL
             JSR  NEG32
+            LDD  #-1                   ; (and its terms)
+            JSR  TSCALE
             BRA  TM_UNX
 TM_COM      LEAX 1,X
             STX  <EXP
@@ -342,6 +421,13 @@ TM_COM      LEAX 1,X
             COM  <EVAL+1
             COM  <EVAL+2
             COM  <EVAL+3
+            TST  EVNT                  ; (not with terms)
+            BEQ  TM_CNT
+            LDA  <EVFLAGS
+            ORA  #EF_COMPLEX
+            STA  <EVFLAGS
+            CLR  EVNT
+TM_CNT
             TST  <EXPW8                ; (an 8-bit immediate: ~ is 8 bits wide)
             BEQ  TM_UNX
             CLR  <EVAL
@@ -360,6 +446,7 @@ TM_FAIL     ORCC #1
 PTERM       CLRD                       ; a constant unless said otherwise
             CLRW
             STQ  <EVAL
+            CLR  EVNT
             STD  <EVADJ
             LDB  #EF_KNOWN
             STB  <EVFLAGS
@@ -380,6 +467,7 @@ PT_ADDR     LEAX 1,X
             CLR  <EVLIT
             LDD  <STARPC
             STD  <EVAL+2
+            JSR  TSECT1                ; (in a section: relative to it)
             LDA  <PCX
             BEQ  PT_RET
             LDD  <PCADJ

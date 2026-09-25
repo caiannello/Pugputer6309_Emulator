@@ -64,6 +64,12 @@ EQ_HAVE     JSR  EVALV
             ANDA #EF_KNOWN
             EORA #EF_KNOWN
             STA  <LSHOWQ
+            LDB  <SECTNUM              ; (object output: relative to another
+            JSR  TALLSECT              ; section, or imported: "????")
+            BCC  EQ_SHOWN
+            LDA  #1
+            STA  <LSHOWQ
+EQ_SHOWN
             LDX  #LABELNAME
             LDY  #NAMEBUF
             JSR  STRCPY
@@ -234,7 +240,12 @@ ZR_EXACT    CLR  <LREPB
             CLR  <TMPB2
             JMP  FILLN
 ZR_RET      RTS
-; D = a count, TMPB2 = a byte: emitted that many times.
+; D = a count, TMPB2 = a byte: emitted that many times. FILLB: FILL and ALIGN,
+; which in a bss section only reserve the space.
+FILLB       PSHS D
+            JSR  SECTISBSS
+            PULS D
+            LBCS RESERVE
 FILLN       TFR  D,X
 FN_LOOP     CMPX #0
             BEQ  FN_RET
@@ -268,7 +279,7 @@ D_FILL      JSR  EVALV
             STA  <TMPB2
             STA  <LREPB
             TFR  X,D
-            JMP  FILLN
+            JMP  FILLB
 FI_BAD      LDA  #ER_BADOPND
             JMP  ERROR
 FI_RET      RTS
@@ -302,7 +313,7 @@ AL_MODDED   CMPD #0
             STD  <TMP
             LDD  <TMP3
             SUBD <TMP
-            JMP  FILLN                 ; (the fill byte is in TMPB2)
+            JMP  FILLB                 ; (the fill byte is in TMPB2)
 AL_RET      RTS
 ;------------------------------------------------------------------------------
 D_END       LDA  #1
@@ -565,18 +576,6 @@ D_WARNING   JSR  SKIPOPND
             JMP  PRINTNL
 D_NOOP      JMP  SKIPOPND
 D_PRAGMA    JMP  SKIPOPND
-;------------------------------------------------------------------------------
-; Sections and symbols between object files: phase 2 (obj). In the other
-; formats lwasm doesn't allow them.
-;------------------------------------------------------------------------------
-D_SECTION
-D_ENDSECTION
-D_EXPORT
-D_IMPORT
-D_EXTERN
-D_EXTDEP    JSR  SKIPOPND
-            LDA  #ER_OBJONLY
-            JMP  ERROR
 ;------------------------------------------------------------------------------
 ; Macros. A macro record: +0 the next macro, +3 its first line (far pointers),
 ; +6 the line that defined it, +8 flags (1: noexpand), +9 the name. A line: +0
@@ -1196,7 +1195,11 @@ IS_NAMED    JSR  STRCPY
             STD  <EVADJ
             LDA  #EF_KNOWN
             STA  <EVFLAGS
-            CLRA
+            CLR  EVNT                  ; (an instance in a section: relative to
+            TST  <INSTRUCT             ; it; inside a struct, only offsets)
+            BNE  IS_OFFSET
+            JSR  TSECT1
+IS_OFFSET   CLRA
             JSR  SYMDEF
             PULS D                     ; a field that is itself a struct: its fields
             STD  <FARP                 ; too, under prefix.name
@@ -1247,6 +1250,7 @@ IS_SIZEOF   LDX  #M_SIZEOF             ; sizeof{prefix}
             STD  <EVAL+2
             LDA  #EF_KNOWN
             STA  <EVFLAGS
+            CLR  EVNT                  ; (a size: a constant)
             CLRA
             JSR  SYMDEF
             LEAS 4,S

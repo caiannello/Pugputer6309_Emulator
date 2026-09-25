@@ -2,7 +2,7 @@
 
 This is a complete, self-contained demo of the **Pugputer 6309**, a homebrew computer built
 around the Hitachi HD6309 CPU: an emulator running the real firmware -- BIOS, DOS, shell, a
-nano-style text editor, an assembler and Microsoft-derived Extended BASIC -- from a virtual SD card. There is
+nano-style text editor, an assembler and linker, and Microsoft-derived Extended BASIC -- from a virtual SD card. There is
 nothing to install and no DLLs to hunt for.
 
 ## Quick start
@@ -73,7 +73,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `EDIT.COM`, `PUGASM.COM`, `BASIC.COM` and the demos |
+| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `EDIT.COM`, `PUGASM.COM`, `PUGLINK.COM`, `BASIC.COM` and the demos |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -99,6 +99,7 @@ GREET Ada
 ```
 
 `EDIT GREET.ASM` shows how it works; `PUGASM` alone lists the options (`-l` makes a listing).
+**`PUGLINK`** links object files (`PUGASM -f obj`) into a program, as lwlink does.
 
 ## Good to know
 
@@ -113,7 +114,7 @@ GREET Ada
 
 The Pugputer 6309 is open source: firmware, emulator and test suite are all in one repository,
 with a much longer README describing the design, how to build everything from source, and where
-the project is going (a self-hosting assembler and linker, a graphics peripheral, and testing
+the project is going (a graphics peripheral, and testing
 on the real hardware). It's at
 <https://github.com/YOUR-GITHUB-NAME/Pugputer6309_Experiments>.
 

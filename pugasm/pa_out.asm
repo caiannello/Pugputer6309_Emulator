@@ -3,7 +3,8 @@
 ; at the end of the listing, and the messages.
 ;------------------------------------------------------------------------------
 ; Before each pass.
-PASSINIT    CLRD
+PASSINIT    JSR  OBJPASS
+            CLRD
             STD  <RAWZERO
             STD  <FIRSTADDR
             STD  <SRECCNT
@@ -14,12 +15,7 @@ PASSINIT    CLRD
             RTS
 ; Before pass 2: the output (and listing) files. A .COM file starts with its
 ; program header, from what pass 1 found.
-OPENOUT     LDA  <FORMAT
-            CMPA #FMT_OBJ
-            BNE  OO_OPEN
-            LDX  #M_NOOBJ
-            JMP  FATAL
-OO_OPEN     LDU  #OUTSTRM
+OPENOUT     LDU  #OUTSTRM
             LDX  #OUTNAME
             JSR  SOPEN
             BCC  OO_OK
@@ -60,6 +56,8 @@ SPUTW       PSHS B                     ; D -> the stream U, high byte first
 OUTSTART    LDA  <FORMAT
             CMPA #FMT_SREC
             BEQ  OS2_RET
+            CMPA #FMT_OBJ              ; (object output: into the sections)
+            BEQ  OS2_RET
             LDD  <RAWZERO
             TFR  D,X
             LDU  #OUTSTRM
@@ -76,6 +74,8 @@ OS2_RET     RTS
 OUTBYTE     LDB  <FORMAT
             CMPB #FMT_SREC
             BEQ  SRECBYTE
+            CMPB #FMT_OBJ
+            LBEQ SECTBYTE
             LDU  #OUTSTRM
             JMP  SPUTC
 ; D = bytes of reserved space at PC (pass 2, after the first output byte): raw
@@ -238,7 +238,13 @@ SPUTHEX     PSHS A,X
 ;------------------------------------------------------------------------------
 ; After pass 2.
 CLOSEOUT    LDA  <FORMAT
-            CMPA #FMT_SREC
+            CMPA #FMT_OBJ
+            BNE  CO3_NOTOBJ
+            LDD  <ERRCNT               ; (the object file, all at the end)
+            BNE  CO3_CLOSE
+            JSR  WRITEOBJ
+            BRA  CO3_CLOSE
+CO3_NOTOBJ  CMPA #FMT_SREC
             BNE  CO3_CLOSE
             JSR  SRECEND
 CO3_CLOSE   LDU  #OUTSTRM
@@ -283,12 +289,20 @@ LISTSYMS    LDU  #LSTSTRM
             LDX  #M_SYMTAB
             JSR  SPUTS
             JSR  SPUTNL
-            LDD  <NSYMS
-            LBEQ LS_RET
-            CMPD #4000                 ; (one heap page of pointers)
-            BLS  LS_FITS
+            JSR  SORTSYMS
+            BCC  LS_SORTED
             LDX  #M_MANYSYMS
             JMP  SPUTS
+; The symbols, sorted into an array (ARRPG, ARRADDR: far pointers, NSYMS of
+; them). Carry set if there are too many for one heap page.
+SORTSYMS    LDD  <NSYMS
+            BEQ  SS3_RET
+            CMPD #4000                 ; (one heap page of pointers)
+            BLS  LS_FITS
+            ORCC #1
+            RTS
+SS3_RET     ANDCC #$FE
+            RTS
 LS_FITS     STD  <TMP
             ADDD <TMP
             ADDD <TMP                  ; 3 bytes each
@@ -328,7 +342,9 @@ LS_NEXTB    LDX  <HBKT
             CMPX #HASHTAB+NHASH*3
             BLO  LS_BUCKET
             JSR  HEAPSORT
-            LDD  #0                    ; print them in order
+            ANDCC #$FE
+            RTS
+LS_SORTED   LDD  #0                    ; print them in order
             STD  <TMP2
 LS_PRINT    LDD  <TMP2
             CMPD <NSYMS
@@ -370,7 +386,18 @@ ARRPUT      PSHS D,X
             PULS D,X,PC
 ; One line: "[SG] NAME                             VALUE"
 LISTSYM     JSR  FARMAP
-            LDU  #LSTSTRM
+            LDA  <FORMAT               ; object output: its value first
+            CMPA #FMT_OBJ
+            BNE  LY_START
+            LDD  <FARP
+            STD  <SYMP
+            LDA  <FARP+2
+            STA  <SYMP+2
+            LDA  #1
+            STA  <EVMODE
+            JSR  SYMVALREC
+            JSR  FARMAP
+LY_START    LDU  #LSTSTRM
             LDA  #'['
             JSR  SPUTC
             LDA  #' '
@@ -379,7 +406,12 @@ LISTSYM     JSR  FARMAP
             BEQ  LY_NOTSET
             LDA  #'S'
 LY_NOTSET   JSR  SPUTC
-            LDA  #'G'
+            LDA  <FORMAT
+            CMPA #FMT_OBJ
+            BNE  LY_NOKIND
+            JSR  SYMKIND
+            JSR  SPUTC
+LY_NOKIND   LDA  #'G'
             LDB  SR_CTX,X
             CMPB #$FF
             BEQ  LY_GLOBAL
@@ -403,7 +435,29 @@ LY_GLOBAL   JSR  SPUTC
 LY_PADDED   LDA  #' '
             JSR  SPUTC
             PULS X
-            LDA  SR_FLAGS,X            ; the value
+            LDA  <FORMAT
+            CMPA #FMT_OBJ
+            BNE  LY_ABS
+            JSR  SYMKIND               ; object output: a constant,
+            CMPA #'c'
+            BEQ  LY_HEX
+            JSR  TSAMESECT             ; or relative to one section,
+            BCS  LY_INCOMPL
+            PSHS B
+            JSR  LYHEX
+            LDX  #M_SECTOPEN           ; "VVVV (name)"
+            JSR  SPUTS
+            PULS B
+            JSR  SECTENTB
+            LEAX SE_NAME,Y
+            JSR  SPUTS
+            LDA  #')'
+            JSR  SPUTC
+            JMP  SPUTNL
+LY_INCOMPL  LDX  #M_INCOMPLETE         ; or neither
+            JSR  SPUTS
+            JMP  SPUTNL
+LY_ABS      LDA  SR_FLAGS,X            ; the value
             BITA #SF_EXPR
             BNE  LY_EXPR
             LDQ  SR_VAL,X
@@ -423,7 +477,9 @@ LY_EXPR     LDD  <FARP                 ; (evaluated as a reference would be)
             LDX  #M_INCOMPLETE
             JSR  SPUTS
             JMP  SPUTNL
-LY_HEX      LDU  #LSTSTRM              ; %04X of the 32-bit value
+LY_HEX      JSR  LYHEX
+            JMP  SPUTNL
+LYHEX       LDU  #LSTSTRM              ; %04X of the 32-bit value
             LDX  #NUMBUF
             LDA  <EVAL
             JSR  HEX2
@@ -440,8 +496,7 @@ LY_SKIP     LDA  ,X
             BHS  LY_OUT
             LEAX 1,X
             BRA  LY_SKIP
-LY_OUT      JSR  SPUTS
-            JMP  SPUTNL
+LY_OUT      JMP  SPUTS
 ;------------------------------------------------------------------------------
 ; Heap sort of the array (NSYMS elements) with SYMCMP.
 ;------------------------------------------------------------------------------
@@ -623,6 +678,18 @@ ER_STRECUR  equ  39
 ER_STRNOSYM equ  40
 ER_STRDUPE  equ  41
 ER_STRNONAME equ 42
+ER_SECTTARGET equ 43
+ER_SECTNAME equ  44
+ER_SECTFLAG equ  45
+ER_ENDSECT  equ  46
+ER_OBJIMPORT equ 47
+ER_OBJEXTDEP equ 48
+ER_EXTDEP   equ  49
+ER_UNDEFEXP equ  50
+ER_NOSECT   equ  51
+ER_COMPLEX  equ  52
+ER_MANYSECT equ  53
+ER_OBJEXPORT equ ER_OBJONLY
 ERRTAB      FCN  "Bad operand"
             FCN  "Bad opcode"
             FCN  "Illegal use of 6309 instruction in 6809 mode"
@@ -656,7 +723,7 @@ ERRTAB      FCN  "Bad operand"
             FCN  "Missing filename"
             FCN  "Cannot open file"
             FCN  "Conditions must be constant on pass 1"
-            FCN  "Only supported for object target"
+            FCN  "Only supported for object target (EXPORT)"
             FCN  "Attempt to define a macro inside a macro"
             FCN  "Missing macro name"
             FCN  "Duplicate macro definition"
@@ -665,6 +732,17 @@ ERRTAB      FCN  "Bad operand"
             FCN  "Structure definition with no effect - no symbol"
             FCN  "Duplicate structure definition"
             FCN  "Cannot declare a structure without a symbol name."
+            FCN  "Cannot use sections unless using the object target"
+            FCN  "Need section name"
+            FCN  "Unrecognized section flag"
+            FCN  "ENDSECTION without SECTION"
+            FCN  "Only supported for object target (IMPORT)"
+            FCN  "Only supported for object target (EXTDEP)"
+            FCN  "EXTDEP must be within a section"
+            FCN  "Undefined exported symbol"
+            FCN  "Instruction generating output outside of a section"
+            FCN  "Incomplete expression too complex"
+            FCN  "Too many sections"
 M_ERRSEP    FCN  ") : ERROR : "
 M_ERRORS    FCB  ' '
             FCC  "error(s)"
@@ -686,7 +764,7 @@ M_NOOUT     FCN  "Cannot create the output file"
 M_NOLIST    FCB  CR,LF
             FCC  "Cannot create the listing file"
             FCB  CR,LF,0
-M_NOOBJ     FCN  "Object output isn't done yet"
+M_SECTOPEN  FCN  " ("
 M_SRECHDR   FCN  "[pugasm 1.0] "
 M_SYMTAB    FCN  "Symbol Table:"
 M_MANYSYMS  FCC  "(too many symbols to list)"

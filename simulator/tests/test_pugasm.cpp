@@ -1,10 +1,14 @@
-// PUGASM.COM (pugasm/), the Pugputer's own assembler, run on the emulated machine
-// through the whole boot chain: it assembles the project's sources (the shell, the
-// editor, DOS, BASIC and itself) and must produce exactly the bytes and the listing
-// that lwasm did at build time. With lwasm on hand, it also has to match lwasm on
-// test_asm/pugasm (every operation in every operand form, for each CPU, and the
-// directives, macros and expressions). The rest: what it runs is runnable, errors
-// are reported and leave no output, and the copy it makes of itself works.
+// PUGASM.COM and PUGLINK.COM (pugasm/), the Pugputer's own assembler and linker,
+// run on the emulated machine through the whole boot chain. PUGASM assembles the
+// project's sources (the shell, the editor, DOS, BASIC, itself, PUGLINK, and the
+// BIOS's modules as object files) and must produce exactly the bytes and listings
+// lwasm did at build time; PUGLINK links the BIOS to exactly lwlink's S-records
+// and map -- and the two build the whole BIOS on the Pugputer. With lwtools on
+// hand, they also have to match lwasm and lwlink on test_asm/pugasm (every
+// operation in every operand form, for each CPU; directives, macros and
+// expressions; object files; links with the default and other scripts). The
+// rest: what they make runs, errors are reported and leave no output, and the
+// copy PUGASM makes of itself works.
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -49,8 +53,8 @@ pugputer::Fat16File text(const std::string& name, const std::string& t) {
 
 // pugasm's sources, as they go on a disk.
 bool add_pugasm_sources(std::vector<pugputer::Fat16File>& files) {
-    static const char* kParts[] = {"pugasm", "pa_util", "pa_heap", "pa_io", "pa_sym", "pa_expr",
-                                   "pa_line", "pa_insn", "pa_dir", "pa_out", "pa_itab"};
+    static const char* kParts[] = {"pugasm", "pa_util", "pa_heap", "pa_io", "pa_strm", "pa_sym", "pa_expr",
+                                   "pa_line", "pa_insn", "pa_dir", "pa_out", "pa_obj", "pa_itab"};
     for (const char* p : kParts) {
         std::string up = p;
         for (char& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -66,6 +70,7 @@ struct Machine {
 
     bool start(const char* image_name, std::vector<pugputer::Fat16File> files) {
         if (!add(files, PUGASM_BIN_PATH, "PUGASM.COM")) return false;
+        if (!add(files, PUGLINK_BIN_PATH, "PUGLINK.COM")) return false;
         img = build_image(image_name, 32768, 4, std::move(files));
         return !img.empty() && s.boot_shell(PUGBIOS_S19_PATH, img.c_str());
     }
@@ -147,10 +152,20 @@ void check_like_lwasm(Machine& m, const std::string& src, const std::string& ste
     CHECK(same((src + " listing").c_str(), no_cr(host_text(lst)), no_cr(m.file(stem + ".LST"))));
 }
 
+// The BIOS's modules, as the link wants them (a response file: the command
+// line is too short for them all).
+const char* const kBiosModules[] = {"helpers", "devio", "serio", "sdcard", "time", "loader", "banks", "main"};
+const char* const kBiosRsp = "-f srec -o PUGBIOS.S19 -m PUGBIOS.MAP -s LINK.SCR\r\n"
+                             "helpers.o devio.o serio.o sdcard.o time.o loader.o banks.o main.o\r\n";
+
+std::string upper(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
 #if PUGPUTER_HAVE_LWASM
-// lwasm on a test_asm/pugasm source (copied into the build directory, so the
-// listing names it the same way), then pugasm on the same source.
-void check_against_lwasm(const char* name, bool m6809) {
+// A scratch directory in the build directory for the host tools' output.
+std::string host_dir() {
     std::string dir = std::string(PUGPUTER_TEST_BUILD_DIR) + "/pugasm";
 #ifdef _WIN32
     std::string mk = "mkdir \"" + dir + "\" >NUL 2>NUL";
@@ -158,29 +173,72 @@ void check_against_lwasm(const char* name, bool m6809) {
     std::string mk = "mkdir -p \"" + dir + "\"";
 #endif
     std::system(mk.c_str());
-    std::string src = std::string(PUGPUTER_TEST_ASM_DIR) + "/pugasm/" + name;
-    std::string body = host_text(src);
-    {
-        std::ofstream o(dir + "/" + name, std::ios::binary);
-        o << body;
-    }
-    std::string cmd = std::string("cd \"") + dir + "\" && \"" + LWASM_EXE_PATH + "\" " + name +
-                      (m6809 ? " --6809" : " --6309") + " --format=raw --output=lw.bin --list=lw.lst --symbols";
+    return dir;
+}
+// Runs a host tool in `dir`: true if it succeeded.
+bool host_run(const std::string& dir, const char* exe, const std::string& args) {
 #ifdef _WIN32
-    cmd = "cd /d \"" + dir + "\" && \"" + LWASM_EXE_PATH + "\" " + name + (m6809 ? " --6809" : " --6309") +
-          " --format=raw --output=lw.bin --list=lw.lst --symbols";
-    cmd = "\"" + cmd + "\"";
+    std::string cmd = "\"cd /d \"" + dir + "\" && \"" + exe + "\" " + args + " >NUL 2>NUL\"";
+#else
+    std::string cmd = "cd \"" + dir + "\" && \"" + exe + "\" " + args + " >/dev/null 2>&1";
 #endif
-    CHECK(std::system(cmd.c_str()) == 0);
-
-    std::string up = name;
-    for (char& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return std::system(cmd.c_str()) == 0;
+}
+// A test_asm/pugasm file: its text, and a copy in `dir`.
+std::string test_source(const std::string& dir, const std::string& name) {
+    std::string body = host_text(std::string(PUGPUTER_TEST_ASM_DIR) + "/pugasm/" + name);
+    std::ofstream o(dir + "/" + name, std::ios::binary);
+    o << body;
+    return body;
+}
+// lwasm on a test_asm/pugasm source (copied into the build directory, so the
+// listing names it the same way), then pugasm on the same source: the same
+// output (raw or an object file) and listing.
+void check_against_lwasm(const char* name, bool m6809, bool obj = false) {
+    std::string dir = host_dir();
+    std::string body = test_source(dir, name);
+    CHECK(host_run(dir, LWASM_EXE_PATH, std::string(name) + (m6809 ? " --6809" : " --6309") +
+                                            (obj ? " --format=obj" : " --format=raw") +
+                                            " --output=lw.bin --list=lw.lst --symbols"));
     Machine m;
-    CHECK(m.start("pugasm_ops.img", {text(up, body)}));
-    std::string out = m.run(std::string("PUGASM ") + (m6809 ? "-9 " : "") + "-o T.BIN -lT.LST -s " + name);
+    CHECK(m.start("pugasm_ops.img", {text(upper(name), body)}));
+    std::string out = m.run(std::string("PUGASM ") + (m6809 ? "-9 " : "") + (obj ? "-f obj " : "") +
+                            "-o T.BIN -lT.LST -s " + name);
     CHECK(out.find("error") == std::string::npos);
     CHECK(same((std::string(name) + " output").c_str(), host_text(dir + "/lw.bin"), m.file("T.BIN")));
     CHECK(same((std::string(name) + " listing").c_str(), no_cr(host_text(dir + "/lw.lst")), no_cr(m.file("T.LST"))));
+}
+#endif
+
+#if PUGPUTER_HAVE_LWASM
+// objf.asm and prov.asm (test_asm/pugasm) as objects by lwasm, linked by lwlink
+// and by PUGLINK with the same arguments (`files`: other test_asm/pugasm files
+// they need): the same output and map.
+void check_link(const std::string& args, const std::string& out, const std::vector<std::string>& files = {}) {
+    if (!std::ifstream(LWLINK_EXE_PATH)) {
+        std::printf("  (no lwlink: skipped)\n");
+        return;
+    }
+    std::string dir = host_dir();
+    std::vector<pugputer::Fat16File> disk;
+    for (const char* src : {"objf", "prov"}) {
+        test_source(dir, std::string(src) + ".asm");
+        CHECK(host_run(dir, LWASM_EXE_PATH, std::string(src) + ".asm --6309 --format=obj --output=" + src + ".o"));
+        CHECK(add(disk, dir + "/" + src + ".o", upper(src) + ".O"));
+    }
+    for (const auto& f : files) {
+        test_source(dir, f);
+        CHECK(add(disk, dir + "/" + f, upper(f)));
+    }
+    std::remove((dir + "/" + out).c_str());
+    std::remove((dir + "/OUT.MAP").c_str());
+    CHECK(host_run(dir, LWLINK_EXE_PATH, args + " -o " + out + " -m OUT.MAP objf.o prov.o"));
+    disk.push_back(text("ARGS.RSP", args + " -o " + out + " -m OUT.MAP objf.o prov.o\r\n"));
+    Machine m;
+    CHECK(m.start("puglink_cmp.img", disk));
+    std::string said = m.run("PUGLINK @args.rsp");
+    CHECK(same(("the output of: " + args).c_str(), host_text(dir + "/" + out), m.file(upper(out))));
+    CHECK(same(("the map of: " + args).c_str(), host_text(dir + "/OUT.MAP"), m.file("OUT.MAP")));
 }
 #endif
 
@@ -346,4 +404,127 @@ TEST(pugasm_reports_errors_and_writes_nothing) {
 TEST(pugasm_matches_lwasm_on_every_6309_operation) { check_against_lwasm("allops.asm", false); }
 TEST(pugasm_matches_lwasm_on_every_6809_operation) { check_against_lwasm("allops9.asm", true); }
 TEST(pugasm_matches_lwasm_on_directives_macros_and_expressions) { check_against_lwasm("feat.asm", false); }
+#endif
+
+TEST(pugasm_makes_the_bios_objects_like_lwasm) {
+    std::vector<pugputer::Fat16File> files;
+    for (const char* mod : kBiosModules) CHECK(add(files, repo(std::string("bios/") + mod + ".asm"), upper(mod) + ".ASM"));
+    CHECK(add(files, BIOS_DEFINES_PATH, "DEFINES.D"));
+    Machine m;
+    CHECK(m.start("pugasm_bios.img", files));
+    for (const char* mod : kBiosModules) {
+        std::string name = mod;
+        std::string out = m.run("PUGASM -f obj -o " + name + ".o -l" + name + ".lst " + name + ".asm");
+        CHECK(out.find("error") == std::string::npos);
+        CHECK(same((name + ".o").c_str(), host_text(repo("bios/" + name + ".o")), m.file(upper(name) + ".O")));
+        CHECK(same((name + ".lst").c_str(), no_cr(host_text(repo("bios/" + name + ".lst"))),
+                   no_cr(m.file(upper(name) + ".LST"))));
+    }
+}
+
+TEST(puglink_links_the_bios_like_lwlink) {
+    std::vector<pugputer::Fat16File> files;
+    for (const char* mod : kBiosModules) CHECK(add(files, repo(std::string("bios/") + mod + ".o"), upper(mod) + ".O"));
+    CHECK(add(files, repo("bios/linker_script"), "LINK.SCR"));
+    files.push_back(text("BIOS.RSP", kBiosRsp));
+    Machine m;
+    CHECK(m.start("puglink_bios.img", files));
+    std::string out = m.run("PUGLINK @bios.rsp");
+    CHECK(out.find("PUGLINK @bios.rsp\r\n/> ") != std::string::npos || out.find("rror") == std::string::npos);
+    CHECK(same("the BIOS's S-records", host_text(PUGBIOS_S19_PATH), m.file("PUGBIOS.S19")));
+    CHECK(same("the BIOS's map", host_text(PUGBIOS_MAP_PATH), m.file("PUGBIOS.MAP")));
+}
+
+TEST(the_bios_builds_entirely_on_the_pugputer) {
+    std::vector<pugputer::Fat16File> files;
+    for (const char* mod : kBiosModules) CHECK(add(files, repo(std::string("bios/") + mod + ".asm"), upper(mod) + ".ASM"));
+    CHECK(add(files, BIOS_DEFINES_PATH, "DEFINES.D"));
+    CHECK(add(files, repo("bios/linker_script"), "LINK.SCR"));
+    files.push_back(text("BIOS.RSP", kBiosRsp));
+    Machine m;
+    CHECK(m.start("pug_biosbuild.img", files));
+    for (const char* mod : kBiosModules) {
+        std::string out = m.run(std::string("PUGASM -f obj -o ") + mod + ".o " + mod + ".asm");
+        CHECK(out.find("error") == std::string::npos);
+    }
+    m.run("PUGLINK @bios.rsp");
+    CHECK(same("the BIOS built here", host_text(PUGBIOS_S19_PATH), m.file("PUGBIOS.S19")));
+    CHECK(same("its map", host_text(PUGBIOS_MAP_PATH), m.file("PUGBIOS.MAP")));
+}
+
+TEST(pugasm_assembles_puglink_and_that_copy_links_the_bios) {
+    std::vector<pugputer::Fat16File> files;
+    for (const char* p : {"puglink", "pa_util", "pa_heap", "pa_strm"})
+        CHECK(add(files, repo(std::string("pugasm/") + p + ".asm"), upper(p) + ".ASM"));
+    CHECK(add(files, BIOS_DEFINES_PATH, "DEFINES.D"));
+    for (const char* mod : kBiosModules) CHECK(add(files, repo(std::string("bios/") + mod + ".o"), upper(mod) + ".O"));
+    CHECK(add(files, repo("bios/linker_script"), "LINK.SCR"));
+    files.push_back(text("BIOS.RSP", kBiosRsp));
+    Machine m;
+    CHECK(m.start("puglink_self.img", files));
+    std::string out = m.run("PUGASM -o LINK2.COM -lPUGLINK.LST -s puglink.asm");
+    CHECK(out.find("error") == std::string::npos);
+    CHECK(same("PUGLINK by PUGASM", host_text(PUGLINK_BIN_PATH), m.file("LINK2.COM")));
+    CHECK(same("its listing", no_cr(host_text(repo("pugasm/puglink.lst"))), no_cr(m.file("PUGLINK.LST"))));
+    m.run("LINK2 @bios.rsp");
+    CHECK(same("the BIOS by that copy", host_text(PUGBIOS_S19_PATH), m.file("PUGBIOS.S19")));
+}
+
+TEST(puglink_makes_programs_that_run) {
+    // Two modules: the program, and the text it prints (another section, another
+    // file); a script puts the code at $4000 and the data after it.
+    Machine m;
+    CHECK(m.start("puglink_run.img",
+                  {text("MAIN.ASM", "F_STDOUT EQU     1\n"
+                                    "B_PUTS   EQU     $0A\n"
+                                    "B_EXIT   EQU     $2B\n"
+                                    "         EXPORT  start\n"
+                                    "greeting IMPORT\n"
+                                    "         SECTION code\n"
+                                    "start    LDX     #greeting\n"
+                                    "         LDB     #F_STDOUT\n"
+                                    "         LDA     #B_PUTS\n"
+                                    "         SWI2\n"
+                                    "         LDA     #B_EXIT\n"
+                                    "         SWI2\n"
+                                    "         ENDSECT\n"),
+                   text("TEXT.ASM", "         EXPORT  greeting\n"
+                                    "         SECTION data\n"
+                                    "greeting FCC     /Linked by PUGLINK/\n"
+                                    "         FCB     13,10,0\n"
+                                    "         ENDSECT\n"),
+                   text("PROG.SCR", "section code load 4000\nsection data\nentry start\n")}));
+    CHECK(m.run("PUGASM -f obj main.asm").find("error") == std::string::npos);
+    CHECK(m.run("PUGASM -f obj text.asm").find("error") == std::string::npos);
+    std::string out = m.run("PUGLINK -f com -o PROG.COM -s prog.scr -m prog.map main.o text.o");
+    std::string com = m.file("PROG.COM");
+    CHECK(com.size() == 8 + 13 + 20);
+    CHECK(com.compare(0, 8, std::string("PX\x40\x00\x40\x00\x00\x00", 8)) == 0);
+    CHECK(m.run("PROG").find("Linked by PUGLINK") != std::string::npos);
+    CHECK(m.file("PROG.MAP").find("Symbol: greeting (text.o) = 400D") != std::string::npos);
+    // Something missing: an error, and nothing written.
+    out = m.run("PUGLINK -f com -o BAD.COM -s prog.scr main.o");
+    CHECK(out.find("External symbol greeting not found in main.o:code") != std::string::npos);
+    CHECK(out.find("Incomplete reference at main.o:code+01") != std::string::npos);
+    CHECK(m.file("BAD.COM") == "<none>");
+    out = m.run("PUGLINK");
+    CHECK(out.find("Usage: PUGLINK") != std::string::npos);
+    out = m.run("PUGLINK -f decb main.o");
+    CHECK(out.find("Invalid output format: decb") != std::string::npos);
+    out = m.run("PUGLINK nosuch.o");
+    CHECK(out.find("Can't open file nosuch.o") != std::string::npos);
+}
+
+#if PUGPUTER_HAVE_LWASM
+TEST(pugasm_matches_lwasm_on_object_files) {
+    check_against_lwasm("objf.asm", false, true);
+    check_against_lwasm("objexpr.asm", false, true);
+}
+TEST(puglink_matches_lwlink_with_its_scripts) {
+    check_link("-f raw", "OUT.BIN");
+    check_link("-f srec", "OUT.S19");
+    check_link("-f srec -s link1.scr", "OUT.S19", {"link1.scr"});
+    check_link("-f raw --section-base=tab=2000 --section-base=bss=0300 -e start", "OUT.BIN");
+    check_link("-f srec -e 4321", "OUT.S19");
+}
 #endif
