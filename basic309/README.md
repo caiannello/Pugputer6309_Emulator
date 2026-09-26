@@ -47,7 +47,7 @@ program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
 
 - **Paths** use `/` as the separator: `SAVE "GAMES/CHESS"`. A leading `/` means the root,
   anything else is relative to the current directory (one, system-wide; it starts at the root
-  on every boot). `.` and `..` work: `CHDIR ".."`, `LOAD "../UTIL/TOOLS"`.
+  on every boot, and BASIC moves to `/BASIC` when it starts if the disk has one). `.` and `..` work: `CHDIR ".."`, `LOAD "../UTIL/TOOLS"`.
 - **Names** are 8.3: at most 8 characters, a dot, at most 3 more; letters are upper-cased for
   you. A longer name is `?BP` (older versions silently cut it to 8 characters).
 - **Default extension:** `LOAD`/`SAVE`/`KILL`/`NAME` give a name with no dot in its last

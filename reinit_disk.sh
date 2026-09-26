@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rebuilds BIOS, dos.asm, the shell, the editor, pugasm, puglink and basic309, then regenerates
-# basic309/disk.img from scratch (just SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM,
+# basic309/disk.img from scratch (just /CMD: SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM,
 # no other files) -- run this any time you want a clean slate between test sessions, or after
 # editing bios/, dos/, shell/, edit/, pugasm/ or basic309/.
 # (The Linux counterpart of reinit_disk.bat.)
@@ -25,7 +25,7 @@ echo "Rebuilding the assembler and linker..."
 echo "Rebuilding basic309..."
 "$ROOT/basic309/build_basic.sh"
 
-echo "Regenerating disk.img (SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM only, clean slate)..."
+echo "Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM only, clean slate)..."
 "$MKDISKIMG"
 
 echo "Done."

@@ -206,7 +206,13 @@ B_ARGS        equ $2A        ; -> X: address (in DOS's RAM) of the running progr
 B_EXIT        equ $2B        ; the program is finished: DOS closes every open file
                              ; and directory scan and starts the shell again (or, on
                              ; a disk with none, BASIC.COM). Never returns.
-B_DOS_END   equ  $2C         ; the DOS calls are B_FOPEN_NAME up to (not including) this
+B_PATH        equ $2C        ; X: a new program search path (NUL-terminated: directories
+                             ; separated by ";", at most PATHVARMAX characters), or 0
+                             ; to leave it -> X: address (in DOS's RAM) of the current
+                             ; one. DOS only keeps it (the shell searches it); it
+                             ; starts as "/CMD" and survives B_EXIT. ERR_TOOBIG if
+                             ; the new one is too long (the old one is kept).
+B_DOS_END   equ  $2D         ; the DOS calls are B_FOPEN_NAME up to (not including) this
 NUM_DOS_JT  equ  B_DOS_END-B_FOPEN_NAME ; DOS-resident calls: one JT_DOS slot
                              ; each (main.asm), in call-code order
 
@@ -242,7 +248,8 @@ DOS_LOAD    equ  $0600       ; where SD_BOOT_TRY loads dos/dos.asm and jumps to 
                              ; Must be above the BIOS's RAM (EndOfVars in
                              ; pugbios.map); test_bios_layout checks that.
 
-DOS_API_VERSION equ $21      ; major*16 + minor: 2.1 (2.1 added programs)
+DOS_API_VERSION equ $22      ; major*16 + minor: 2.2 (2.1 added programs, 2.2 B_PATH)
+PATHVARMAX  equ  79          ; the longest B_PATH search path
 
 ; Program files. Header, all 16-bit values big-endian:
 ;   +0  "PX"           magic

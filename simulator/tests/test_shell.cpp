@@ -112,7 +112,7 @@ TEST(shell_info_commands) {
     std::string img = image("shell2.img", {});
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
-    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.1\r\n");
+    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.2\r\n");
     CHECK(cmd(s, "MEM") == "RAM: 1024 KB installed, 960 KB free for programs\r\n");
     std::string help = cmd(s, "help");
     CHECK(has(help, "DIR [path]") && has(help, "COPY from to") && has(help, "name [args]"));
@@ -192,8 +192,8 @@ TEST(shell_line_editing) {
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
     // Backspace and Delete erase; the echo shows the erasure.
-    CHECK(cmd(s, "vex\x08r") == "Pugputer 6309 DOS 2.1\r\n");
-    CHECK(cmd(s, "vxx\x7f\x7f" "er") == "Pugputer 6309 DOS 2.1\r\n");
+    CHECK(cmd(s, "vex\x08r") == "Pugputer 6309 DOS 2.2\r\n");
+    CHECK(cmd(s, "vxx\x7f\x7f" "er") == "Pugputer 6309 DOS 2.2\r\n");
     // Ctrl-C abandons the line.
     s.received.clear();
     for (char c : std::string("del importa")) s.send_byte(static_cast<uint8_t>(c));
@@ -202,13 +202,13 @@ TEST(shell_line_editing) {
     uint64_t spent = 0;
     while (!ends_with(s.received, "> ") && spent < 100000000) spent += s.bus.run(20000);
     CHECK(has(s.received, "^C"));
-    CHECK(has(s.received, "Pugputer 6309 DOS 2.1"));
+    CHECK(has(s.received, "Pugputer 6309 DOS 2.2"));
     CHECK(!has(s.received, "Missing argument")); // "del importa" never ran
     // A command is case-insensitive; a long line is capped rather than overrun.
-    CHECK(cmd(s, "VeR") == "Pugputer 6309 DOS 2.1\r\n");
+    CHECK(cmd(s, "VeR") == "Pugputer 6309 DOS 2.2\r\n");
     std::string longline = "ver " + std::string(120, 'x');
-    CHECK(cmd(s, longline) == "Pugputer 6309 DOS 2.1\r\n");
-    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.1\r\n");
+    CHECK(cmd(s, longline) == "Pugputer 6309 DOS 2.2\r\n");
+    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.2\r\n");
 }
 
 TEST(shell_runs_programs_with_a_command_tail_and_returns_to_the_shell) {
@@ -223,7 +223,7 @@ TEST(shell_runs_programs_with_a_command_tail_and_returns_to_the_shell) {
     uint64_t spent = 0;
     while (!ends_with(s.received, "/> ") && spent < 100000000) spent += s.bus.run(20000);
     CHECK(ends_with(s.received, "/> "));
-    // Name forms: with the extension, lower case, no tail at all, and from another directory (root fallback).
+    // Name forms: with the extension, lower case, no tail at all.
     for (const std::string& line : {std::string("ECHO.COM abc"), std::string("Echo abc")}) {
         s.received.clear();
         s.type(line);
@@ -234,6 +234,9 @@ TEST(shell_runs_programs_with_a_command_tail_and_returns_to_the_shell) {
     }
     CHECK(cmd(s, "md sub") == "");
     CHECK(cmd(s, "cd sub") == "");
+    // From another directory it takes the search path, which doesn't have the root in it ...
+    CHECK(cmd(s, "echo from-sub") == "Bad command or file name\r\n");
+    CHECK(cmd(s, "path /") == ""); // ... until it does
     s.received.clear();
     s.type("echo from-sub");
     CHECK(s.wait_for("from-sub"));
@@ -242,8 +245,79 @@ TEST(shell_runs_programs_with_a_command_tail_and_returns_to_the_shell) {
     while (!ends_with(s.received, "/SUB> ") && !ends_with(s.received, "/> ") && spent < 100000000) spent += s.bus.run(20000);
     // DOS keeps the current directory across the restart of the shell.
     CHECK(ends_with(s.received, "/SUB> "));
-    // A program path is used as given (no root fallback for an explicit path).
-    CHECK(cmd(s, "/echo.com x").find("x") != std::string::npos || true);
+    // A program path is used as given (no search for an explicit path).
+    CHECK(cmd(s, "nope/echo x") == "Bad command or file name\r\n");
+}
+
+TEST(shell_path_command_shows_and_sets_the_search_path) {
+    std::string img = image("shell_path1.img", {});
+    Basic309Session s;
+    CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
+    CHECK(cmd(s, "path") == "PATH=/CMD\r\n"); // DOS starts it as /CMD
+    CHECK(cmd(s, "path /bin;/cmd  ") == "");  // upper-cased, trailing blanks dropped
+    CHECK(cmd(s, "PATH") == "PATH=/BIN;/CMD\r\n");
+    CHECK(cmd(s, "path ;") == "");            // ";" alone empties it
+    CHECK(cmd(s, "path") == "No path\r\n");
+    std::string help = cmd(s, "help");
+    CHECK(has(help, "PATH [dir;dir]"));
+}
+
+TEST(shell_finds_programs_in_the_current_directory_then_along_the_path) {
+    // ECHO.COM in /CMD and /BIN; HERE.COM in both /CMD and the root, printing different things.
+    // Hand-assembled: LDX #msg ; LDB #F_STDOUT ; LDA #B_PUTS ; SWI2 ; LDA #B_EXIT ; SWI2 ; msg ($500D)
+    auto say = [](const std::string& msg) {
+        Bytes body = {0x8E, 0x50, 0x0D, 0xC6, 0x01, 0x86, 0x0A, SWI2_0, SWI2_1, 0x86, 0x2B, SWI2_0, SWI2_1};
+        for (char c : msg) body.push_back(static_cast<uint8_t>(c));
+        body.push_back(0);
+        return program(0x5000, 0x5000, body);
+    };
+    std::string img = image("shell_path2.img", {file("CMD/ECHO.COM", echo_program()), file("HERE.COM", say("root")),
+                                                file("CMD/HERE.COM", say("cmd")), file("BIN/ONLY.COM", say("bin")),
+                                                text("NOTDIR", "x")});
+    Basic309Session s;
+    CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
+    auto run = [&](const std::string& line, const std::string& want) {
+        s.received.clear();
+        s.type(line);
+        bool ok = s.wait_for(want) && s.wait_for("shell");
+        uint64_t spent = 0;
+        while (!ends_with(s.received, "> ") && spent < 100000000) spent += s.bus.run(20000);
+        if (!ok) std::fprintf(stderr, "  [%s] expected [%s], got [%s]\n", line.c_str(), want.c_str(), s.received.c_str());
+        return ok;
+    };
+    CHECK(run("echo hi there", "hi there"));   // found in /CMD, the default path
+    CHECK(run("here", "root"));                // the current directory comes first
+    CHECK(cmd(s, "cd /bin") == "");
+    CHECK(run("here", "cmd"));                 // not here: the path
+    CHECK(run("only", "bin"));                 // (the current directory)
+    CHECK(cmd(s, "cd /") == "");
+    CHECK(cmd(s, "only") == "Bad command or file name\r\n");
+    // Missing directories and files in the path are passed over; the path survives the shell
+    // being reloaded after each program.
+    CHECK(cmd(s, "path /nope;notdir;;/bin") == "");
+    CHECK(run("only", "bin"));
+    CHECK(cmd(s, "path") == "PATH=/NOPE;NOTDIR;;/BIN\r\n");
+    CHECK(cmd(s, "echo x") == "Bad command or file name\r\n"); // /CMD isn't in it any more
+    CHECK(cmd(s, "path ;") == "");
+    CHECK(cmd(s, "cd /bin") == "");
+    CHECK(cmd(s, "here") == "Bad command or file name\r\n");   // no path: the current directory only
+    CHECK(run("only", "bin"));
+}
+
+TEST(basic_starts_in_the_basic_directory_when_the_disk_has_one) {
+    std::string img = image("shell_basicdir.img", {text("BASIC/HI.BAS", "10 PRINT \"HI THERE\"\r\n")});
+    Basic309Session s;
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
+    CHECK(s.run_line("CHDIR") == "/BASIC\r\n");
+    CHECK(s.run_line("LOAD \"HI\"") == "");
+    CHECK(s.run_line("RUN").find("HI THERE") != std::string::npos);
+    // SYSTEM goes back to the shell, which is now in /BASIC too (one current directory).
+    s.received.clear();
+    s.type("SYSTEM");
+    CHECK(s.wait_for("Pugputer 6309 shell"));
+    uint64_t spent = 0;
+    while (!ends_with(s.received, "> ") && spent < 100000000) spent += s.bus.run(20000);
+    CHECK(ends_with(s.received, "/BASIC> "));
 }
 
 TEST(shell_reports_files_that_are_not_programs) {

@@ -1,6 +1,6 @@
 @echo off
 rem Rebuilds BIOS, dos.asm, the shell, the editor, pugasm, puglink and basic309, then regenerates
-rem basic309\disk.img from scratch (just SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM,
+rem basic309\disk.img from scratch (just /CMD: SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM,
 rem no other files) -- run this
 rem any time you want a clean slate between test sessions, or after editing bios/,
 rem dos/, shell/, edit/, pugasm/ or basic309/.
@@ -47,7 +47,7 @@ echo Rebuilding basic309...
 call "%ROOT%basic309\build_basic.bat"
 if errorlevel 1 exit /b 1
 
-echo Regenerating disk.img (SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM only, clean slate)...
+echo Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, PUGASM.COM, PUGLINK.COM and BASIC.COM only, clean slate)...
 "%MKDISKIMG%" || exit /b 1
 
 echo Done.

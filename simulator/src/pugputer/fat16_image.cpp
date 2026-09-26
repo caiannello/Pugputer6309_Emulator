@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <string>
+#include <utility>
 
 namespace pugputer {
 
@@ -108,33 +110,129 @@ Fat16BuildResult build_fat16_image(const std::string& path, const std::vector<ui
     set_fat16_entry(fat, 0, 0xFF00 | image[0x15]);
     set_fat16_entry(fat, 1, 0xFFFF);
 
-    // --- Root directory + file data/cluster chains ---
-    std::vector<uint8_t> root_dir(root_dir_sectors * kSectorSize, 0);
+    // --- Directory tree + file data/cluster chains ---
+    // A name with "/" in it ("CMD/SHELL.COM") goes in that subdirectory, created on
+    // first mention. Entries keep the order they are first named in; each
+    // subdirectory gets "." and ".." first, then its clusters, then its files'.
+    struct Dir {
+        std::vector<uint8_t> entries; // 32-byte entries, in order
+        uint16_t cluster = 0;         // first cluster (0 = the root)
+        std::vector<std::pair<std::string, size_t>> subdirs; // name -> index in dirs
+    };
+    std::vector<Dir> dirs(1);
+    const size_t bytes_per_cluster = static_cast<size_t>(sectors_per_cluster) * kSectorSize;
     uint16_t next_cluster = 2;
+    auto clusters_for = [&](size_t bytes) { return (bytes + bytes_per_cluster - 1) / bytes_per_cluster; };
+    // Allocates `n` consecutive clusters and chains them; returns the first (0 if n is 0).
+    auto allocate = [&](size_t n) -> uint16_t {
+        if (n == 0) return 0;
+        uint16_t first = next_cluster;
+        for (size_t c = 0; c < n; ++c) {
+            uint16_t cluster = static_cast<uint16_t>(first + c);
+            set_fat16_entry(fat, cluster, c + 1 < n ? static_cast<uint16_t>(cluster + 1) : 0xFFFF);
+        }
+        next_cluster = static_cast<uint16_t>(next_cluster + n);
+        return first;
+    };
+    auto add_entry = [](Dir& d, const std::string& name, uint8_t attr, uint16_t cluster, uint32_t size) {
+        size_t off = d.entries.size();
+        d.entries.resize(off + 32, 0);
+        put_short_name(d.entries, off, name);
+        if (name == "." || name == "..") {
+            for (int i = 0; i < 11; ++i) d.entries[off + i] = ' ';
+            d.entries[off] = '.';
+            if (name == "..") d.entries[off + 1] = '.';
+        }
+        d.entries[off + 11] = attr;
+        put_le16(d.entries, off + 26, cluster);
+        put_le32(d.entries, off + 28, size);
+    };
+    auto upper = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return s;
+    };
+
+    // First pass: the tree's shape, so every directory's size is known before
+    // any cluster is handed out.
+    std::vector<std::pair<size_t, std::string>> placed; // (directory, leaf name) per file
+    for (const Fat16File& f : files) {
+        size_t dir = 0;
+        std::string rest = f.name;
+        size_t slash;
+        while ((slash = rest.find('/')) != std::string::npos) {
+            std::string part = upper(rest.substr(0, slash));
+            rest.erase(0, slash + 1);
+            if (part.empty()) continue;
+            size_t child = 0;
+            for (const auto& sd : dirs[dir].subdirs)
+                if (sd.first == part) child = sd.second;
+            if (child == 0) {
+                child = dirs.size();
+                dirs[dir].subdirs.emplace_back(part, child);
+                dirs.emplace_back();
+            }
+            dir = child;
+        }
+        placed.emplace_back(dir, rest);
+    }
+    // Each directory's entry count: its subdirectories, its files, and (not the
+    // root) "." and "..".
+    std::vector<size_t> entry_count(dirs.size(), 0);
+    for (size_t d = 0; d < dirs.size(); ++d) entry_count[d] = dirs[d].subdirs.size() + (d == 0 ? 0 : 2);
+    for (const auto& p : placed) ++entry_count[p.first];
+    if (entry_count[0] > root_entry_count) {
+        result.error = "too many entries for the root directory (" + std::to_string(entry_count[0]) + ", at most " +
+                       std::to_string(root_entry_count) + ")";
+        return result;
+    }
+    size_t clusters_needed = 0;
+    for (size_t d = 1; d < dirs.size(); ++d) clusters_needed += clusters_for(entry_count[d] * 32);
+    for (const Fat16File& f : files) clusters_needed += clusters_for(f.data.size());
+    if (clusters_needed > total_clusters) {
+        result.error = "the files don't fit on a volume of this size";
+        return result;
+    }
+    for (size_t d = 1; d < dirs.size(); ++d) dirs[d].cluster = allocate(clusters_for(entry_count[d] * 32));
+    std::vector<size_t> parent(dirs.size(), 0);
+    for (size_t d = 0; d < dirs.size(); ++d)
+        for (const auto& sd : dirs[d].subdirs) parent[sd.second] = d;
+    for (size_t d = 1; d < dirs.size(); ++d) {
+        add_entry(dirs[d], ".", 0x10, dirs[d].cluster, 0);
+        add_entry(dirs[d], "..", 0x10, dirs[parent[d]].cluster, 0);
+    }
+
+    // Second pass: entries in the order they were first named, file data after
+    // the directories.
+    std::vector<bool> linked(dirs.size(), false);
     for (size_t fi = 0; fi < files.size(); ++fi) {
         const Fat16File& f = files[fi];
-        size_t entry_off = fi * 32;
-        put_short_name(root_dir, entry_off, f.name);
-        root_dir[entry_off + 11] = 0x20; // ARCHIVE attribute
-        uint16_t start_cluster = next_cluster;
-        put_le16(root_dir, entry_off + 26, start_cluster);
-        put_le32(root_dir, entry_off + 28, static_cast<uint32_t>(f.data.size()));
-
-        size_t bytes_per_cluster = static_cast<size_t>(sectors_per_cluster) * kSectorSize;
-        size_t clusters_needed = f.data.empty() ? 0 : (f.data.size() + bytes_per_cluster - 1) / bytes_per_cluster;
-        for (size_t c = 0; c < clusters_needed; ++c) {
-            uint16_t cluster = static_cast<uint16_t>(next_cluster + c);
-            uint16_t next = (c + 1 < clusters_needed) ? static_cast<uint16_t>(cluster + 1) : 0xFFFF;
-            set_fat16_entry(fat, cluster, next);
-
-            size_t cluster_lba = data_lba + static_cast<size_t>(cluster - 2) * sectors_per_cluster;
-            size_t src_off = c * bytes_per_cluster;
-            size_t n = std::min(bytes_per_cluster, f.data.size() - src_off);
-            for (size_t i = 0; i < n; ++i) {
-                image[cluster_lba * kSectorSize + i] = f.data[src_off + i];
-            }
+        // Link the directories on this file's path into their parents (first time only).
+        size_t d = placed[fi].first;
+        std::vector<size_t> chain;
+        for (size_t x = d; x != 0 && !linked[x]; x = parent[x]) chain.push_back(x);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            size_t x = *it;
+            for (const auto& sd : dirs[parent[x]].subdirs)
+                if (sd.second == x) add_entry(dirs[parent[x]], sd.first, 0x10, dirs[x].cluster, 0);
+            linked[x] = true;
         }
-        next_cluster = static_cast<uint16_t>(next_cluster + clusters_needed);
+        size_t n = f.data.empty() ? 0 : clusters_for(f.data.size());
+        uint16_t start_cluster = allocate(n);
+        add_entry(dirs[d], placed[fi].second, 0x20, start_cluster, static_cast<uint32_t>(f.data.size())); // ARCHIVE
+        for (size_t c = 0; c < n; ++c) {
+            size_t cluster_lba = data_lba + static_cast<size_t>(start_cluster + c - 2) * sectors_per_cluster;
+            size_t src_off = c * bytes_per_cluster;
+            size_t len = std::min(bytes_per_cluster, f.data.size() - src_off);
+            std::copy_n(f.data.begin() + static_cast<std::ptrdiff_t>(src_off), len,
+                        image.begin() + static_cast<std::ptrdiff_t>(cluster_lba * kSectorSize));
+        }
+    }
+    std::vector<uint8_t> root_dir(root_dir_sectors * kSectorSize, 0);
+    std::copy(dirs[0].entries.begin(), dirs[0].entries.end(), root_dir.begin());
+    for (size_t d = 1; d < dirs.size(); ++d) {
+        size_t lba = data_lba + static_cast<size_t>(dirs[d].cluster - 2) * sectors_per_cluster;
+        std::copy(dirs[d].entries.begin(), dirs[d].entries.end(),
+                  image.begin() + static_cast<std::ptrdiff_t>(lba * kSectorSize));
     }
 
     for (uint32_t copy = 0; copy < num_fats; ++copy) {

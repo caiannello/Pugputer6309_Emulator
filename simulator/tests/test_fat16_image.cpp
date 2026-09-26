@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "fat16_reader.hpp"
 #include "test_framework.hpp"
 #include "pugputer/fat16_image.hpp"
 
@@ -170,4 +171,58 @@ TEST(fat16_image_rejects_a_cluster_count_outside_fat16_range) {
     auto result = build_fat16_image(path, dos_payload, {}, /*total_sectors=*/100);
     CHECK(!result.ok);
     CHECK(!result.error.empty());
+}
+
+TEST(fat16_image_puts_names_with_slashes_in_subdirectories) {
+    std::string path = out_path("subdirs.img");
+    std::vector<uint8_t> dos_payload(50, 0);
+    std::vector<Fat16File> files;
+    Fat16File top;
+    top.name = "TOP.TXT";
+    top.data = {'t'};
+    files.push_back(top);
+    for (int i = 0; i < 40; ++i) { // more than one cluster's worth of entries (32 per 1KB cluster)
+        Fat16File f;
+        f.name = "cmd/F" + std::to_string(i) + ".COM"; // (lower case: folded like the file names)
+        f.data.assign(static_cast<size_t>(100 + i * 50), static_cast<uint8_t>(i));
+        files.push_back(f);
+    }
+    Fat16File deep;
+    deep.name = "A/B/DEEP.DAT";
+    deep.data.assign(3000, 0x5A);
+    files.push_back(deep);
+    auto result = build_fat16_image(path, dos_payload, files);
+    CHECK(result.ok);
+    if (!result.ok) return;
+
+    Fat16Volume v;
+    CHECK(v.load(path.c_str()));
+    Fat16Volume::Entry e;
+    CHECK(v.find("/TOP.TXT", e) && v.read(e) == top.data);
+    CHECK(v.find("/CMD", e) && e.is_dir() && e.size == 0);
+    uint16_t cmd_cluster = e.cluster;
+    CHECK(v.chain(cmd_cluster).size() == 2); // 42 entries: 2 clusters
+    auto cmd = v.entries(cmd_cluster);
+    CHECK(cmd.size() == 42);
+    CHECK(cmd[0].name == "." && cmd[0].is_dir() && cmd[0].cluster == cmd_cluster);
+    CHECK(cmd[1].name == ".." && cmd[1].is_dir() && cmd[1].cluster == 0);
+    for (int i = 0; i < 40; ++i) {
+        CHECK(v.find("/CMD/F" + std::to_string(i) + ".COM", e) && v.read(e) == files[static_cast<size_t>(i) + 1].data);
+    }
+    CHECK(v.find("/A/B/DEEP.DAT", e) && v.read(e) == deep.data);
+    CHECK(v.find("/A/B", e) && e.is_dir());
+    auto b = v.entries(e.cluster);
+    CHECK(v.find("/A", e));
+    CHECK(b.size() == 3 && b[1].name == ".." && b[1].cluster == e.cluster);
+    auto root = v.entries(0);
+    CHECK(root.size() == 3 && root[0].name == "TOP.TXT" && root[1].name == "CMD" && root[2].name == "A");
+    CHECK(v.fats_match());
+}
+
+TEST(fat16_image_rejects_files_that_do_not_fit) {
+    std::string path = out_path("toofull.img");
+    Fat16File big;
+    big.name = "BIG.DAT";
+    big.data.assign(9u * 1024 * 1024, 0); // an 8MB volume
+    CHECK(!build_fat16_image(path, std::vector<uint8_t>(10, 0), {big}).ok);
 }

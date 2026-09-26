@@ -10,10 +10,12 @@
 ; A line is a command word followed by arguments. Built-in commands:
 ;   DIR [path]      CD [path]       MD|MKDIR path    RD|RMDIR path
 ;   DEL|ERASE path  REN old new     TYPE file        COPY from to
-;   VER             MEM             HELP
+;   VER             MEM             PATH [dir;...]   HELP
 ; Anything else is a program: NAME runs NAME.COM (or NAME as typed, if it has an
-; extension) from the current directory, else from the root, passing the rest of
-; the line as its command tail (see B_EXEC / B_ARGS).
+; extension) from the current directory, else from the first directory of the
+; search path that has it, passing the rest of the line as its command tail (see
+; B_EXEC / B_ARGS). The search path is kept by DOS (B_PATH), so it survives the
+; shell being reloaded after every program; it starts as /CMD.
 ;------------------------------------------------------------------------------
     INCLUDE defines.d
 ;------------------------------------------------------------------------------
@@ -265,7 +267,8 @@ DS_LONG     LDX  #MSG_BADCMD
 DS_RET      RTS
 ;------------------------------------------------------------------------------
 ; Not a built-in: a program. The word becomes a path (".COM" added when its last
-; part has no extension), tried as typed and then, for a bare name, in the root.
+; part has no extension), tried as typed and then, for a bare name, in each
+; directory of the search path ("dir;dir;...") in turn.
 ;------------------------------------------------------------------------------
 DS_PROGRAM  LDX  #CMDWORD
             LDY  #PATHBUF
@@ -301,17 +304,45 @@ PG_TERM     CLR  ,Y
             BNE  PG_FAIL
             TST  HASSLASH
             BNE  PG_FAIL               ; an explicit path: no second try
-            LDX  #PATHBUF2             ; second try: "/" + the name
+            LDX  #0
+            LDA  #B_PATH
+            SWI2                       ; X = the search path (in DOS's RAM)
+            STX  SRCHP
+PG_DIR      LDX  SRCHP                 ; the next directory in it ...
+PG_SEP      LDA  ,X
+            BEQ  PG_BAD                ; (none left: not found)
+            CMPA #';'
+            BNE  PG_DSTART
+            LEAX 1,X
+            BRA  PG_SEP
+PG_DSTART   LDY  #PATHBUF2
+PG_DCOPY    LDA  ,X                    ; ... copied into PATHBUF2 ...
+            BEQ  PG_DEND
+            CMPA #';'
+            BEQ  PG_DEND
+            STA  ,Y+
+            LEAX 1,X
+            BRA  PG_DCOPY
+PG_DEND     STX  SRCHP
+            LDA  -1,Y
+            CMPA #'/'
+            BEQ  PG_NAME               ; ("/" or "DIR/": no second "/")
             LDA  #'/'
-            STA  ,X+
-            LDY  #PATHBUF
-PG_COPY2    LDA  ,Y+
-            STA  ,X+
-            BNE  PG_COPY2
+            STA  ,Y+
+PG_NAME     LDX  #PATHBUF              ; ... then "/" and the name
+PG_NCOPY    LDA  ,X+
+            STA  ,Y+
+            BNE  PG_NCOPY
             LDX  #PATHBUF2
             LDY  ARGP
             LDA  #B_EXEC
             SWI2
+            CMPA #ERR_NOTFOUND         ; not there: the next directory
+            BEQ  PG_DIR
+            CMPA #ERR_NOTDIR           ; (a search path entry that isn't a directory,
+            BEQ  PG_DIR
+            CMPA #ERR_BADPATH          ; or isn't a valid path at all)
+            BEQ  PG_DIR
 PG_FAIL     CMPA #ERR_NOTFOUND
             BEQ  PG_BAD
             CMPA #ERR_ISDIR
@@ -583,6 +614,49 @@ PRINT_KB    ASLD
             CLRD
             JMP  PRINTDEC
 ;------------------------------------------------------------------------------
+; PATH alone shows the search path; PATH dir;dir;... sets it (upper-cased, trailing
+; blanks dropped); PATH ; empties it.
+CMD_PATH    LDX  ARGP
+            LDA  ,X
+            BEQ  PA_SHOW
+PA_UP       LDA  ,X
+            BEQ  PA_TRIM
+            CMPA #'a'
+            BLO  PA_NEXT
+            CMPA #'z'
+            BHI  PA_NEXT
+            SUBA #$20
+            STA  ,X
+PA_NEXT     LEAX 1,X
+            BRA  PA_UP
+PA_TRIM     CLR  ,X                    ; (it starts with a non-blank: this stops)
+            LDA  ,-X
+            CMPA #' '
+            BEQ  PA_TRIM
+            LDX  ARGP
+            LDD  ,X
+            CMPD #$3B00                ; ";" alone: no search path
+            BNE  PA_SET
+            CLR  ,X
+PA_SET      LDA  #B_PATH
+            SWI2
+            LBCS ERR_OUT
+            RTS
+PA_SHOW     LDX  #0
+            LDA  #B_PATH
+            SWI2
+            LBCS ERR_OUT
+            TST  ,X
+            BEQ  PA_NONE
+            PSHS X
+            LDX  #MSG_PATHEQ
+            JSR  PUTS
+            PULS X
+            JSR  PUTS
+            JMP  NEWLINE
+PA_NONE     LDX  #MSG_NOPATH
+            JMP  PUTS
+;------------------------------------------------------------------------------
 CMD_HELP    LDX  #MSG_HELP
             JMP  PUTS
 ;------------------------------------------------------------------------------
@@ -629,6 +703,9 @@ COMMANDS    FCC  "DIR"
             FCC  "MEM"
             FCB  0
             FDB  CMD_MEM
+            FCC  "PATH"
+            FCB  0
+            FDB  CMD_PATH
             FCC  "HELP"
             FCB  0
             FDB  CMD_HELP
@@ -660,6 +737,10 @@ MSG_PAGES   FCC  " KB installed, "
             FCB  0
 MSG_FREE    FCC  " KB free for programs"
             FCB  0
+MSG_PATHEQ  FCC  "PATH="
+            FCB  0
+MSG_NOPATH  FCC  "No path"
+            FCB  CR,LF,0
 MSG_ERR     FCC  "Error $"
             FCB  0
 MSG_NOTFOUND FCC "File not found"
@@ -702,6 +783,8 @@ MSG_HELP    FCC  "DIR [path]        list a directory"
             FCB  CR,LF
             FCC  "VER  MEM          version, memory"
             FCB  CR,LF
+            FCC  "PATH [dir;dir]    show / set where programs are found"
+            FCB  CR,LF
             FCC  "name [args]       run name.COM (BASIC starts BASIC)"
             FCB  CR,LF,0
 ;------------------------------------------------------------------------------
@@ -711,8 +794,8 @@ MSG_HELP    FCC  "DIR [path]        list a directory"
 SHELL_VARS  equ  *
 LINEBUF     equ  SHELL_VARS            ; 84
 PATHBUF     equ  LINEBUF+84            ; 84
-PATHBUF2    equ  PATHBUF+84            ; 88
-CMDWORD     equ  PATHBUF2+88           ; 44
+PATHBUF2    equ  PATHBUF+84            ; 128: a search path directory + "/" + PATHBUF
+CMDWORD     equ  PATHBUF2+128          ; 44
 ENTBUF      equ  CMDWORD+44            ; 16
 NAMEBUF     equ  ENTBUF+16             ; 16
 IOBUF       equ  NAMEBUF+16            ; 512
@@ -734,7 +817,8 @@ MEMFREE     equ  VAR0+16               ; 2
 PDVAL       equ  VAR0+18               ; 4
 PDSTART     equ  VAR0+22
 PDDIG       equ  VAR0+23
-SHELL_END   equ  VAR0+24
+SRCHP       equ  VAR0+24               ; 2: where the search path scan is
+SHELL_END   equ  VAR0+26
 ;------------------------------------------------------------------------------
 ; End of shell.asm
 ;------------------------------------------------------------------------------

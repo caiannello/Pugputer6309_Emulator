@@ -1,6 +1,7 @@
 // The demo programs shipped on the binary release's disk (demo/programs): each must LOAD and
 // RUN without an error, with the output it advertises. The disk is built here (mkdiskimg's
-// contents plus the demo folder) so the test doesn't depend on the shared disk.img.
+// contents plus the demo folder, subfolders and all) so the test doesn't depend on the shared
+// disk.img. BASIC starts in /BASIC, where they are, so they load by bare name.
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -15,11 +16,11 @@ namespace {
 
 std::string demo_disk() {
     std::vector<pugputer::Fat16File> extra;
-    for (const auto& e : std::filesystem::directory_iterator(DEMO_DIR)) {
+    for (const auto& e : std::filesystem::recursive_directory_iterator(DEMO_DIR)) {
         if (!e.is_regular_file()) continue;
         std::ifstream f(e.path(), std::ios::binary);
         pugputer::Fat16File file;
-        file.name = e.path().filename().string();
+        file.name = std::filesystem::relative(e.path(), DEMO_DIR).generic_string(); // e.g. "BASIC/HELLO.BAS"
         file.data.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         extra.push_back(std::move(file));
     }
@@ -39,6 +40,7 @@ TEST(demo_programs_load_and_run_and_print_what_they_should) {
     CHECK(!img.empty());
     Basic309Session s;
     CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
+    CHECK(s.run_line("CHDIR") == "/BASIC\r\n");
 
     std::string out = run_demo(s, "HELLO");
     CHECK(contains(out, "HELLO FROM THE PUGPUTER 6309!") && contains(out, "COUNTING 5") && !contains(out, "ERROR"));

@@ -15,11 +15,14 @@ time a program ends. It is an ordinary program: it uses only BIOS `SWI2` calls.
 | `TYPE file` | show a file |
 | `COPY from to` | copy a file (overwrites) |
 | `VER`, `MEM`, `HELP` | DOS version, installed / free RAM pages, the list above |
+| `PATH [dir;dir;...]` | show / set the program search path; `PATH ;` empties it |
 | `name [args]` | run the program `name.COM` (or `name` as typed if it has an extension) |
 
 Paths use `/`; the current directory is system-wide and survives a program ending. A program
 name is looked for as given (relative to the current directory) and, for a bare name, then in
-the root. The line editor takes Backspace/Delete and Ctrl-C.
+each directory of the search path in turn. The search path is kept by DOS (`B_PATH`), so it
+survives the shell being reloaded after every program; it starts as `/CMD`, where the disk
+image keeps its programs. The line editor takes Backspace/Delete and Ctrl-C.
 
 ## Program files
 
@@ -45,4 +48,5 @@ reloaded from disk rather than kept resident.
 
 The shell is `shell.bin` (built by `compile.bat`; `../reinit_disk.bat` does it with everything
 else) and lives at `$4000`; its buffers are just RAM after its code. `../simulator/tools/mkdiskimg`
-puts it on the disk image as `SHELL.COM`, and gives `BASIC.COM` its header.
+puts it on the disk image as `/CMD/SHELL.COM`, and gives `BASIC.COM` its header. DOS starts
+`/CMD/SHELL.COM` at boot, or `/SHELL.COM` on a disk that has no `/CMD`.

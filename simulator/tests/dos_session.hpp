@@ -27,13 +27,13 @@ constexpr uint8_t B_OPENDIR = 0x17, B_READDIR = 0x18, B_KILL_NAME = 0x19, B_RENA
 constexpr uint8_t B_FGETC = 0x1B, B_FPUTC = 0x1C, B_FREAD = 0x1D, B_FWRITE = 0x1E, B_FSEEK_NAME = 0x1F,
                   B_FSTAT_NAME = 0x20, B_FFLUSH = 0x21, B_MKDIR = 0x22, B_RMDIR = 0x23, B_CHDIR = 0x24,
                   B_GETCWD = 0x25, B_CLOSEDIR = 0x26, B_STAT = 0x27, B_DOS_VERSION = 0x28, B_EXEC = 0x29, B_ARGS = 0x2A,
-                  B_EXIT = 0x2B;
-constexpr uint8_t B_BANK_GET = 0x2C, B_BANK_SET = 0x2D, B_PAGE_ALLOC = 0x2E, B_PAGE_FREE = 0x2F,
-                  B_PAGE_INFO = 0x30, B_PAGE_COPY = 0x31;
+                  B_EXIT = 0x2B, B_PATH = 0x2C;
+constexpr uint8_t B_BANK_GET = 0x2D, B_BANK_SET = 0x2E, B_PAGE_ALLOC = 0x2F, B_PAGE_FREE = 0x30,
+                  B_PAGE_INFO = 0x31, B_PAGE_COPY = 0x32;
 constexpr uint8_t ERR_BADDEV = 0x02, ERR_IOERR = 0x04, ERR_NOTFOUND = 0x05, ERR_NOSPACE = 0x06, ERR_NOSLOT = 0x07, ERR_EXISTS = 0x08,
                   ERR_EOF = 0x09, ERR_ISOPEN = 0x0A, ERR_BADMODE = 0x0B, ERR_NOTDIR = 0x0C, ERR_ISDIR = 0x0D,
                   ERR_NOTEMPTY = 0x0E, ERR_BADPATH = 0x0F, ERR_TOOBIG = 0x10, ERR_BADPARAM = 0x11, ERR_BADEXE = 0x12, ERR_NOCARD = 0x13, ERR_TIMEOUT = 0x14;
-constexpr uint8_t B_IOCTL = 0x0F, B_BLK_READ = 0x11, B_BLK_WRITE = 0x12, B_BLK_READ32 = 0x32, B_BLK_WRITE32 = 0x33;
+constexpr uint8_t B_IOCTL = 0x0F, B_BLK_READ = 0x11, B_BLK_WRITE = 0x12, B_BLK_READ32 = 0x33, B_BLK_WRITE32 = 0x34;
 constexpr uint8_t F_UART = 0x08, UT_IOC_GETERR = 0x01;
 constexpr uint8_t READ = 0, WRITE = 1, APPEND = 2, UPDATE = 3;
 constexpr uint8_t FROM_START = 0, FROM_CUR = 1, FROM_END = 2; // (SEEK_* are stdio macros)

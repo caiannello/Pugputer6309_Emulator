@@ -347,7 +347,7 @@ TEST(pugasm_makes_programs_that_run) {
 
 TEST(pugasm_builds_the_demo_program) {
     std::vector<pugputer::Fat16File> files;
-    CHECK(add(files, std::string(DEMO_DIR) + "/GREET.ASM", "GREET.ASM"));
+    CHECK(add(files, std::string(DEMO_DIR) + "/ASM/GREET.ASM", "GREET.ASM"));
     Machine m;
     CHECK(m.start("pugasm_demo.img", files));
     std::string out = m.run("PUGASM -f com greet.asm");

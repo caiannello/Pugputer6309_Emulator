@@ -11,8 +11,9 @@
 ; Two jobs, both against the same FAT16 volume (BPB fields parsed once at
 ; boot into resident variables both share):
 ;
-; 1. Boot-time: find "BASIC.COM" in the root directory, walk its cluster
-;    chain loading it to $C000, jump to BASIC_ENTRY.
+; 1. Boot-time: start the shell (/CMD/SHELL.COM, or /SHELL.COM on a disk laid
+;    out before /CMD), or failing that BASIC (/CMD/BASIC.COM or /BASIC.COM), as a
+;    program (B_EXEC).
 ; 2. Resident file API (see the B_* DOS calls in bios/defines.d): SD_BOOT_TRY
 ;    passes the address of the BIOS's DOS call table (JT_DOS) in Y; right
 ;    before jumping to BASIC, DOS copies its DOS_ENTRIES table there, so the
@@ -132,6 +133,8 @@ SHIFTDONE
             CLR  FATDIRTY
             LDD  #2
             STD  ALLOC_HINT     ; the first free-cluster search starts at the start
+            LDX  #PATH_DEFAULT
+            JSR  DOS_PATH       ; the program search path starts as "/CMD"
             LDA  DOSBUF+15      ; reserved sector count, offset $0E/$0F
             LDB  DOSBUF+14
             STD  RESSEC
@@ -241,17 +244,21 @@ MC_OK
             LDY  JT_BASE
             LDW  #NUM_DOS_JT*2
             TFM  X+,Y+
-RUN_STARTUP LDX  #PATH_SHELL
-            LDY  #0
-            JSR  DOS_EXEC       ; (returns only if it couldn't start it)
+RUN_STARTUP LDX  #PATH_SHELL     ; /CMD/SHELL.COM ...
+            BSR  RS_TRY
+            LDX  #PATH_SHELL+4   ; ... else /SHELL.COM (the same name without "/CMD")
+            BSR  RS_TRY
             LDX  #PATH_BASIC
-            LDY  #0
-            JSR  DOS_EXEC
+            BSR  RS_TRY
+            LDX  #PATH_BASIC+4
+            BSR  RS_TRY
             LDX  #MSG_NOSHELL
             LDB  #F_STDOUT
             LDA  #B_PUTS
             SWI2
 HANG        BRA  HANG           ; nothing else to do -- not resumable
+RS_TRY      LDY  #0             ; X = a program to start, with no command tail
+            JMP  DOS_EXEC       ; (returns only if it couldn't start it)
 ;==============================================================================
 ; Low-level block/FAT/directory primitives, shared by the boot-time loader
 ; above and the resident file API below.
@@ -2194,6 +2201,29 @@ DOS_ARGS    LDX  #ARGBUF
             ANDCC #$FE
             RTS
 ;------------------------------------------------------------------------------
+; IN: X = a new program search path (NUL-terminated) or 0. -> X = the current one
+; (PATHVAR). ERR_TOOBIG if the new one is longer than PATHVARMAX: the old one is
+; kept. DOS only keeps it, across B_EXIT, for the shell, which does the searching.
+;------------------------------------------------------------------------------
+DOS_PATH    CMPX #0
+            BEQ  PT_DONE
+            TFR  X,Y              ; measure it first: a bad one changes nothing
+            LDB  #PATHVARMAX+1
+PT_LEN      LDA  ,Y+
+            BEQ  PT_COPY
+            DECB
+            BNE  PT_LEN
+            LDA  #ERR_TOOBIG
+            ORCC #1
+            RTS
+PT_COPY     LDY  #PATHVAR
+PT_LOOP     LDA  ,X+
+            STA  ,Y+
+            BNE  PT_LOOP
+PT_DONE     LDX  #PATHVAR
+            ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
 ; The program is done. Closes every open file (flushing what was written) and
 ; every directory scan, then starts the shell again on the boot stack. Never
 ; returns.
@@ -2731,9 +2761,11 @@ PB_FULL     LDA  #ERR_TOOBIG
             ORCC #1
             RTS
 ;------------------------------------------------------------------------------
-PATH_SHELL  FCC  "/SHELL.COM"
+PATH_SHELL  FCC  "/CMD/SHELL.COM"
             FCB  0
-PATH_BASIC  FCC  "/BASIC.COM"
+PATH_BASIC  FCC  "/CMD/BASIC.COM"
+            FCB  0
+PATH_DEFAULT FCC "/CMD"
             FCB  0
 MSG_NOSHELL FCC  "No SHELL.COM or BASIC.COM on the disk"
             FCB  LF,CR,0
@@ -2766,6 +2798,7 @@ DOS_ENTRIES FDB  DOS_OPEN       ; $13 B_FOPEN_NAME
             FDB  DOS_EXEC       ; $29 B_EXEC
             FDB  DOS_ARGS       ; $2A B_ARGS
             FDB  DOS_EXIT       ; $2B B_EXIT
+            FDB  DOS_PATH       ; $2C B_PATH
 DOS_ENTRIES_END
     IFNE (DOS_ENTRIES_END-DOS_ENTRIES)-2*NUM_DOS_JT
     ERROR "DOS_ENTRIES must have one entry per DOS call (see defines.d)"
@@ -2789,6 +2822,7 @@ ROOTDIRSEC    RMB  2
 DATALBA       RMB  4
 BOOT_SP       RMB  2        ; the stack DOS started on: programs start on it
 ARGBUF        RMB  ARGMAX+1 ; the command tail of the program being started
+PATHVAR       RMB  PATHVARMAX+1 ; the program search path (B_PATH)
 HDRBUF        RMB  EXE_HDRSIZE
 EX_PATH       RMB  2
 EX_H          RMB  1

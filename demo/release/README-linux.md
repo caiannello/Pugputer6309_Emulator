@@ -24,7 +24,8 @@ reasonably recent Linux distribution, with no libraries to match.
    ```
 
    Try `HELP`, `DIR`, `VER` and `MEM`.
-4. Type **`BASIC`** and press Enter to start BASIC. You will see the `OK` prompt.
+4. Type **`BASIC`** and press Enter to start BASIC. You will see the `OK` prompt. BASIC starts
+   in the disk's `/BASIC` directory, where the demo programs are.
 5. Load and run a demo program:
 
    ```
@@ -40,7 +41,7 @@ Everything you `SAVE` is kept on `disk.img`. **`./reset-disk.sh`** puts the disk
 
 ## The demo programs
 
-They are on the disk; `DIR` at the shell prompt lists them.
+They are in the disk's `/BASIC` directory; `DIR /BASIC` at the shell prompt lists them.
 
 | Program | Shows |
 |---|---|
@@ -54,8 +55,10 @@ They are on the disk; `DIR` at the shell prompt lists them.
 
 ## Things to try
 
-- **Shell:** `DIR`, `MD GAMES`, `CD GAMES`, `CD ..`, `COPY HELLO.BAS HI.BAS`, `TYPE HI.BAS`, `REN`,
-  `DEL`, `RD`. A word that isn't a command runs a program: `BASIC` runs `BASIC.COM`.
+- **Shell:** `DIR`, `MD GAMES`, `CD GAMES`, `CD ..`, `CD /BASIC`, `COPY HELLO.BAS HI.BAS`,
+  `TYPE HI.BAS`, `REN`, `DEL`, `RD`. A word that isn't a command runs a program: `BASIC` runs
+  `BASIC.COM`, found in the current directory or else along the search path -- `PATH` shows it
+  (`/CMD`, where all the programs are) and `PATH /CMD;/GAMES` changes it.
 - **BASIC:** write your own: `10 PRINT "HI"`, `RUN`, `SAVE "MINE"`, then leave with `SYSTEM` and
   `DIR` to see `MINE.BAS`. `FILES`, `KILL`, `NAME`, `MKDIR` and `CHDIR` work from BASIC too.
   The differences from GW-BASIC are listed in the project's `basic309/README.md`.
@@ -90,13 +93,13 @@ lists the options (`--bios` and `--disk` select other images).
 |---|---|
 | `pugputer` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `SHELL.COM`, `EDIT.COM`, `PUGASM.COM`, `PUGLINK.COM`, `BASIC.COM` and the demos |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `PUGASM.COM`, `PUGLINK.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.sh` |
 | `start-console.sh`, `start-serial.sh`, `reset-disk.sh` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
 
 You can also read `disk.img` with ordinary tools (it is a plain FAT16 image with no partition
-table), for instance `mdir -i disk.img ::` and `mcopy -i disk.img ::HELLO.BAS .` from mtools,
+table), for instance `mdir -i disk.img ::` and `mcopy -i disk.img ::BASIC/HELLO.BAS .` from mtools,
 or `sudo mount -o loop disk.img /mnt`, to copy your BASIC programs out or in.
 
 ## The text editor
@@ -104,7 +107,7 @@ or `sudo mount -o loop disk.img /mnt`, to copy your BASIC programs out or in.
 **`EDIT NAME.TXT`** at the shell prompt opens a file (or starts a new one) in a full-screen editor
 that works like GNU nano: the keys are listed at the bottom of the screen (`^` is Ctrl, `M-` is
 Alt, or Esc then the key). `^O` writes the file, `^X` exits, `^G` shows all the keys. Try
-`EDIT HELLO.BAS`, change it, write it out, then `LOAD` and `RUN` it in BASIC.
+`EDIT /BASIC/HELLO.BAS`, change it, write it out, then `LOAD` and `RUN` it in BASIC.
 
 ## The assembler
 
@@ -112,6 +115,7 @@ Alt, or Esc then the key). `^O` writes the file, `^X` exits, `^G` shows all the 
 lwasm, the assembler the whole system is built with). Try the demo:
 
 ```
+CD /ASM
 PUGASM -f com greet.asm
 GREET Ada
 ```

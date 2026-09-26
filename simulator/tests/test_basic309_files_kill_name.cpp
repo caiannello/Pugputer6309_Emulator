@@ -73,7 +73,7 @@ TEST(basic309_files_kill_name_round_trip) {
 
     // Start from a known state even if an earlier run left these behind
     // (KILL of a missing file just reports ?NE, which we ignore here).
-    for (const char* name : {"A.BAS", "B.BAS", "C.BAS"}) {
+    for (const char* name : {"A.BAS", "B.BAS", "C.BAS", "D.BAS"}) {
         type(std::string("KILL\"") + name + "\"");
         bus.run(1500000);
     }
@@ -92,11 +92,11 @@ TEST(basic309_files_kill_name_round_trip) {
     bus.run(1500000);
     CHECK(received.find("OK") != std::string::npos);
 
-    // FILES should list BASIC.COM, A.BAS, B.BAS.
+    // FILES should list the CMD directory (the programs), A.BAS, B.BAS.
     received.clear();
     type("FILES");
     bus.run(2000000);
-    CHECK(received.find("BASIC.COM") != std::string::npos);
+    CHECK(received.find("CMD <DIR>") != std::string::npos);
     CHECK(received.find("A.BAS") != std::string::npos);
     CHECK(received.find("B.BAS") != std::string::npos);
 
@@ -140,7 +140,7 @@ TEST(basic309_files_kill_name_round_trip) {
     bus.run(2000000);
     CHECK(received.find("B.BAS") == std::string::npos);
     CHECK(received.find("C.BAS") != std::string::npos);
-    CHECK(received.find("BASIC.COM") != std::string::npos);
+    CHECK(received.find("CMD <DIR>") != std::string::npos);
 
     // KILL of a nonexistent file -> ?NE ERROR.
     received.clear();
@@ -149,8 +149,14 @@ TEST(basic309_files_kill_name_round_trip) {
     CHECK(received.find("?NE ERROR") != std::string::npos);
 
     // NAME onto an existing target -> ?FE ERROR.
+    type("SAVE\"D.BAS\"");
+    bus.run(1500000);
     received.clear();
-    type("NAME\"C.BAS\" AS \"BASIC.COM\"");
+    type("NAME\"C.BAS\" AS \"D.BAS\"");
     bus.run(1500000);
     CHECK(received.find("?FE ERROR") != std::string::npos);
+    for (const char* name : {"C.BAS", "D.BAS"}) {
+        type(std::string("KILL\"") + name + "\"");
+        bus.run(1500000);
+    }
 }

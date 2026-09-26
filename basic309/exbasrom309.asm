@@ -58,7 +58,7 @@ FM_RND        equ 4            ; OPEN "R" / random access
 WORKBASE    equ  $3400         ; base of BASIC's relocated fixed workspace. Must
                                ; stay a multiple of $100 (it's a direct page) and
                                ; above the top of dos/dos.asm's RAM (code, sector
-                               ; buffers, variables -- DOS_END in dos/dos.lst; $3332
+                               ; buffers, variables -- DOS_END in dos/dos.lst; $33CC
                                ; with 8 file buffers). test_bios_layout checks it.
                                ; DP is derived from this, not hand-typed.
 TOPRAM_FIXED equ $BFFF         ; fixed top-of-RAM for BASIC's use (interpreter
@@ -361,6 +361,11 @@ RESVEC
           LDA  #WORKBASE/256
           TFR  A,DP
 LA00E     LDS  #LINBUF+LBUFMX+1 SET STACK TO TOP OF LINE INPUT BUFFER
+; basic309: start in /BASIC, where a disk keeps its BASIC programs, if it has
+; one -- no such directory (or no DOS at all): stay in the current directory.
+          LDX  #BASDIR
+          LDA  #B_CHDIR
+          SWI2
           LDA  RSTFLG         GET WARM START FLAG
           CMPA #$55           IS IT A WARM START? 
           BNE  BACDST         NO - D0 A COLD START 
@@ -1562,6 +1567,8 @@ CHDIR_DONE LDA #CR
 SYSTEM    LDA  #B_EXIT
           SWI2
           RTS
+BASDIR    FCC  "/BASIC"         WHERE BASIC STARTS (RESVEC)
+          FCB  0
 ;------------------------------------------------------------------------------
 ; Error trapping. ON ERROR GOTO n names a handler line; from then on an error in a
 ; running program (not in a direct-mode line, and not while another is being

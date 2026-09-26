@@ -314,7 +314,7 @@ TEST(bios_a_crashing_program_lands_back_in_the_shell_with_the_machine_put_right)
         return f;
     };
     // All of them run at $9000 (bank 2). The first two remap bank 1 (B_BANK_SET) and trash the direct page first.
-    Bytes trash = {0xC6, 0x01, 0x11, 0x86, 0x14, 0x86, 0x2D, 0x10, 0x3F, // bank 1 -> page 20
+    Bytes trash = {0xC6, 0x01, 0x11, 0x86, 0x14, 0x86, 0x2E, 0x10, 0x3F, // bank 1 -> page 20
                    0x86, 0xFF, 0x1F, 0x8B};                              // DP = $FF
     auto with = [&](Bytes a, const Bytes& b) {
         a.insert(a.end(), b.begin(), b.end());
@@ -345,8 +345,8 @@ TEST(bios_a_crashing_program_lands_back_in_the_shell_with_the_machine_put_right)
         s.received.clear();
         s.type("ver");
         spent = 0;
-        while (!has(s.received, "DOS 2.1") && spent < 100000000) spent += s.bus.run(20000);
-        CHECK(has(s.received, "Pugputer 6309 DOS 2.1"));
+        while (!has(s.received, "DOS 2.2") && spent < 100000000) spent += s.bus.run(20000);
+        CHECK(has(s.received, "Pugputer 6309 DOS 2.2"));
         spent = 0;
         while (!ends_with(s.received, "/> ") && spent < 100000000) spent += s.bus.run(20000);
     };

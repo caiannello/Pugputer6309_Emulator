@@ -14,7 +14,7 @@
 namespace pugputer {
 
 struct Fat16File {
-    std::string name; // e.g. "BASIC.COM" -- converted to 8.3 internally
+    std::string name; // e.g. "BASIC.COM" or "CMD/BASIC.COM" -- converted to 8.3 internally
     std::vector<uint8_t> data;
 };
 
@@ -27,7 +27,9 @@ struct Fat16BuildResult {
 // sector); its size (rounded up to whole sectors) plus 1 becomes the
 // BPB's reserved-sector-count, so bios/sdcard.asm's SD_BOOT_TRY knows how
 // much to load. `files` become root-directory entries with their data
-// written into the cluster area. Fails (ok=false) if the resulting
+// written into the cluster area; a name with "/" in it ("CMD/SHELL.COM") goes in
+// that subdirectory, which is created (with "." and "..") on first mention.
+// Fails (ok=false) if the files don't fit, the root has too many entries, or the resulting
 // cluster count would fall outside FAT16's valid range (4085-65524) --
 // adjust total_sectors/sectors_per_cluster if so.
 Fat16BuildResult build_fat16_image(const std::string& path, const std::vector<uint8_t>& dos_payload,

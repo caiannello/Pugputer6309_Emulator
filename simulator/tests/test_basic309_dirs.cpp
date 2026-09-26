@@ -29,7 +29,7 @@ TEST(basic309_dirs_make_enter_list_and_remove_directories) {
     CHECK(expect_eq("start", s.run_line("CHDIR"), "/\r\n")); // no argument: where am I
     CHECK(expect_eq("mkdir", s.run_line("MKDIR \"SUB1\""), ""));
     CHECK(contains(s.run_line("FILES"), "SUB1 <DIR>"));
-    CHECK(contains(s.run_line("FILES"), "BASIC.COM 12296"));
+    CHECK(contains(s.run_line("FILES \"/CMD\""), "BASIC.COM 12296"));
     CHECK(expect_eq("chdir", s.run_line("CHDIR \"SUB1\""), ""));
     CHECK(expect_eq("cwd", s.run_line("CHDIR"), "/SUB1\r\n"));
     CHECK(expect_eq("empty", s.run_line("FILES"), "")); // "." and ".." aren't shown
@@ -99,11 +99,11 @@ TEST(basic309_dirs_errors) {
     CHECK(expect_eq("mk", s.run_line("MKDIR \"SUB1\""), ""));
     CHECK(contains(s.run_line("MKDIR \"SUB1\""), "?FE ERROR"));          // exists
     CHECK(contains(s.run_line("CHDIR \"NOPE\""), "?NE ERROR"));          // missing
-    CHECK(contains(s.run_line("CHDIR \"BASIC.COM\""), "?ND ERROR"));     // a file, not a directory
+    CHECK(contains(s.run_line("CHDIR \"/CMD/BASIC.COM\""), "?ND ERROR"));     // a file, not a directory
     CHECK(contains(s.run_line("RMDIR \"NOPE\""), "?NE ERROR"));
-    CHECK(contains(s.run_line("RMDIR \"BASIC.COM\""), "?ND ERROR"));
+    CHECK(contains(s.run_line("RMDIR \"/CMD/BASIC.COM\""), "?ND ERROR"));
     CHECK(contains(s.run_line("MKDIR \"NOPE/X\""), "?NE ERROR"));        // a missing parent
-    CHECK(contains(s.run_line("MKDIR \"BASIC.COM/X\""), "?ND ERROR"));   // a file as a parent
+    CHECK(contains(s.run_line("MKDIR \"/CMD/BASIC.COM/X\""), "?ND ERROR"));   // a file as a parent
     CHECK(contains(s.run_line("MKDIR \"A B\""), "?BP ERROR"));           // not a valid name
     CHECK(contains(s.run_line("MKDIR \"TOOLONGNAME\""), "?BP ERROR"));
     CHECK(contains(s.run_line("MKDIR \"A.B.C\""), "?BP ERROR"));
@@ -114,7 +114,7 @@ TEST(basic309_dirs_errors) {
     std::string longpath(85, 'A');
     CHECK(contains(s.run_line("MKDIR \"" + longpath + "\""), "?BP ERROR")); // over the 79-character limit
     CHECK(contains(s.run_line("FILES \"NOPE\""), "?NE ERROR"));
-    CHECK(contains(s.run_line("FILES \"BASIC.COM\""), "?ND ERROR"));
+    CHECK(contains(s.run_line("FILES \"/CMD/BASIC.COM\""), "?ND ERROR"));
     CHECK(expect_eq("still usable", s.run_line("PRINT 1+1"), " 2 \r\n"));
     tidy(s);
 }

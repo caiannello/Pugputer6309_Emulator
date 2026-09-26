@@ -65,7 +65,8 @@ Every folder has its own `README.md` with the details.
   volume -- and the test suite proves it by cutting the power at every single disk write of a
   scripted session.
 - **Programs.** A program is a file with an 8-byte header (load address, entry address);
-  `B_EXEC` loads and starts it and `B_EXIT` returns to the shell.
+  `B_EXEC` loads and starts it and `B_EXIT` returns to the shell. The disk keeps them in `/CMD`,
+  and the shell finds them through its `PATH`.
 - **Editor.** `EDIT [file]`: nano's keys (`^O` write out, `^X` exit, `^W` search, `^K`/`^U` cut
   and paste, `M-A` mark, ...), a title bar, a status line, and it fits itself to the terminal's
   size. See `edit/README.md`.
