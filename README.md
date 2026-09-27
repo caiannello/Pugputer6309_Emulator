@@ -26,7 +26,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
 | `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano, except stripped-down and implemented in 6309 assembly language. The executable file size is currently under 8KB. |
 | `asmlink/` | `ASM.COM` and `LINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
-| `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII). |
+| `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII) and `MOVE.COM` (move or rename a file). |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release. |
@@ -77,8 +77,8 @@ Every folder has its own `README.md` with the details.
   and LWOBJ object output. `LINK [-f raw|srec|com] [-o out] [-m map] [-s script] file.o ...`:
   lwlink's link scripts, relocations and maps. On the Pugputer they rebuild the shell, the
   editor, DOS, BASIC, the BIOS and themselves byte for byte. See `asmlink/README.md`.
-- **Utilities.** `HEXDUMP file`: a file as offsets, hex and ASCII, 16 bytes a line. See
-  `utils/README.md`.
+- **Utilities.** `HEXDUMP file`: a file as offsets, hex and ASCII, 16 bytes a line.
+  `MOVE from [to]`: move a file to another directory, or rename it. See `utils/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
   `basic309/README.md` for the differences from GW-BASIC.

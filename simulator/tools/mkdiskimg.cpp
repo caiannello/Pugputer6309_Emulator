@@ -1,9 +1,9 @@
 // Builds basic309/disk.img: a fresh FAT16 disk image (see
 // pugputer/fat16_image.hpp) containing dos/dos.bin in its reserved
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
-// EDIT.COM, ASM.COM, LINK.COM and HEXDUMP.COM (shell/shell.bin, edit/edit.bin,
-// asmlink/asm.bin, asmlink/link.bin and utils/hexdump.bin as assembled -- they
-// carry their own program headers) and BASIC.COM (the $C000-$EFFF window of basic309's S-record,
+// EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM and MOVE.COM (shell/shell.bin,
+// edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, utils/hexdump.bin and
+// utils/move.bin as assembled -- they carry their own program headers) and BASIC.COM (the $C000-$EFFF window of basic309's S-record,
 // given a program header: load $C000, entry $C000 -- see EXE_* in bios/defines.d).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
@@ -12,7 +12,7 @@
 //   mkdiskimg --dos path/to/dos.bin --basic path/to/exbasrom309.s19
 //             --shell path/to/shell.bin --edit path/to/edit.bin
 //             --asm path/to/asm.bin --link path/to/link.bin
-//             --hexdump path/to/hexdump.bin
+//             --hexdump path/to/hexdump.bin --move path/to/move.bin
 //             --out path/to/disk.img
 //             [--add-dir path/to/folder]
 //
@@ -74,7 +74,8 @@ int main(int argc, char** argv) {
     std::vector<Program> programs = {{"--edit", EDIT_BIN_DEFAULT, "EDIT.COM"},
                                      {"--asm", ASM_BIN_DEFAULT, "ASM.COM"},
                                      {"--link", LINK_BIN_DEFAULT, "LINK.COM"},
-                                     {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"}};
+                                     {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"},
+                                     {"--move", MOVE_BIN_DEFAULT, "MOVE.COM"}};
     for (int i = 1; i < argc; ++i) {
         bool program = false;
         for (auto& p : programs)

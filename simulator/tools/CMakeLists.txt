@@ -12,6 +12,7 @@ set(EDIT_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.bin")
 set(ASM_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/asm.bin")
 set(LINK_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/link.bin")
 set(HEXDUMP_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/hexdump.bin")
+set(MOVE_BIN_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/move.bin")
 set(DISK_IMG_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
 
 # mkdiskimg is plain, cross-platform file I/O -- no conio.h/Windows
@@ -25,6 +26,7 @@ target_compile_definitions(mkdiskimg PRIVATE
     ASM_BIN_DEFAULT="${ASM_BIN_DEFAULT}"
     LINK_BIN_DEFAULT="${LINK_BIN_DEFAULT}"
     HEXDUMP_BIN_DEFAULT="${HEXDUMP_BIN_DEFAULT}"
+    MOVE_BIN_DEFAULT="${MOVE_BIN_DEFAULT}"
     EXBASROM309_S19_DEFAULT="${EXBASROM309_S19_DEFAULT}"
     DISK_IMG_DEFAULT="${DISK_IMG_DEFAULT}"
 )

@@ -19,3 +19,25 @@ shows a file as hex and ASCII, 16 bytes a line:
 
 The offset is 24 bits (6 hex digits). Bytes outside `$20`-`$7E` show as dots in the ASCII
 column, and a short last line leaves its missing bytes blank. Ctrl-C stops it.
+
+## MOVE
+
+```
+MOVE from [to]
+```
+
+moves a file to another directory, or renames it:
+
+- With no `to`, the file goes to the current directory under its own name.
+- If `to` is a directory (one that exists, or a path ending in `/`), the file goes into it under
+  its own name.
+- Otherwise `to` is the file's new path (and name).
+
+The shell's `COPY from [to]` follows the same rules. MOVE never overwrites a file: if the
+destination exists, it says "Already exists" and changes nothing.
+
+Within one directory the entry is simply renamed, so this also renames a directory. To another
+directory, a file is copied and then the original deleted, because DOS has no call that moves an
+entry between directories (and has no room left below BASIC's workspace for one). If the copy
+fails (a full disk, say), the partial copy is deleted and the original is left as it was. A
+directory can only be renamed in place.

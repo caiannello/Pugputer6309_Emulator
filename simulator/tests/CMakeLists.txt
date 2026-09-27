@@ -113,6 +113,7 @@ set(EDIT_LST "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.lst")
 set(ASM_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/asm.bin")
 set(LINK_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/link.bin")
 set(HEXDUMP_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/hexdump.bin")
+set(MOVE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/move.bin")
 if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_sdboot_golden.cpp)
     set(PUGPUTER_HAVE_SDBOOT 1)
@@ -141,7 +142,7 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     if(EXISTS "${ASM_BIN}" AND EXISTS "${LINK_BIN}")
         list(APPEND PUGPUTER_TEST_SOURCES test_asmlink.cpp)
     endif()
-    if(EXISTS "${HEXDUMP_BIN}")
+    if(EXISTS "${HEXDUMP_BIN}" AND EXISTS "${MOVE_BIN}")
         list(APPEND PUGPUTER_TEST_SOURCES test_utils.cpp)
     endif()
     list(APPEND PUGPUTER_TEST_SOURCES test_demo_programs.cpp)
@@ -176,6 +177,7 @@ target_compile_definitions(pugputer_tests PRIVATE
     ASM_BIN_PATH="${ASM_BIN}"
     LINK_BIN_PATH="${LINK_BIN}"
     HEXDUMP_BIN_PATH="${HEXDUMP_BIN}"
+    MOVE_BIN_PATH="${MOVE_BIN}"
     LWLINK_EXE_PATH="${LWLINK_EXE}"
     REPO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
