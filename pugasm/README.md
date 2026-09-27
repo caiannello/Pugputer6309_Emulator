@@ -1,4 +1,4 @@
-# Please don't be mad.
+# About
 
 This folder holds two programs that run on the Pugputer itself. This project was developed with substantial assistance from Claude (Anthropic).
 
