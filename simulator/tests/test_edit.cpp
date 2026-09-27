@@ -299,7 +299,7 @@ long arena_size() {
 TEST(edit_shows_a_file_edits_it_and_writes_it_back) {
     Editor e;
     CHECK(e.start("edit1.img", {text("NOTE.TXT", "alpha\r\nbeta\r\n")}, "edit note.txt"));
-    CHECK(has(e.row(1), "EDIT 1.0") && has(e.row(1), "File: note.txt") && !has(e.row(1), "Modified"));
+    CHECK(has(e.row(1), "NANO6309 1.0") && has(e.row(1), "File: note.txt") && !has(e.row(1), "Modified"));
     CHECK(e.scr.inv[0].find(' ') == std::string::npos); // the title bar is all inverse
     CHECK(e.row(3) == "alpha");
     CHECK(e.row(4) == "beta");
