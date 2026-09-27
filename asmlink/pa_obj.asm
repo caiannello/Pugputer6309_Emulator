@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_obj.asm -- pugasm: object files (lwtools' LWOBJ16, for lwlink or PUGLINK).
+; pa_obj.asm -- ASM: object files (lwtools' LWOBJ16, for lwlink or LINK).
 ;
 ; In an object file an address is relative to its section, whose place only the
 ; linker decides; a symbol from another file (IMPORT) has no value here at all.

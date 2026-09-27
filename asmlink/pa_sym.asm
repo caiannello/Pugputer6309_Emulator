@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_sym.asm -- pugasm: the symbol table.
+; pa_sym.asm -- ASM: the symbol table.
 ;
 ; A symbol is a heap record, chained into one of NHASH buckets (HASHTAB: a far
 ; pointer each), newest first. A SET symbol gets a new record (a "version") every

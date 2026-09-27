@@ -18,7 +18,7 @@ foreach(_dir "$ENV{LWTOOLS}" "${_LW_BIN}")
             if(NOT LWASM_EXE AND _dir AND EXISTS "${_dir}${_sub}/lwasm${_ext}"
                AND NOT IS_DIRECTORY "${_dir}${_sub}/lwasm${_ext}")
                 set(LWASM_EXE "${_dir}${_sub}/lwasm${_ext}")
-                # lwlink sits next to lwasm (PUGLINK is compared with it), or in the source tree's lwlink/.
+                # lwlink sits next to lwasm (LINK is compared with it), or in the source tree's lwlink/.
                 if(_sub STREQUAL "")
                     set(_LWLINK_CANDIDATE "${_dir}/lwlink${_ext}")
                 else()
@@ -110,8 +110,8 @@ set(DOS_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../dos/dos.bin")
 set(SHELL_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../shell/shell.bin")
 set(EDIT_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.bin")
 set(EDIT_LST "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.lst")
-set(PUGASM_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../pugasm/pugasm.bin")
-set(PUGLINK_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../pugasm/puglink.bin")
+set(ASM_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/asm.bin")
+set(LINK_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/link.bin")
 if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_sdboot_golden.cpp)
     set(PUGPUTER_HAVE_SDBOOT 1)
@@ -137,8 +137,8 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     if(EXISTS "${EDIT_BIN}")
         list(APPEND PUGPUTER_TEST_SOURCES test_edit.cpp)
     endif()
-    if(EXISTS "${PUGASM_BIN}" AND EXISTS "${PUGLINK_BIN}")
-        list(APPEND PUGPUTER_TEST_SOURCES test_pugasm.cpp)
+    if(EXISTS "${ASM_BIN}" AND EXISTS "${LINK_BIN}")
+        list(APPEND PUGPUTER_TEST_SOURCES test_asmlink.cpp)
     endif()
     list(APPEND PUGPUTER_TEST_SOURCES test_demo_programs.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_bios_audit.cpp)
@@ -169,8 +169,8 @@ target_compile_definitions(pugputer_tests PRIVATE
     SHELL_BIN_PATH="${SHELL_BIN}"
     EDIT_BIN_PATH="${EDIT_BIN}"
     EDIT_LST_PATH="${EDIT_LST}"
-    PUGASM_BIN_PATH="${PUGASM_BIN}"
-    PUGLINK_BIN_PATH="${PUGLINK_BIN}"
+    ASM_BIN_PATH="${ASM_BIN}"
+    LINK_BIN_PATH="${LINK_BIN}"
     LWLINK_EXE_PATH="${LWLINK_EXE}"
     REPO_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )

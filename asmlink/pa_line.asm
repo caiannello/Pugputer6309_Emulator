@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_line.asm -- pugasm: one source line (lwasm's pass-1 rules for what is a
+; pa_line.asm -- ASM: one source line (lwasm's pass-1 rules for what is a
 ; label, an operation and an operand), emitting bytes, errors, the listing.
 ;------------------------------------------------------------------------------
 DOLINE      LDD  <LSEQ

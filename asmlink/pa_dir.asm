@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_dir.asm -- pugasm: the directives (lwasm's pseudo operations), conditional
+; pa_dir.asm -- ASM: the directives (lwasm's pseudo operations), conditional
 ; assembly, macros and structs.
 ;------------------------------------------------------------------------------
 DIRHAND     FDB  D_ORG,D_EQU,D_SET,D_SETDP,D_FCB,D_FDB,D_FQB,D_FCC,D_FCN,D_FCS

@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
-; pa_io.asm -- pugasm: the command line, and the input stack (source files,
+; pa_io.asm -- ASM: the command line, and the input stack (source files,
 ; INCLUDEs and macro expansions) that READLINE takes lines from. (The output
-; streams are in pa_strm.asm, shared with PUGLINK.)
+; streams are in pa_strm.asm, shared with LINK.)
 ;------------------------------------------------------------------------------
 ; An input record (INSTACK, one a level; INP = the top one):
 IR_TYPE     equ  0                 ; IT_FILE or IT_MACRO

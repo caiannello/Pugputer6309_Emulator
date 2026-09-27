@@ -76,7 +76,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `PUGASM.COM`, `PUGLINK.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -93,17 +93,17 @@ Alt, or Esc then the key). `^O` writes the file, `^X` exits, `^G` shows all the 
 
 ## The assembler
 
-**`PUGASM`** assembles 6309/6809 source on the Pugputer itself (it speaks the same language as
+**`ASM`** assembles 6309/6809 source on the Pugputer itself (it speaks the same language as
 lwasm, the assembler the whole system is built with). Try the demo:
 
 ```
 CD /ASM
-PUGASM -f com greet.asm
+ASM -f com greet.asm
 GREET Ada
 ```
 
-`EDIT GREET.ASM` shows how it works; `PUGASM` alone lists the options (`-l` makes a listing).
-**`PUGLINK`** links object files (`PUGASM -f obj`) into a program, as lwlink does.
+`EDIT GREET.ASM` shows how it works; `ASM` alone lists the options (`-l` makes a listing).
+**`LINK`** links object files (`ASM -f obj`) into a program, as lwlink does.
 
 ## Good to know
 

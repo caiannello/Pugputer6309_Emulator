@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_strm.asm -- buffered output files (shared by PUGASM and PUGLINK). A stream
+; pa_strm.asm -- buffered output files (shared by ASM and LINK). A stream
 ; is 4+256 bytes: +0 the DOS handle, +1 open, +2 bytes buffered, +4 the buffer.
 ; A write error is fatal (M_WRITEERR, FATAL: the program's own).
 ;------------------------------------------------------------------------------

@@ -1,9 +1,9 @@
-* GREET.ASM -- a first program for PUGASM, the Pugputer's own assembler.
+* GREET.ASM -- a first program for ASM, the Pugputer's own assembler.
 *
-*   PUGASM -f com greet.asm        makes GREET.COM
+*   ASM -f com greet.asm        makes GREET.COM
 *   GREET Ada                      prints "Hello, Ada!"
 *
-* A program is a file with an 8-byte header (PUGASM's "com" format writes it);
+* A program is a file with an 8-byte header (ASM's "com" format writes it);
 * the shell loads it and jumps to its entry point (END's operand). Everything
 * else goes through the BIOS: SWI2 with a function number in A.
 

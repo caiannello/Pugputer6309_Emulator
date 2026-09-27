@@ -1,8 +1,8 @@
 // Builds basic309/disk.img: a fresh FAT16 disk image (see
 // pugputer/fat16_image.hpp) containing dos/dos.bin in its reserved
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
-// EDIT.COM, PUGASM.COM and PUGLINK.COM (shell/shell.bin, edit/edit.bin,
-// pugasm/pugasm.bin and pugasm/puglink.bin as assembled -- they carry their own
+// EDIT.COM, ASM.COM and LINK.COM (shell/shell.bin, edit/edit.bin,
+// asmlink/asm.bin and asmlink/link.bin as assembled -- they carry their own
 // program headers) and BASIC.COM (the $C000-$EFFF window of basic309's S-record,
 // given a program header: load $C000, entry $C000 -- see EXE_* in bios/defines.d).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
@@ -11,7 +11,7 @@
 //   mkdiskimg                                  -- default paths below
 //   mkdiskimg --dos path/to/dos.bin --basic path/to/exbasrom309.s19
 //             --shell path/to/shell.bin --edit path/to/edit.bin
-//             --pugasm path/to/pugasm.bin --puglink path/to/puglink.bin
+//             --asm path/to/asm.bin --link path/to/link.bin
 //             --out path/to/disk.img
 //             [--add-dir path/to/folder]
 //
@@ -62,8 +62,8 @@ int main(int argc, char** argv) {
     std::string basic_path = EXBASROM309_S19_DEFAULT;
     std::string shell_path = SHELL_BIN_DEFAULT;
     std::string edit_path = EDIT_BIN_DEFAULT;
-    std::string pugasm_path = PUGASM_BIN_DEFAULT;
-    std::string puglink_path = PUGLINK_BIN_DEFAULT;
+    std::string asm_path = ASM_BIN_DEFAULT;
+    std::string link_path = LINK_BIN_DEFAULT;
     std::string out_path = DISK_IMG_DEFAULT;
     std::string add_dir;
     for (int i = 1; i < argc; ++i) {
@@ -75,10 +75,10 @@ int main(int argc, char** argv) {
             shell_path = argv[++i];
         } else if (std::strcmp(argv[i], "--edit") == 0 && i + 1 < argc) {
             edit_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--pugasm") == 0 && i + 1 < argc) {
-            pugasm_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--puglink") == 0 && i + 1 < argc) {
-            puglink_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--asm") == 0 && i + 1 < argc) {
+            asm_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--link") == 0 && i + 1 < argc) {
+            link_path = argv[++i];
         } else if (std::strcmp(argv[i], "--add-dir") == 0 && i + 1 < argc) {
             add_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
@@ -100,15 +100,15 @@ int main(int argc, char** argv) {
     if (!read_file(edit_path, edit_com.data)) return 1;
     std::printf("Loaded %s (%zu bytes) as /CMD/EDIT.COM\n", edit_path.c_str(), edit_com.data.size());
 
-    Fat16File pugasm_com;
-    pugasm_com.name = "CMD/PUGASM.COM";
-    if (!read_file(pugasm_path, pugasm_com.data)) return 1;
-    std::printf("Loaded %s (%zu bytes) as /CMD/PUGASM.COM\n", pugasm_path.c_str(), pugasm_com.data.size());
+    Fat16File asm_com;
+    asm_com.name = "CMD/ASM.COM";
+    if (!read_file(asm_path, asm_com.data)) return 1;
+    std::printf("Loaded %s (%zu bytes) as /CMD/ASM.COM\n", asm_path.c_str(), asm_com.data.size());
 
-    Fat16File puglink_com;
-    puglink_com.name = "CMD/PUGLINK.COM";
-    if (!read_file(puglink_path, puglink_com.data)) return 1;
-    std::printf("Loaded %s (%zu bytes) as /CMD/PUGLINK.COM\n", puglink_path.c_str(), puglink_com.data.size());
+    Fat16File link_com;
+    link_com.name = "CMD/LINK.COM";
+    if (!read_file(link_path, link_com.data)) return 1;
+    std::printf("Loaded %s (%zu bytes) as /CMD/LINK.COM\n", link_path.c_str(), link_com.data.size());
 
     std::vector<uint8_t> basic_image(65536, 0);
     SrecLoadResult basic_load = load_srec_file(basic_path, basic_image.data(), basic_image.size());
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
     std::printf("Loaded %s ($%04X-$%04X) as /CMD/BASIC.COM (%zu bytes with its header)\n", basic_path.c_str(),
                 basic_load.min_addr, basic_load.max_addr, basic_com.data.size());
 
-    std::vector<Fat16File> files = {shell_com, basic_com, edit_com, pugasm_com, puglink_com};
+    std::vector<Fat16File> files = {shell_com, basic_com, edit_com, asm_com, link_com};
     if (!add_dir.empty()) {
         // Everything under the folder, in a stable order; a file's path relative to
         // the folder (with "/" separators) is its path on the disk.

@@ -25,7 +25,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `dos/` | The resident DOS: a FAT16 file system (8.3 names, subdirectories, 32-bit file sizes and block numbers, a FAT cache, crash-safe write ordering) and the program loader. |
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
 | `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano, except stripped-down and implemented in 6309 assembly language. The executable file size is currently under 8KB. |
-| `pugasm/` | `PUGASM.COM` and `PUGLINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
+| `asmlink/` | `ASM.COM` and `LINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release. |
@@ -71,11 +71,11 @@ Every folder has its own `README.md` with the details.
 - **Editor.** `EDIT [file]`: nano's keys (`^O` write out, `^X` exit, `^W` search, `^K`/`^U` cut
   and paste, `M-A` mark, ...), a title bar, a status line, and it fits itself to the terminal's
   size. See `edit/README.md`.
-- **Assembler and linker.** `PUGASM [-f raw|srec|com|obj] [-o out] [-l[list]] [-s] file`:
+- **Assembler and linker.** `ASM [-f raw|srec|com|obj] [-o out] [-l[list]] [-s] file`:
   lwasm's syntax, directives, macros, structs and code-size choices, with raw, S-record, `.COM`
-  and LWOBJ object output. `PUGLINK [-f raw|srec|com] [-o out] [-m map] [-s script] file.o ...`:
+  and LWOBJ object output. `LINK [-f raw|srec|com] [-o out] [-m map] [-s script] file.o ...`:
   lwlink's link scripts, relocations and maps. On the Pugputer they rebuild the shell, the
-  editor, DOS, BASIC, the BIOS and themselves byte for byte. See `pugasm/README.md`.
+  editor, DOS, BASIC, the BIOS and themselves byte for byte. See `asmlink/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
   `basic309/README.md` for the differences from GW-BASIC.

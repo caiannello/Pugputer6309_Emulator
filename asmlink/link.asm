@@ -1,13 +1,13 @@
 ;------------------------------------------------------------------------------
 ; PROJECT: Pugputer 6309 linker
-;    FILE: puglink.asm
+;    FILE: link.asm
 ;
-; PUGLINK.COM: a linker for the Pugputer, modelled on lwlink (lwtools 4.20). It
-; reads LWOBJ16 object files (from PUGASM or lwasm), places their sections as a
+; LINK.COM: a linker for the Pugputer, modelled on lwlink (lwtools 4.20). It
+; reads LWOBJ16 object files (from ASM or lwasm), places their sections as a
 ; link script says, resolves the references between them, and writes the
 ; program: the same bytes, S-records and map as lwlink.
 ;
-;   PUGLINK [options] file.o ...
+;   LINK [options] file.o ...
 ;     -f FMT, --format=FMT     raw (the default), srec, com (raw with a Pugputer
 ;                              program header: load = the first section's
 ;                              address, entry = the entry point, if any)
@@ -2700,7 +2700,7 @@ M_LENGTH    FCN  ", length "
 M_EQUALS    FCN  ") = "
 M_SYNTH     FCN  "<synthetic>"
 M_COLON     FCN  ": "
-M_USAGE     FCC  "Usage: PUGLINK [-f raw|srec|com] [-o out] [-m map] [-s script]"
+M_USAGE     FCC  "Usage: LINK [-f raw|srec|com] [-o out] [-m map] [-s script]"
             FCB  CR,LF
             FCC  "               [-e entry] [--section-base=S=ADDR] file.o ..."
             FCB  CR,LF,0
@@ -2769,5 +2769,5 @@ VP          SET  VARS
             VAR  RSPBUF,RSPMAX+1
 VARSEND     equ  VP
 ;------------------------------------------------------------------------------
-; End of puglink.asm
+; End of link.asm
 ;------------------------------------------------------------------------------

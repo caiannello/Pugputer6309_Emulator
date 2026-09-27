@@ -1,13 +1,13 @@
 ;------------------------------------------------------------------------------
 ; PROJECT: Pugputer 6309 assembler
-;    FILE: pugasm.asm
+;    FILE: asm.asm
 ;
-; PUGASM.COM: a 6809/6309 assembler for the Pugputer, modelled on lwasm (lwtools
+; ASM.COM: a 6809/6309 assembler for the Pugputer, modelled on lwasm (lwtools
 ; 4.20) and producing the same code for the same source: the same mnemonics
 ; (the table is generated from lwasm's), expression syntax, directives, forward-
 ; reference sizing, listing and symbol table.
 ;
-;   PUGASM [options] file
+;   ASM [options] file
 ;     -f FMT, --format=FMT   raw (the default), srec, com (raw with a Pugputer
 ;                            program header: load = the first address, entry =
 ;                            END's operand or the first address), obj
@@ -372,5 +372,5 @@ VP          SET  VARS
             VAR  RLBUF,RL_TERMS+MAXTERMS*TSZ
 VARSEND     equ  VP
 ;------------------------------------------------------------------------------
-; End of pugasm.asm
+; End of asm.asm
 ;------------------------------------------------------------------------------

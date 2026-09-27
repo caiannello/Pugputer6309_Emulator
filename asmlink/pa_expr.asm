@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_expr.asm -- pugasm: expressions, as lwasm parses them.
+; pa_expr.asm -- ASM: expressions, as lwasm parses them.
 ;
 ; EXPR parses and evaluates the expression at EXP: 32-bit values (C int), the
 ; operators and precedences of lwtools' lw_expr (unary - ~ ^; * / % \; + -;

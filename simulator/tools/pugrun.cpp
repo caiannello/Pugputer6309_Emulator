@@ -1,7 +1,7 @@
 // Runs Pugputer commands from a host script: builds a disk image (DOS, SHELL.COM
 // and the files asked for), boots the emulator through the real chain, types each
 // command at the shell prompt, prints what the console shows, and copies files
-// back out of the disk afterwards. For trying programs quickly (pugasm's tests
+// back out of the disk afterwards. For trying programs quickly (ASM's tests
 // use the same parts through the test harness).
 //
 //   pugrun [--add HOSTFILE[=NAME]]... [--get NAME=HOSTFILE]... [--disk IMG]

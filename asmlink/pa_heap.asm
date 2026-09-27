@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_heap.asm -- pugasm: the heap in banked RAM.
+; pa_heap.asm -- ASM: the heap in banked RAM.
 ;
 ; Symbols, macros, structs and stored expressions are allocated from RAM pages
 ; (B_PAGE_ALLOC) that are mapped one at a time into bank 3, $C000-$EFFF (the

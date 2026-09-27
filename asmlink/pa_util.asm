@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_util.asm -- pugasm: console output, strings, numbers, character classes.
+; pa_util.asm -- ASM: console output, strings, numbers, character classes.
 ;------------------------------------------------------------------------------
 ; X = a NUL-terminated string -> the console. Keeps every register.
 PRINTS      PSHS D,X,Y

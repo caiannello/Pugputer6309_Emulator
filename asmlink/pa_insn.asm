@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_insn.asm -- pugasm: the instructions, one handler for each lwasm operand
+; pa_insn.asm -- ASM: the instructions, one handler for each lwasm operand
 ; class. Each handler parses the operand at EXP, decides the form (sizing from
 ; what is known before this line: SIZE mode), and emits the bytes (values in
 ; VALUE mode). The same code runs in both passes; pass 1 only counts the bytes.

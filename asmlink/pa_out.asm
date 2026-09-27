@@ -1,5 +1,5 @@
 ;------------------------------------------------------------------------------
-; pa_out.asm -- pugasm: the output file (raw, .COM, S-records), the symbol table
+; pa_out.asm -- ASM: the output file (raw, .COM, S-records), the symbol table
 ; at the end of the listing, and the messages.
 ;------------------------------------------------------------------------------
 ; Before each pass.
@@ -126,7 +126,7 @@ SB_ADD      LDB  <SRECLEN
             LDA  #1
             STA  <SRECLAST
             RTS
-; The S0 header: "[pugasm 1.0] " and the source's name.
+; The S0 header: "[asm 1.0] " and the source's name.
 SRECS0      LDA  #1
             STA  <S0DONE
             LDX  #M_SRECHDR
@@ -710,7 +710,7 @@ ERRTAB      FCN  "Bad operand"
             FCN  "Multiply defined symbol"
             FCN  "Phase error (a line assembled differently on pass 2)"
             FCN  "User Specified: "
-            FCN  "Not supported by pugasm"
+            FCN  "Not supported by ASM"
             FCN  "Bad expression"
             FCN  "ORG address must be known when it is reached"
             FCN  "Missing symbol"
@@ -750,7 +750,7 @@ M_ERRORS    FCB  ' '
 M_NOOUTPUT  FCC  "Not doing output due to assembly errors."
             FCB  CR,LF,0
 M_WARNING   FCN  "Warning: "
-M_USAGE     FCC  "Usage: PUGASM [-f raw|srec|com|obj] [-o out] [-l[list]] [-s]"
+M_USAGE     FCC  "Usage: ASM [-f raw|srec|com|obj] [-o out] [-l[list]] [-s]"
             FCB  CR,LF
             FCC  "              [-I dir] [-3|-9] file"
             FCB  CR,LF,0
@@ -765,7 +765,7 @@ M_NOLIST    FCB  CR,LF
             FCC  "Cannot create the listing file"
             FCB  CR,LF,0
 M_SECTOPEN  FCN  " ("
-M_SRECHDR   FCN  "[pugasm 1.0] "
+M_SRECHDR   FCN  "[asm 1.0] "
 M_SYMTAB    FCN  "Symbol Table:"
 M_MANYSYMS  FCC  "(too many symbols to list)"
             FCB  CR,LF,0

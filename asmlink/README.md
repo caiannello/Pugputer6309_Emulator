@@ -14,12 +14,12 @@ LWTOOLS and William Astle's work deserve credit for providing the 6809/6309 tool
 
 The project was developed using AI assistance and is intentionally disclosed as such. The author has not represented the generated implementation as an official LWTOOLS component or as work by William Astle.
 
-# PUGASM and PUGLINK, the Pugputer's assembler and linker
+# ASM and LINK, the Pugputer's assembler and linker
 
-- **`PUGASM.COM`** (`pugasm.asm` and the `pa_*.asm` files it includes) is a 6309/6809
+- **`ASM.COM`** (`asm.asm` and the `pa_*.asm` files it includes) is a 6309/6809
   assembler modelled on **lwasm**. It produces the same bytes, listings and symbol tables, and
   the same LWOBJ object files.
-- **`PUGLINK.COM`** (`puglink.asm`) is a linker modelled on **lwlink**. It produces the same
+- **`LINK.COM`** (`link.asm`) is a linker modelled on **lwlink**. It produces the same
   S-records, raw binaries and maps from the same object files and link script.
 
 Together they build everything in this project on the Pugputer, identical to the lwtools
@@ -27,10 +27,10 @@ build: the shell, the editor, DOS and BASIC, the BIOS from its eight object file
 script, and both tools themselves.
 
 
-## PUGASM
+## ASM
 
 ```
-PUGASM [options] file
+ASM [options] file
   -f FMT, --format=FMT        raw (the default), srec, com, or obj
   -o FILE, --output=FILE      the output (default: the source's name with .BIN, .S19, .COM or .O)
   -l[FILE], --list[=FILE]     a listing (default: the source's name with .LST)
@@ -42,7 +42,7 @@ PUGASM [options] file
 For example, on a disk that holds the shell's source and `defines.d`:
 
 ```
-/> PUGASM -o SHELL.COM -l -s shell.asm
+/> ASM -o SHELL.COM -l -s shell.asm
 ```
 
 ### Output formats
@@ -50,13 +50,13 @@ For example, on a disk that holds the shell's source and `defines.d`:
 - **raw**: the bytes from the first one emitted to the last. Space reserved in between (`RMB`)
   is written as zeros, as lwasm does.
 - **srec**: Motorola S-records (S1 data, and an S9 with `END`'s address). The S0 header
-  names the tool (`[pugasm 1.0] file`), so it is the one record that differs from lwasm's.
+  names the tool (`[asm 1.0] file`), so it is the one record that differs from lwasm's.
 - **com**: a Pugputer program. This is raw output with the 8-byte program header in front:
   "PX", the load address (the first byte's), the entry address (`END`'s operand, or else the
   load address), and flags 0. Type its name at the shell to run it. The project's programs
-  (like `pugasm.asm` itself) write their own header in the source, so for them use raw
+  (like `asm.asm` itself) write their own header in the source, so for them use raw
   output named `.COM`.
-- **obj**: an LWOBJ16 object file for PUGLINK (or lwlink), byte for byte what lwasm writes.
+- **obj**: an LWOBJ16 object file for LINK (or lwlink), byte for byte what lwasm writes.
   See below.
 
 A source with errors produces no output file and no listing, as with lwasm. Each error
@@ -157,10 +157,10 @@ The memory map while it runs: the direct page is at `$3400`, the code at `$3500`
 then its buffers, and the stack below `$C000`. Heap pages are mapped one at a time into bank 3
 (`$C000`-`$EFFF`).
 
-## PUGLINK
+## LINK
 
 ```
-PUGLINK [options] file.o ...
+LINK [options] file.o ...
   -f FMT, --format=FMT        raw (the default), srec, or com
   -o FILE, --output=FILE      the output (default A.OUT)
   -m FILE, --map=FILE         a map: the sections, then every symbol with its address
@@ -179,7 +179,7 @@ BIOS, for instance:
 BIOS.RSP:  -f srec -o PUGBIOS.S19 -m PUGBIOS.MAP -s LINK.SCR
            helpers.o devio.o serio.o sdcard.o time.o loader.o banks.o main.o
 
-/> PUGLINK @bios.rsp
+/> LINK @bios.rsp
 ```
 
 ### Output formats
@@ -191,7 +191,7 @@ BIOS.RSP:  -f srec -o PUGBIOS.S19 -m PUGBIOS.MAP -s LINK.SCR
 - **com**: a Pugputer program. This is the raw output with the 8-byte program header in front:
   the load address is the first section's, and the entry is the script's or `-e`'s, if any
   (otherwise the load address). The sections should follow one another in memory, as a
-  script with one `load` places them. This format is PUGLINK's own; lwlink has no equivalent.
+  script with one `load` places them. This format is LINK's own; lwlink has no equivalent.
 
 ### Link scripts
 
@@ -209,7 +209,7 @@ pad N / stacksize N           (accepted and ignored)
 Sections are placed in the order the script lists them, each from the last `load` address
 onwards (or downwards from a `high` address). A named line places every file's section of that
 name. `section *` places each section not placed yet, with the flags asked for, together with
-all others of its name. Without `-s`, PUGLINK uses lwlink's built-in script for the format:
+all others of its name. Without `-s`, LINK uses lwlink's built-in script for the format:
 `raw` places `init` at 0, then `code`, then everything else; `srec` does the same from `$0400`
 with `entry __start`. `--section-base` lines come before it. A constant section is placed at
 0 as soon as something imports from it, the way lwlink handles it.
@@ -217,7 +217,7 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
 ### Differences from lwlink
 
 - No libraries (`-l`, `-L`, `.a` archives), no `sectopt`, and no DECB, OS-9 or LWEX formats.
-  The `com` format and `@FILE` are PUGLINK's own.
+  The `com` format and `@FILE` are LINK's own.
 - A section is placed once. lwlink places a section again when the script names it twice.
   For example, `--section-base=code=ADDR` with the default script (which also names `code`)
   makes lwlink write the code twice.
@@ -236,14 +236,14 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
   then in its own file's exports, then in every file's in order.
 - **Writing:** the value is patched into the bytes. Then the output is written, and the map
   (sorted with a heap sort in banked RAM, by name and then by file, as lwlink sorts it).
-- **Size:** PUGLINK is about 7KB.
+- **Size:** LINK is about 7KB.
 
 ## The files
 
 | File | What it holds |
 |---|---|
-| `pugasm.asm` | PUGASM: the header, the variables, the main flow (the command line, two passes, the end). |
-| `puglink.asm` | PUGLINK, all of it (with `pa_util`, `pa_heap` and `pa_strm`). |
+| `asm.asm` | ASM: the header, the variables, the main flow (the command line, two passes, the end). |
+| `link.asm` | LINK, all of it (with `pa_util`, `pa_heap` and `pa_strm`). |
 | `pa_util.asm` | Console output, strings, character classes, 32-bit multiply and divide. (Both.) |
 | `pa_heap.asm` | The banked-RAM heap (far pointers: a page number and an address). (Both.) |
 | `pa_strm.asm` | Buffered output files. (Both.) |
@@ -259,21 +259,21 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
 
 ## Building and testing
 
-`compile.bat` assembles both with lwasm (`pugasm.bin`, `puglink.bin` and their listings).
+`compile.bat` assembles both with lwasm (`asm.bin`, `link.bin` and their listings).
 `build_all.bat` and `reinit_disk.bat` do this too, and put them on the disk image as
-`PUGASM.COM` and `PUGLINK.COM`.
+`ASM.COM` and `LINK.COM`.
 
-`simulator/tests/test_pugasm.cpp` runs them on the emulated machine and checks the following,
+`simulator/tests/test_asmlink.cpp` runs them on the emulated machine and checks the following,
 comparing byte for byte (and listing line for listing line) with the lwtools build:
 
-- PUGASM assembles the shell, the editor, DOS (raw), BASIC (S-records) and the BIOS's eight
+- ASM assembles the shell, the editor, DOS (raw), BASIC (S-records) and the BIOS's eight
   modules (object files).
-- PUGLINK links the BIOS's objects to `pugbios.s19` and `pugbios.map`.
+- LINK links the BIOS's objects to `pugbios.s19` and `pugbios.map`.
 - The whole BIOS builds on the Pugputer, from source.
-- PUGASM makes a copy of itself (and that copy makes another), and a copy of PUGLINK that
+- ASM makes a copy of itself (and that copy makes another), and a copy of LINK that
   links the BIOS.
 - What they make runs, and errors are reported and leave no files.
-- With lwtools available, the sources in `simulator/tests/test_asm/pugasm` must match lwasm
+- With lwtools available, the sources in `simulator/tests/test_asm/asmlink` must match lwasm
   and lwlink too:
   - every operation in every operand form, for each CPU (generated by `gen_allops.py`);
   - a file of directives, macros and expressions;
