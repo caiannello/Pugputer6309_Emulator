@@ -1,7 +1,21 @@
-# PUGASM and PUGLINK, the Pugputer's assembler and linker
+# Please don't be mad.
 
-This folder holds two programs that run on the Pugputer itself. Each is a counterpart of a tool
-from William Astle's lwtools 4.20, and each produces the same files for the same input.
+This folder holds two programs that run on the Pugputer itself. This project was developed with substantial assistance from Claude (Anthropic).
+
+The assembler and linker are native 6309 assembly-language programs designed specifically for this computer. The primary goal was self-hosting: once the initial system is built using a modern development machine, the 6309 should be capable of rebuilding its own assembler, linker, operating system, and applications without requiring a PC.
+
+LWTOOLS is used to bootstrap the system from the host. I have used LWTOOLS extensively for my other 6809/6309 projects, so I deliberately chose its assembler syntax and object-file conventions for compatibility.
+
+During development, compatibility with LWTOOLS object files was also chosen so that, where practical, objects produced by the 6309-hosted assembler can be processed by LWTOOLS tools on a modern computer, and vice versa.
+
+The native assembler and linker are independent implementations written in 6309 assembly language; they are not ports of the LWTOOLS C source code.
+
+LWTOOLS and William Astle's work deserve credit for providing the 6809/6309 toolchain and conventions on which this compatibility is based. Please see the LWTOOLS project and its documentation for the original implementation and licensing information.
+
+The project was developed using AI assistance and is intentionally disclosed as such. The author has not represented the generated implementation as an official LWTOOLS component or as work by William Astle.
+
+
+# PUGASM and PUGLINK, the Pugputer's assembler and linker
 
 - **`PUGASM.COM`** (`pugasm.asm` and the `pa_*.asm` files it includes) is a 6309/6809
   assembler modelled on **lwasm**. It produces the same bytes, listings and symbol tables, and
@@ -12,6 +26,7 @@ from William Astle's lwtools 4.20, and each produces the same files for the same
 Together they build everything in this project on the Pugputer, identical to the lwtools
 build: the shell, the editor, DOS and BASIC, the BIOS from its eight object files and link
 script, and both tools themselves.
+
 
 ## PUGASM
 
