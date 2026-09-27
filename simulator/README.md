@@ -420,7 +420,7 @@ dos/dos.asm (a real BIOS client, talks to BIOS purely via SWI2 block calls)
 `$FFFE` reset vector with no hand-wired PC hijack anywhere -- nothing in
 the test tells the emulator where `SHELL.COM` or `BASIC.COM` is; the disk/DOS chain
 finds them. `tools/mkdiskimg.cpp` builds `basic309/disk.img` (`dos/dos.bin`
-+ `SHELL.COM` + `EDIT.COM` + `ASM.COM` + `LINK.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
++ `SHELL.COM` + `EDIT.COM` + `ASM.COM` + `LINK.COM` + `HEXDUMP.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
 with a program header, the same bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_demo.cpp`
 is the interactive equivalent of `basic309_demo` for this path
 (`--com`/`--bios`/`--disk` flags). In console mode it makes the console an ANSI terminal both
@@ -516,6 +516,9 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   - With lwtools present, they must also match lwasm and lwlink on `test_asm/asmlink`: every
     operation in every operand form (6309 and 6809); directives, macros and expressions; object
     files; and links with the default scripts and others.
+- `test_utils.cpp` -- the utilities in `../utils/` run from the shell: HEXDUMP's layout
+  (offsets, the two halves, a short last line, dots for what isn't printable), offsets past
+  64KB, and its errors.
 - `test_edit.cpp` -- EDIT.COM (`../edit/`), driven with keystrokes through the whole boot chain.
   A small VT100 model interprets its output, so the tests check the screen (title bar, text rows,
   status and shortcut lines, inverse video) as well as the files it writes: editing and writing

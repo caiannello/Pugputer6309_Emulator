@@ -1,9 +1,9 @@
 // Builds basic309/disk.img: a fresh FAT16 disk image (see
 // pugputer/fat16_image.hpp) containing dos/dos.bin in its reserved
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
-// EDIT.COM, ASM.COM and LINK.COM (shell/shell.bin, edit/edit.bin,
-// asmlink/asm.bin and asmlink/link.bin as assembled -- they carry their own
-// program headers) and BASIC.COM (the $C000-$EFFF window of basic309's S-record,
+// EDIT.COM, ASM.COM, LINK.COM and HEXDUMP.COM (shell/shell.bin, edit/edit.bin,
+// asmlink/asm.bin, asmlink/link.bin and utils/hexdump.bin as assembled -- they
+// carry their own program headers) and BASIC.COM (the $C000-$EFFF window of basic309's S-record,
 // given a program header: load $C000, entry $C000 -- see EXE_* in bios/defines.d).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
@@ -12,6 +12,7 @@
 //   mkdiskimg --dos path/to/dos.bin --basic path/to/exbasrom309.s19
 //             --shell path/to/shell.bin --edit path/to/edit.bin
 //             --asm path/to/asm.bin --link path/to/link.bin
+//             --hexdump path/to/hexdump.bin
 //             --out path/to/disk.img
 //             [--add-dir path/to/folder]
 //
@@ -61,24 +62,33 @@ int main(int argc, char** argv) {
     std::string dos_path = DOS_BIN_DEFAULT;
     std::string basic_path = EXBASROM309_S19_DEFAULT;
     std::string shell_path = SHELL_BIN_DEFAULT;
-    std::string edit_path = EDIT_BIN_DEFAULT;
-    std::string asm_path = ASM_BIN_DEFAULT;
-    std::string link_path = LINK_BIN_DEFAULT;
     std::string out_path = DISK_IMG_DEFAULT;
     std::string add_dir;
+    // The other programs in /CMD, each assembled with its own header: the option that
+    // names another file for it, the file, and its name on the disk.
+    struct Program {
+        const char* option;
+        std::string path;
+        const char* name;
+    };
+    std::vector<Program> programs = {{"--edit", EDIT_BIN_DEFAULT, "EDIT.COM"},
+                                     {"--asm", ASM_BIN_DEFAULT, "ASM.COM"},
+                                     {"--link", LINK_BIN_DEFAULT, "LINK.COM"},
+                                     {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"}};
     for (int i = 1; i < argc; ++i) {
+        bool program = false;
+        for (auto& p : programs)
+            if (std::strcmp(argv[i], p.option) == 0 && i + 1 < argc) {
+                p.path = argv[++i];
+                program = true;
+            }
+        if (program) continue;
         if (std::strcmp(argv[i], "--dos") == 0 && i + 1 < argc) {
             dos_path = argv[++i];
         } else if (std::strcmp(argv[i], "--basic") == 0 && i + 1 < argc) {
             basic_path = argv[++i];
         } else if (std::strcmp(argv[i], "--shell") == 0 && i + 1 < argc) {
             shell_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--edit") == 0 && i + 1 < argc) {
-            edit_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--asm") == 0 && i + 1 < argc) {
-            asm_path = argv[++i];
-        } else if (std::strcmp(argv[i], "--link") == 0 && i + 1 < argc) {
-            link_path = argv[++i];
         } else if (std::strcmp(argv[i], "--add-dir") == 0 && i + 1 < argc) {
             add_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
@@ -94,21 +104,6 @@ int main(int argc, char** argv) {
     shell_com.name = "CMD/SHELL.COM";
     if (!read_file(shell_path, shell_com.data)) return 1;
     std::printf("Loaded %s (%zu bytes) as /CMD/SHELL.COM\n", shell_path.c_str(), shell_com.data.size());
-
-    Fat16File edit_com;
-    edit_com.name = "CMD/EDIT.COM";
-    if (!read_file(edit_path, edit_com.data)) return 1;
-    std::printf("Loaded %s (%zu bytes) as /CMD/EDIT.COM\n", edit_path.c_str(), edit_com.data.size());
-
-    Fat16File asm_com;
-    asm_com.name = "CMD/ASM.COM";
-    if (!read_file(asm_path, asm_com.data)) return 1;
-    std::printf("Loaded %s (%zu bytes) as /CMD/ASM.COM\n", asm_path.c_str(), asm_com.data.size());
-
-    Fat16File link_com;
-    link_com.name = "CMD/LINK.COM";
-    if (!read_file(link_path, link_com.data)) return 1;
-    std::printf("Loaded %s (%zu bytes) as /CMD/LINK.COM\n", link_path.c_str(), link_com.data.size());
 
     std::vector<uint8_t> basic_image(65536, 0);
     SrecLoadResult basic_load = load_srec_file(basic_path, basic_image.data(), basic_image.size());
@@ -132,7 +127,14 @@ int main(int argc, char** argv) {
     std::printf("Loaded %s ($%04X-$%04X) as /CMD/BASIC.COM (%zu bytes with its header)\n", basic_path.c_str(),
                 basic_load.min_addr, basic_load.max_addr, basic_com.data.size());
 
-    std::vector<Fat16File> files = {shell_com, basic_com, edit_com, asm_com, link_com};
+    std::vector<Fat16File> files = {shell_com, basic_com};
+    for (const auto& p : programs) {
+        Fat16File f;
+        f.name = std::string("CMD/") + p.name;
+        if (!read_file(p.path, f.data)) return 1;
+        std::printf("Loaded %s (%zu bytes) as /CMD/%s\n", p.path.c_str(), f.data.size(), p.name);
+        files.push_back(std::move(f));
+    }
     if (!add_dir.empty()) {
         // Everything under the folder, in a stable order; a file's path relative to
         // the folder (with "/" separators) is its path on the disk.

@@ -20,8 +20,8 @@ JOBS=$(nproc 2>/dev/null || echo 4)
 
 . "$ROOT/lwtools_env.sh"
 
-echo "=== Assembling the BIOS, DOS, shell, editor, assembler and BASIC ==="
-for D in bios dos shell edit asmlink; do
+echo "=== Assembling the BIOS, DOS, shell, editor, assembler, utilities and BASIC ==="
+for D in bios dos shell edit asmlink utils; do
     "$ROOT/$D/compile.sh"
 done
 "$ROOT/basic309/build_basic.sh"

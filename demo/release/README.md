@@ -76,7 +76,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -104,6 +104,10 @@ GREET Ada
 
 `EDIT GREET.ASM` shows how it works; `ASM` alone lists the options (`-l` makes a listing).
 **`LINK`** links object files (`ASM -f obj`) into a program, as lwlink does.
+
+## Other commands
+
+**`HEXDUMP file`** shows a file as hex and ASCII, 16 bytes a line (Ctrl-C stops it).
 
 ## Good to know
 
