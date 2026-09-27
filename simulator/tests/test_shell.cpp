@@ -115,7 +115,7 @@ TEST(shell_info_commands) {
     CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.2\r\n");
     CHECK(cmd(s, "MEM") == "RAM: 1024 KB installed, 960 KB free for programs\r\n");
     std::string help = cmd(s, "help");
-    CHECK(has(help, "DIR [path]") && has(help, "COPY from to") && has(help, "name [args]"));
+    CHECK(has(help, "DIR [path]") && has(help, "COPY from [to]") && has(help, "name [args]"));
     CHECK(cmd(s, "frobnicate") == "Bad command or file name\r\n");
     CHECK(cmd(s, "x/y/z") == "Bad command or file name\r\n");
     CHECK(cmd(s, "averyveryverylongcommandwordthatgoesonandonandonforever") == "Bad command or file name\r\n");
@@ -161,7 +161,8 @@ TEST(shell_file_commands_copy_type_rename_delete) {
     CHECK(cmd(s, "del moved.txt") == "");
     CHECK(cmd(s, "erase moved.txt") == "File not found\r\n");
     CHECK(cmd(s, "copy nope.txt x.txt") == "File not found\r\n");
-    CHECK(cmd(s, "copy hello.txt") == "Missing argument\r\n");
+    CHECK(cmd(s, "copy") == "Missing argument\r\n");
+    CHECK(cmd(s, "copy hello.txt") == "File cannot be copied onto itself\r\n");
     CHECK(cmd(s, "ren hello.txt") == "Missing argument\r\n");
     CHECK(cmd(s, "type") == "Missing argument\r\n");
     CHECK(cmd(s, "del") == "Missing argument\r\n");
@@ -181,6 +182,19 @@ TEST(shell_file_commands_copy_type_rename_delete) {
     CHECK(cmd(s, "cd hello.txt") == "Not a directory\r\n");
     CHECK(cmd(s, "del ../../bad name") != "");
 
+    // COPY's destination: a directory takes the source's name; none means here.
+    CHECK(cmd(s, "md d2") == "");
+    CHECK(cmd(s, "copy hello.txt d2") == "        1 file copied\r\n");  // d2/HELLO.TXT
+    CHECK(cmd(s, "copy big.com d2/") == "        1 file copied\r\n");  // d2/BIG.COM
+    CHECK(cmd(s, "md d2/sub") == "");
+    CHECK(cmd(s, "cd d2/sub") == "");
+    CHECK(cmd(s, "copy ../hello.txt") == "        1 file copied\r\n"); // d2/sub/HELLO.TXT
+    CHECK(cmd(s, "copy /hello.txt ..") == "        1 file copied\r\n"); // d2/HELLO.TXT again
+    CHECK(cmd(s, "copy ../../hello.txt /") == "File cannot be copied onto itself\r\n");
+    CHECK(cmd(s, "copy hello.txt .") == "File cannot be copied onto itself\r\n");
+    CHECK(cmd(s, "copy hello.txt nodir/") == "File not found\r\n");
+    CHECK(cmd(s, "cd /") == "");
+
     // What's on the disk.
     Fat16Volume v;
     CHECK(v.load(img.c_str()));
@@ -188,6 +202,9 @@ TEST(shell_file_commands_copy_type_rename_delete) {
     CHECK(v.find("/HELLO.TXT", e) && v.read(e) == Bytes({'H', 'e', 'l', 'l', 'o', '\r', '\n', 'w', 'o', 'r', 'l', 'd', '\r', '\n'}));
     CHECK(v.find("/BIG.COM", e) && v.find("/BASIC.COM", e2) && v.read(e) == v.read(e2));
     CHECK(!v.find("/MOVED.TXT", e) && !v.find("/D1", e));
+    CHECK(v.find("/D2/HELLO.TXT", e2) && v.find("/HELLO.TXT", e) && v.read(e2) == v.read(e));
+    CHECK(v.find("/D2/SUB/HELLO.TXT", e2) && v.read(e2) == v.read(e));
+    CHECK(v.find("/D2/BIG.COM", e2) && v.find("/BIG.COM", e) && v.read(e2) == v.read(e));
     CHECK(v.fats_match());
 }
 

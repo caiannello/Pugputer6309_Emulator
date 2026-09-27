@@ -9,7 +9,7 @@
 ;
 ; A line is a command word followed by arguments. Built-in commands:
 ;   DIR [path]      CD [path]       MD|MKDIR path    RD|RMDIR path
-;   DEL|ERASE path  REN old new     TYPE file        COPY from to
+;   DEL|ERASE path  REN old new     TYPE file        COPY from [to]
 ;   VER             MEM             PATH [dir;...]   HELP
 ; Anything else is a program: NAME runs NAME.COM (or NAME as typed, if it has an
 ; extension) from the current directory, else from the first directory of the
@@ -537,8 +537,77 @@ TY_END      LDB  FH1
             JMP  NEWLINE
 TY_DONE     RTS
 ;------------------------------------------------------------------------------
-CMD_COPY    JSR  SPLIT2
-            LBCS NOARG
+; The destination of COPY from [to] (ARGP = from, DSTP = to or 0), made into a file's
+; path in DSTP: with no "to", the source's own name in the current directory; if "to"
+; is a directory (one that exists, or a path ending in "/"), the source's name in it;
+; otherwise "to" itself. Carry set + A = ERR_BADPATH if it would be too long.
+DSTNAME     LDX  ARGP                  ; SRCNM = the source's last component
+            STX  SRCNM
+DN_SCAN     LDA  ,X+
+            BEQ  DN_DST
+            CMPA #'/'
+            BNE  DN_SCAN
+            STX  SRCNM
+            BRA  DN_SCAN
+DN_DST      LDX  DSTP
+            BNE  DN_GIVEN
+            LDX  SRCNM                 ; none: the source's name, here
+            STX  DSTP
+            ANDCC #$FE
+            RTS
+DN_GIVEN    LDA  ,X+                   ; ends in "/"?
+            BNE  DN_GIVEN
+            LDA  -2,X
+            CMPA #'/'
+            BEQ  DN_INDIR
+            LDX  DSTP                  ; a directory that exists?
+            LDA  #B_OPENDIR
+            SWI2
+            BCS  DN_FILE
+            TFR  A,B
+            LDA  #B_CLOSEDIR
+            SWI2
+            LDA  #'/'                  ; "to/name"
+            BRA  DN_BUILD
+DN_INDIR    CLRA                       ; "to/" + "name"
+DN_BUILD    LDY  #PATHBUF2
+            LDX  DSTP
+            LDB  #127                  ; room left in PATHBUF2, less its NUL
+DN_CPDST    TST  ,X
+            BEQ  DN_SEP
+            DECB
+            BEQ  DN_LONG
+            LDE  ,X+
+            STE  ,Y+
+            BRA  DN_CPDST
+DN_SEP      TSTA
+            BEQ  DN_NAME
+            DECB
+            BEQ  DN_LONG
+            STA  ,Y+
+DN_NAME     LDX  SRCNM
+DN_CPNAME   LDA  ,X+
+            STA  ,Y+
+            BEQ  DN_BUILT
+            DECB
+            BNE  DN_CPNAME
+DN_LONG     LDA  #ERR_BADPATH
+            ORCC #1
+            RTS
+DN_BUILT    LDX  #PATHBUF2
+            STX  DSTP
+DN_FILE     ANDCC #$FE
+            RTS
+;------------------------------------------------------------------------------
+CMD_COPY    LDX  ARGP
+            LDA  ,X
+            LBEQ NOARG
+            JSR  SPLIT2                ; "to" is optional
+            BCC  CP_NAMES
+            CLR  DSTP
+            CLR  DSTP+1
+CP_NAMES    JSR  DSTNAME
+            LBCS ERR_OUT
             LDX  ARGP
             LDE  #FOPEN_READ
             LDA  #B_FOPEN_NAME
@@ -589,7 +658,11 @@ CP_OPENFAIL STA  ERRSAVE               ; the destination wouldn't open: close th
             LDA  #B_FCLOSE_NAME
             SWI2
             LDA  ERRSAVE
-            JMP  PRINT_ERR
+            CMPA #ERR_ISOPEN           ; (open already: it is the source itself)
+            LBNE PRINT_ERR
+            LDX  #MSG_SELF
+            JSR  PUTS
+            JMP  NEWLINE
 CP_CLOSE1   STA  ERRSAVE               ; the destination failed to close (disk full ...)
             LDB  FH1
             LDA  #B_FCLOSE_NAME
@@ -756,6 +829,8 @@ MSG_DIRTAG  FCC  "<DIR>"
             FCB  0
 MSG_COPIED  FCC  "        1 file copied"
             FCB  CR,LF,0
+MSG_SELF    FCC  "File cannot be copied onto itself"
+            FCB  0
 MSG_VER     FCC  "Pugputer 6309 DOS "
             FCB  0
 MSG_RAM     FCC  "RAM: "
@@ -806,7 +881,7 @@ MSG_HELP    FCC  "DIR [path]        list a directory"
             FCB  CR,LF
             FCC  "TYPE file         show a file"
             FCB  CR,LF
-            FCC  "COPY from to      copy a file"
+            FCC  "COPY from [to]    copy a file (to: a file or directory)"
             FCB  CR,LF
             FCC  "VER  MEM          version, memory"
             FCB  CR,LF
@@ -846,7 +921,8 @@ PDSTART     equ  VAR0+22
 PDDIG       equ  VAR0+23
 SRCHP       equ  VAR0+24               ; 2: where the search path scan is
 LASTC       equ  VAR0+26               ; TYPE: the last byte sent
-SHELL_END   equ  VAR0+27
+SRCNM       equ  VAR0+27               ; 2: COPY: the source's last component
+SHELL_END   equ  VAR0+29
 ;------------------------------------------------------------------------------
 ; End of shell.asm
 ;------------------------------------------------------------------------------

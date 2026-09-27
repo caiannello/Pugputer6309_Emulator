@@ -13,7 +13,7 @@ time a program ends. It is an ordinary program: it uses only BIOS `SWI2` calls.
 | `DEL path` / `ERASE` | delete a file |
 | `REN old new` | rename (the new name is a single name, in the same directory) |
 | `TYPE file` | show a file (lines may end in LF or CR LF) |
-| `COPY from to` | copy a file (overwrites) |
+| `COPY from [to]` | copy a file (overwrites). With no `to`, into the current directory under its own name; if `to` is a directory (or ends in `/`), into it under its own name |
 | `VER`, `MEM`, `HELP` | DOS version, installed / free RAM pages, the list above |
 | `PATH [dir;dir;...]` | show / set the program search path; `PATH ;` empties it |
 | `name [args]` | run the program `name.COM` (or `name` as typed if it has an extension) |
