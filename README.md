@@ -25,7 +25,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `dos/` | The resident DOS: a FAT16 file system (8.3 names, subdirectories, 32-bit file sizes and block numbers, a FAT cache, crash-safe write ordering) and the program loader. |
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
 | `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano. |
-| `pugasm/` | `PUGASM.COM` and `PUGLINK.COM`, an assembler and a linker that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- together they build this whole project, the BIOS and themselves included. |
+| `pugasm/` | `PUGASM.COM` and `PUGLINK.COM`, an assembler and a linker that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- together they build this whole project, the BIOS and themselves included. NOTE: I asked Claude for syntax compatibility with [LWTOOLS](https://www.lwtools.ca/) for a good reason: I wanted everything to be self-hosting after it is built, allowing the user to modify the tools on the Pugputer, using those same tools, without needing to use a modern PC running LWTOOLS.|
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release. |
