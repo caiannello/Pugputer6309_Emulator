@@ -12,7 +12,7 @@ time a program ends. It is an ordinary program: it uses only BIOS `SWI2` calls.
 | `MD path` / `MKDIR`, `RD path` / `RMDIR` | make / remove a directory |
 | `DEL path` / `ERASE` | delete a file |
 | `REN old new` | rename (the new name is a single name, in the same directory) |
-| `TYPE file` | show a file |
+| `TYPE file` | show a file (lines may end in LF or CR LF) |
 | `COPY from to` | copy a file (overwrites) |
 | `VER`, `MEM`, `HELP` | DOS version, installed / free RAM pages, the list above |
 | `PATH [dir;dir;...]` | show / set the program search path; `PATH ;` empties it |

@@ -143,16 +143,20 @@ TEST(shell_dir_lists_names_sizes_and_directories) {
 }
 
 TEST(shell_file_commands_copy_type_rename_delete) {
-    std::string img = image("shell4.img", {text("HELLO.TXT", "Hello\r\nworld\r\n")});
+    std::string img = image("shell4.img", {text("HELLO.TXT", "Hello\r\nworld\r\n"), text("UNIX.TXT", "one\ntwo\n\nend"),
+                                           text("EMPTY.TXT", "")});
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
-    CHECK(cmd(s, "type hello.txt") == "Hello\r\nworld\r\n\r\n"); // (TYPE adds a final newline)
+    CHECK(cmd(s, "type hello.txt") == "Hello\r\nworld\r\n");
+    // Bare LF line endings get their CR; a last line with no ending gets one.
+    CHECK(cmd(s, "type unix.txt") == "one\r\ntwo\r\n\r\nend\r\n");
+    CHECK(cmd(s, "type empty.txt") == "");
     CHECK(cmd(s, "copy hello.txt copy.txt") == "        1 file copied\r\n");
-    CHECK(cmd(s, "type copy.txt") == "Hello\r\nworld\r\n\r\n");
+    CHECK(cmd(s, "type copy.txt") == "Hello\r\nworld\r\n");
     CHECK(cmd(s, "copy hello.txt copy.txt") == "        1 file copied\r\n"); // overwrites
     CHECK(cmd(s, "ren copy.txt moved.txt") == "");
     CHECK(cmd(s, "type copy.txt") == "File not found\r\n");
-    CHECK(cmd(s, "type moved.txt") == "Hello\r\nworld\r\n\r\n");
+    CHECK(cmd(s, "type moved.txt") == "Hello\r\nworld\r\n");
     CHECK(cmd(s, "ren moved.txt hello.txt") == "Already exists\r\n");
     CHECK(cmd(s, "del moved.txt") == "");
     CHECK(cmd(s, "erase moved.txt") == "File not found\r\n");

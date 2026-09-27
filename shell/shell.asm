@@ -483,6 +483,10 @@ CMD_REN     JSR  SPLIT2
             LBCS ERR_OUT
             RTS
 ;------------------------------------------------------------------------------
+; TYPE: a file's lines may end in LF (Unix, as the sources on the disk do) or CR LF;
+; the console needs CR LF, so a CR goes out before every LF that doesn't follow one.
+; The file is read 128 bytes at a time into IOBUF and expanded into IOBUF+256. A
+; final line with no line ending gets one.
 CMD_TYPE    LDX  ARGP
             LDA  ,X
             LBEQ NOARG
@@ -491,6 +495,8 @@ CMD_TYPE    LDX  ARGP
             SWI2
             LBCS ERR_OUT
             STA  FH1
+            LDA  #LF                   ; (as if after a line end: an empty file adds none)
+            STA  LASTC
 TY_LOOP     LDB  FH1
             LDX  #IOBUF
             LDY  #128
@@ -499,8 +505,25 @@ TY_LOOP     LDB  FH1
             BCS  TY_END
             CMPX #0
             BEQ  TY_END
-            TFR  X,Y
+            TFR  X,W                   ; W = bytes read
             LDX  #IOBUF
+            LDY  #IOBUF+256
+TY_BYTE     LDA  ,X+
+            CMPA #LF
+            BNE  TY_PUT
+            LDB  LASTC
+            CMPB #CR
+            BEQ  TY_PUT
+            LDB  #CR                   ; a bare LF: CR first
+            STB  ,Y+
+TY_PUT      STA  ,Y+
+            STA  LASTC
+            DECW
+            BNE  TY_BYTE
+            TFR  Y,D
+            SUBD #IOBUF+256
+            TFR  D,Y
+            LDX  #IOBUF+256
             LDB  #F_STDOUT
             LDA  #B_PUT
             SWI2
@@ -508,7 +531,11 @@ TY_LOOP     LDB  FH1
 TY_END      LDB  FH1
             LDA  #B_FCLOSE_NAME
             SWI2
+            LDA  LASTC
+            CMPA #LF
+            BEQ  TY_DONE
             JMP  NEWLINE
+TY_DONE     RTS
 ;------------------------------------------------------------------------------
 CMD_COPY    JSR  SPLIT2
             LBCS NOARG
@@ -818,7 +845,8 @@ PDVAL       equ  VAR0+18               ; 4
 PDSTART     equ  VAR0+22
 PDDIG       equ  VAR0+23
 SRCHP       equ  VAR0+24               ; 2: where the search path scan is
-SHELL_END   equ  VAR0+26
+LASTC       equ  VAR0+26               ; TYPE: the last byte sent
+SHELL_END   equ  VAR0+27
 ;------------------------------------------------------------------------------
 ; End of shell.asm
 ;------------------------------------------------------------------------------
