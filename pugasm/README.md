@@ -10,10 +10,9 @@ During development, compatibility with LWTOOLS object files was also chosen so t
 
 The native assembler and linker are independent implementations written in 6309 assembly language; they are not ports of the LWTOOLS C source code.
 
-LWTOOLS and William Astle's work deserve credit for providing the 6809/6309 toolchain and conventions on which this compatibility is based. Please see the LWTOOLS project and its documentation for the original implementation and licensing information.
+LWTOOLS and William Astle's work deserve credit for providing the 6809/6309 toolchain and conventions on which this compatibility is based. [Please see the LWTOOLS project and its documentation for the original implementation and licensing information.](https://www.lwtools.ca/)
 
 The project was developed using AI assistance and is intentionally disclosed as such. The author has not represented the generated implementation as an official LWTOOLS component or as work by William Astle.
-
 
 # PUGASM and PUGLINK, the Pugputer's assembler and linker
 
