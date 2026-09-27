@@ -24,7 +24,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `bios/` | The 4KB boot ROM: reset, an interrupt-driven UART driver, an SD block driver, RAM-bank management, and the `SWI2` system-call interface everything else uses. |
 | `dos/` | The resident DOS: a FAT16 file system (8.3 names, subdirectories, 32-bit file sizes and block numbers, a FAT cache, crash-safe write ordering) and the program loader. |
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
-| `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano. |
+| `edit/` | `EDIT.COM`, a full-screen text editor for an ANSI terminal, modelled on GNU nano, except stripped-down and implemented in 6309 assembly language. The executable file size is currently under 8KB. |
 | `pugasm/` | `PUGASM.COM` and `PUGLINK.COM`, an assembler and a linker (implemented in 6309 assembly language) that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an important reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC running William Astle's LWTOOLS.|
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
