@@ -491,8 +491,9 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
 - `test_bios_banks.cpp` -- the BIOS bank service through real SWI2 calls: page info after boot,
   allocator order/exhaustion/double-free, bank get/set against the hardware registers and their
   refusals (bank 0, uninstalled pages, the stack's bank), RAM-size probing (4 to 256 pages),
-  page copy (unaligned, whole page, callers' remapped banks, stack in any bank, interrupt mask
-  kept, bad ranges rejected), and the BIOS/DOS memory layout check.
+  page copy (unaligned, whole page, callers' remapped banks, stack in any bank -- the top 4KB of
+  a page too, which bank 3 can't show -- interrupt mask kept, bad ranges rejected), and the
+  BIOS/DOS memory layout check.
 - `test_bios_audit.cpp` -- BIOS robustness (see `../bios/README.md`): SD retries, no card, a
   card stuck BUSY, block buffers reaching the ROM, UART error flags, the S-record loader fed
   malformed and dangerous records, corrupt boot sectors and a card dying mid-load, crashing

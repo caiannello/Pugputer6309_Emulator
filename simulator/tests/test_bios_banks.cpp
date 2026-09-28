@@ -281,6 +281,19 @@ TEST(bios_banks_page_copy_works_with_the_stack_in_any_bank) {
         CHECK(ok);
         CHECK(d.bus.phys_ram()[21 * kPage + 0x1F] == pat(0x00, 0x1F) && d.bus.phys_ram()[21 * kPage + 0x20 + 700] == pat(0x00, 0x20 + 700)); // just outside the range: untouched
         CHECK(identity_banks(d));
+        // The top 4KB of a page too, on both sides (bank 3 can't show it: the ROM is there).
+        fill_page(d, 22, 0x41);
+        fill_page(d, 23, 0x00);
+        CHECK(page_copy(d, 22, 23, 0x2E00, 0x2F00, 0x1100).ok());
+        bool top = true;
+        for (size_t i = 0; i < 0x1100; ++i) top = top && d.bus.phys_ram()[23 * kPage + 0x2F00 + i] == pat(0x41, 0x2E00 + i);
+        CHECK(top);
+        CHECK(d.bus.phys_ram()[23 * kPage + 0x2EFF] == pat(0x00, 0x2EFF));
+        CHECK(page_copy(d, 23, 22, 0, 0, 0x4000).ok()); // and a whole page
+        bool whole = true;
+        for (size_t i = 0; i < kPage; ++i) whole = whole && d.bus.phys_ram()[22 * kPage + i] == d.bus.phys_ram()[23 * kPage + i];
+        CHECK(whole);
+        CHECK(identity_banks(d));
     }
 }
 

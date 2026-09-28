@@ -45,6 +45,7 @@ BC_OK       EXTERN
 BC_ERR      EXTERN
 SBANK_1     EXTERN          ; main.asm: SBANK_1..SBANK_3 are consecutive bytes
 ;------------------------------------------------------------------------------
+PC_CHUNKMAX equ  128         ; B_PAGE_COPY's chunk (PC_BOUNCE)
     SECT bss
 PAGEMAP     RMB  32         ; one bit per page: 1 = used / not installed
 NPAGES      RMB  2          ; installed RAM pages (4..256)
@@ -53,9 +54,9 @@ PC_LEN      RMB  2          ; B_PAGE_COPY: bytes left to copy
 PC_CHUNK    RMB  2          ; bytes in the current chunk
 PC_SPAGE    RMB  1          ; source / destination page
 PC_DPAGE    RMB  1
-PC_SB       RMB  1          ; the banks used for the temporary mapping
-PC_DB       RMB  1
+PC_TB       RMB  1          ; the bank used for the temporary mapping
 PC_KEEPI    RMB  1          ; nonzero: the caller had interrupts masked, so leave them so
+PC_BOUNCE   RMB  PC_CHUNKMAX ; each chunk goes source -> here -> destination
     ENDSECT
 ;------------------------------------------------------------------------------
     SECT code
@@ -257,16 +258,15 @@ BIOS_PAGE_INFO
             STD  SWI2_Y,S
             JMP  BC_OK
 ;------------------------------------------------------------------------------
-; B_PAGE_COPY. The two pages are mapped into two of banks 1..3 for a chunk at a
-; time and copied with TFM, with interrupts masked while the mapping differs from
-; the caller's -- and never in the bank the stack is in, since an interrupt that
-; cannot be masked (the NMI tick) would push its frame onto whatever page is
-; there. The stack bank is skipped by choosing the pair from PC_BANKS.
+; B_PAGE_COPY. A chunk at a time, the source page is mapped into a bank and the
+; chunk copied (TFM) into PC_BOUNCE, in the BIOS's RAM; then the destination page
+; is mapped into the same bank and the chunk copied on from PC_BOUNCE. Interrupts
+; are masked while the mapping differs from the caller's. The bank is 1, or 2 if
+; the stack is in bank 1: never the stack's bank, since an interrupt that cannot
+; be masked (the NMI tick) would push its frame onto whatever page is there, and
+; never bank 3, whose top 4KB is hidden by the ROM and I/O (page offsets $3000-
+; $3FFF can't be reached through it).
 ;------------------------------------------------------------------------------
-PC_BANKS    FCB  1,2              ; stack in bank 0 (page 0): use banks 1 and 2
-            FCB  2,3              ;       bank 1
-            FCB  1,3              ;       bank 2
-            FCB  1,2              ;       bank 3
 BIOS_PAGE_COPY
             LDX  SWI2_X,S
             LDY  SWI2_Y,S
@@ -304,60 +304,47 @@ PC_ABS      CMPD >PC_LEN
 PC_NOOVERLAP
             LDD  >PC_LEN
             LBEQ BC_OK            ; nothing to copy
-            TFR  S,D              ; pick the temporary banks (not the stack's)
+            TFR  S,D              ; the temporary bank: 1, or 2 if the stack is in bank 1
+            LDB  #1
             ANDA #$C0
-            LSRA
-            LSRA
-            LSRA
-            LSRA
-            LSRA                  ; = stack bank * 2 (bit 0 is junk: masked next)
-            ANDA #$06
-            PSHS X
-            LDX  #PC_BANKS
-            LEAX A,X
-            LDA  ,X
-            STA  >PC_SB
-            LDA  1,X
-            STA  >PC_DB
-            PULS X
-            LDA  >PC_SB           ; X = window of the source bank + source offset
+            CMPA #$40
+            BNE  PC_BANK
+            INCB
+PC_BANK     STB  >PC_TB
+            TFR  B,A              ; X, Y = the bank's window + the offsets
             LDB  #$40
             MUL
             TFR  B,A
             CLRB
             ADDR D,X
-            LDA  >PC_DB           ; Y likewise for the destination
-            LDB  #$40
-            MUL
-            TFR  B,A
-            CLRB
             ADDR D,Y
             LDA  SWI2_CC,S
             ANDA #$50             ; I or F set: the caller wants interrupts off
             STA  >PC_KEEPI
 PC_LOOP     LDD  >PC_LEN
             BEQ  PC_DONE
-            CMPD #256
+            CMPD #PC_CHUNKMAX
             BLS  PC_SET
-            LDD  #256
+            LDD  #PC_CHUNKMAX
 PC_SET      STD  >PC_CHUNK
-            TFR  D,W
-            ORCC #$50             ; from here to the restore, the maps are ours
+            ORCC #$50             ; from here to the restore, the map is ours
             LDU  #BANK_BASE
-            LDB  >PC_SB
-            LDA  >PC_SPAGE
+            LDB  >PC_TB
+            LDA  >PC_SPAGE        ; the source page: its chunk to PC_BOUNCE
             STA  B,U
-            LDB  >PC_DB
-            LDA  >PC_DPAGE
-            STA  B,U
+            LDW  >PC_CHUNK
+            PSHS Y
+            LDY  #PC_BOUNCE
             TFM  X+,Y+
-            LDU  #SBANK_1-1       ; put the caller's mapping back from the shadows
-            LDB  >PC_SB
-            LDA  B,U
-            LDU  #BANK_BASE
+            PULS Y
+            LDA  >PC_DPAGE        ; the destination page: the chunk from PC_BOUNCE
             STA  B,U
-            LDU  #SBANK_1-1
-            LDB  >PC_DB
+            LDW  >PC_CHUNK
+            PSHS X
+            LDX  #PC_BOUNCE
+            TFM  X+,Y+
+            PULS X
+            LDU  #SBANK_1-1       ; put the caller's mapping back from the shadows
             LDA  B,U
             LDU  #BANK_BASE
             STA  B,U
