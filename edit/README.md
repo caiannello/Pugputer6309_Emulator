@@ -67,17 +67,34 @@ for the column you were at. Tab inserts a tab; tab stops are every 8 columns.
 
 - **Line endings.** A file whose lines end in bare LF is written back that way. Anything else,
   and new files, get CR LF, like the rest of the system. The last line always gets a line ending.
-- **Size.** The text and the cut buffer share the RAM from the end of the program to `$EFFF`,
-  about 37 KB (`ARENA_LO` in `edit.lst`). A bigger file isn't opened: "File too large to edit".
-  When the space is full, typing or pasting says "Out of memory". Cutting doesn't free space,
-  because the cut text moves into the cut buffer.
+- **Size.** A file can be as big as the free RAM: up to 4 MB, about 960 KB on a machine with
+  1 MB, and at most 65535 lines. Only a window of it (about 34 KB) is in the RAM above the
+  program; the rest is kept in RAM pages above 64 KB (`B_PAGE_ALLOC`) and comes into the window
+  as the cursor moves. A file bigger than that isn't opened ("File too large to edit"), and when
+  the memory is full, typing or pasting says "Out of memory". EDIT gives the pages back when it
+  ends.
+- **Jumps.** Going to the first or last line, or to a search result far away, moves the text in
+  between through the window: about 1.5 seconds per 100 KB at 3.58 MHz, with nothing on the
+  screen meanwhile.
+- **Cut and paste** happen in the window: the marked text must fit in it (while the mark is
+  set, the window can't move past it, so the cursor stops at its edge), and so must the cut
+  buffer together with a copy of it when pasting, so about 17 KB can be moved at a time. The
+  mark is dropped by a jump to the start or the end, or to a search result outside the window.
 - **Writing to another name** that already exists asks "File exists, OVERWRITE ?" first.
 
 ## How it works
 
 - The text is a gap buffer: the text before the cursor, the gap, the text after it. The cut
   buffer sits at the very top of the same space and grows downwards. Moving the cursor moves the
-  gap with `TFM`; searching first moves the gap to the end, so the text is all in one piece.
+  gap with `TFM`.
+- That space (the arena, `ARENA_LO` to `$EFFF`) is a window of the text. The rest is in the
+  store: a byte space over RAM pages, with the text before the window at its bottom and the text
+  after it at its top. Before every key, `ENSUREWIN` keeps about half the window's worth of text
+  on each side of the cursor (when the store has it) and some gap to type into, moving text
+  between the ends of the window and the store with `B_PAGE_COPY`. Positions inside the program
+  are relative to the window, line numbers are for the whole text, and `GOTOABS` moves the
+  window anywhere in the text. Searching and writing the file read the whole text through
+  `DOCCOPY`, from the store and the window alike.
 - At 19200 baud a full repaint takes about a second, so the screen is updated a row at a time.
   `DIRTY` flags mark the text rows to redraw. Scrolling by one line and opening or closing a line
   use the terminal's scroll region (`ESC [ 3 ; n r`) with insert / delete line (`ESC [ L` /
@@ -97,8 +114,7 @@ and check both the screen (through a small terminal model) and the files it writ
 ## Not done
 
 - Undo, replace, go to line, justify, spell checking, syntax colouring, more than one buffer.
-- Files bigger than about 37 KB. The RAM pages above 64 KB (`B_PAGE_ALLOC`) could hold much
-  more.
+- A cut buffer outside the window, so that bigger blocks could be moved.
 - Terminal resizes are noticed at the next pause in typing, not the moment they happen. The
   serial line has no signal for them, and the emulator doesn't run the 16 Hz clock that could
   time a regular check.

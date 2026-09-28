@@ -27,6 +27,11 @@
 ; that way, anything else (and a new file) is written with CR LF, like the rest
 ; of the system.
 ;
+; A text too big for that space is only partly in it: the arena holds a window
+; of the text around the cursor, and the rest is in the store, RAM pages above
+; the program's 64KB (see "The window and the store"). So a text can be as big as
+; the free RAM (up to 4MB), with at most 65535 lines.
+;
 ; At 19200 baud a full repaint takes about a second, so the screen is kept up to
 ; date a row at a time (DIRTY), scrolling with insert / delete line inside a
 ; scroll region around the text. The terminal's size is asked for with the
@@ -54,6 +59,12 @@ IDLEPOLLS   equ  5400              ; empty keyboard polls (about half a second a
 SIZEWAIT    equ  3200              ; polls to wait for the size reply at the start
                                    ; (about 0.3 s: a terminal answers in a few ms)
 STACKSIZE   equ  384
+GAPMIN      equ  4096              ; the window keeps this much gap (room to type) ...
+GAPLOW      equ  2048              ; ... and is rearranged when the gap gets below this
+STRESERVE   equ  4096              ; store space kept free, so the window can always move
+MAXSP       equ  252               ; store pages at most (4MB, less banks 0..3)
+RDMAX       equ  255               ; RDBYTE reads the text this many characters at a time
+SCHUNK      equ  256               ; the search tries this many places per DOCCOPY
 ; Key codes from GETKEY, in A, with B = 1 for a Meta key (Alt, or Esc then the
 ; key; letters in upper case). Below $80 they are the characters themselves.
 K_UP        equ  $80
@@ -98,6 +109,7 @@ START       LDS  #STACKTOP
             LDA  #80
             STA  COLS
             JSR  SIZEVARS
+            JSR  STINIT
             LDD  #ARENA_HI             ; the cut buffer starts empty
             STD  CUTLO
             JSR  NEWBUF
@@ -116,7 +128,8 @@ START       LDS  #STACKTOP
 ;------------------------------------------------------------------------------
 ; The main loop: bring the screen up to date, then do one key.
 ;------------------------------------------------------------------------------
-MAINLOOP    JSR  ENSUREVIS
+MAINLOOP    JSR  ENSUREWIN
+            JSR  ENSUREVIS
             JSR  RENDER
             JSR  GETKEY
             CMPA #K_RESIZE
@@ -306,18 +319,19 @@ C_DOWN      JSR  NEXTLINE
             BCS  CU_RET
             JMP  GOCOL
 C_TOP       CLRD
-            JSR  MOVEGAP
-            INC  UPDPREF
-            RTS
-C_BOTTOM    JSR  TEXTLEN
-            JSR  MOVEGAP
+            CLRW
+            BRA  TB_GO
+C_BOTTOM    JSR  DOCLEN
+TB_GO       STQ  GOTP
+            JSR  GOTOABS
             INC  UPDPREF
             RTS
 ; A page is the text rows less two; the screen moves with the cursor.
 C_PGUP      JSR  PAGEN
             STB  PGNS
             STB  PGN
-PU_LOOP     JSR  PREVLINE
+PU_LOOP     JSR  ENSUREWIN             ; (a page may take the window along)
+            JSR  PREVLINE
             BCS  PU_DONE
             DEC  PGN
             BNE  PU_LOOP
@@ -335,7 +349,8 @@ PU_RET      RTS
 C_PGDN      JSR  PAGEN
             STB  PGNS
             STB  PGN
-PD_LOOP     JSR  NEXTLINE
+PD_LOOP     JSR  ENSUREWIN
+            JSR  NEXTLINE
             BCS  PD_DONE
             DEC  PGN
             BNE  PD_LOOP
@@ -580,6 +595,13 @@ NEWBUF      LDD  #ARENA_LO
             STD  PREFCOL
             STD  DRAWNPS
             STD  MARKPOS
+            STD  BLINES                ; nothing in the store
+            STD  ALINES
+            STD  BLEN
+            STD  BLEN+2
+            STD  ALEN
+            STD  ALEN+2
+            CLR  LFOVER
             CLR  MARKON
             CLR  MODIFIED
             CLR  LASTCUT
@@ -593,6 +615,731 @@ SETMOD      TST  MODIFIED
             INC  TITLEDIRTY
 SM_RET      RTS
 ;------------------------------------------------------------------------------
+; The window and the store. The arena holds a window of the text; the rest is in
+; the store: RAM pages above the program's 64KB, up to NSP of them (B_PAGE_ALLOC'd
+; the first time they are written, given back at the end). In the store's byte
+; space [0, VTOP), [0, BLEN) is the text before the window, in order, and
+; [VTOP-ALEN, VTOP) the text after it; BLINES and ALINES count their LFs.
+; CURLINE, NLINES and TOPLINE count lines in the whole text, but positions
+; (CURPOS, MOVEGAP, MARKPOS) are in the window. B_PAGE_COPY moves bytes between
+; the store and the arena without touching the bank mapping. ENSUREWIN keeps the
+; window around the cursor, before every key; GOTOABS moves it anywhere.
+;------------------------------------------------------------------------------
+; Finds the arena's pages and how big the store can be (the free pages).
+STINIT      LDB  #1
+SI_BANK     PSHS B
+            LDA  #B_BANK_GET
+            SWI2
+            PULS B
+            LDX  #ARPAGE
+            STA  B,X
+            INCB
+            CMPB #4
+            BLO  SI_BANK
+            LDA  #B_PAGE_INFO          ; Y = the pages still free
+            SWI2
+            CMPY #MAXSP
+            BLS  SI_NSP
+            LDY  #MAXSP
+SI_NSP      TFR  Y,D
+            STB  NSP
+            LSRB                       ; VTOP = NSP * 16KB
+            LSRB
+            CLRA
+            STD  VTOP
+            LDB  NSP
+            ANDB #3
+            LDA  #$40
+            MUL
+            TFR  B,A
+            CLRB
+            STD  VTOP+2
+            RTS
+; Gives the store's pages back.
+STFREE      LDX  #STPAGES
+            CLRA
+SQ_LOOP     LDB  ,X+
+            BEQ  SQ_NEXT
+            PSHS A,X
+            LDA  #B_PAGE_FREE
+            SWI2
+            PULS A,X
+SQ_NEXT     INCA
+            BNE  SQ_LOOP
+            RTS
+; A = a store page's index: -> A = the RAM page (taken now if it wasn't yet);
+; carry set if there is none to take.
+STPAGE      PSHS B,X
+            LDX  #STPAGES
+            TFR  A,B
+            ABX
+            LDA  ,X
+            BNE  SP_OK
+            LDA  #B_PAGE_ALLOC
+            SWI2
+            BCS  SP_RET
+            STA  ,X
+SP_OK       ANDCC #$FE
+SP_RET      PULS B,X,PC
+; Copies XLEN bytes between XRAM (an address in banks 1..3) and XVA (a place in
+; the store): XDIR 0 from RAM to the store, 1 from the store to RAM. A piece at a
+; time, so that neither side crosses a page. Carry set if a page couldn't be had.
+XFER        LDD  XLEN
+            LBEQ XF_OK
+            LDA  XRAM                  ; the RAM side: its bank's page, the offset
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            LDX  #ARPAGE
+            LDA  A,X
+            STA  XRP
+            LDD  XRAM
+            ANDA #$3F
+            STD  XRO
+            LDD  #$4000
+            SUBD XRO
+            STD  XC                    ; (the room left in that page)
+            LDB  XVA+2                 ; the store side: page index = bits 14..21
+            LSRB
+            LSRB
+            LSRB
+            LSRB
+            LSRB
+            LSRB
+            STB  TMPB
+            LDA  XVA+1
+            LSLA
+            LSLA
+            ORA  TMPB
+            JSR  STPAGE
+            BCS  XF_RET
+            STA  XSP
+            LDD  XVA+2
+            ANDA #$3F
+            STD  XSO
+            LDD  #$4000
+            SUBD XSO
+            CMPD XC
+            BHS  XF_C1
+            STD  XC
+XF_C1       LDD  XLEN
+            CMPD XC
+            BHS  XF_C2
+            STD  XC
+XF_C2       TST  XDIR
+            BNE  XF_IN
+            LDB  XRP                   ; RAM -> store
+            LDE  XSP
+            LDX  XRO
+            LDY  XSO
+            BRA  XF_GO
+XF_IN       LDB  XSP                   ; store -> RAM
+            LDE  XRP
+            LDX  XSO
+            LDY  XRO
+XF_GO       LDU  XC
+            LDA  #B_PAGE_COPY
+            SWI2
+            BCS  XF_RET
+            LDD  XRAM
+            ADDD XC
+            STD  XRAM
+            LDQ  XVA
+            ADDW XC
+            ADCD #0
+            STQ  XVA
+            LDD  XLEN
+            SUBD XC
+            STD  XLEN
+            LBRA XFER
+XF_OK       ANDCC #$FE
+XF_RET      RTS
+; D = n: the window's first n characters (all before the gap) go on the end of the
+; store's front part. Carry set if the store can't take them (then nothing moves).
+SPILLF      STD  SPN
+            BEQ  SPF_OK
+            LDX  #ARENA_LO
+            JSR  COUNTLF
+            STD  SPLF
+            LDD  #ARENA_LO
+            STD  XRAM
+            LDQ  BLEN
+            STQ  XVA
+            LDD  SPN
+            STD  XLEN
+            CLR  XDIR
+            JSR  XFER
+            BCS  SPF_RET
+            LDQ  BLEN
+            ADDW SPN
+            ADCD #0
+            STQ  BLEN
+            LDD  BLINES
+            ADDD SPLF
+            BCC  SPF_LINES
+            INC  LFOVER                ; (over 65535 lines: can only happen reading)
+SPF_LINES   STD  BLINES
+            LDD  GAPS                  ; the rest before the gap moves down n
+            SUBD #ARENA_LO
+            SUBD SPN
+            BEQ  SPF_MOVED
+            TFR  D,W
+            LDD  #ARENA_LO
+            ADDD SPN
+            TFR  D,X
+            LDY  #ARENA_LO
+            TFM  X+,Y+
+SPF_MOVED   LDD  GAPS
+            SUBD SPN
+            STD  GAPS
+            LDD  MARKPOS               ; and so do the positions kept in the window
+            SUBD SPN
+            STD  MARKPOS
+            LDD  CPSAVE
+            SUBD SPN
+            STD  CPSAVE
+SPF_OK      ANDCC #$FE
+SPF_RET     RTS
+; D = n (at most BLEN, and at most the gap): the last n characters of the store's
+; front part come back to the start of the window.
+FILLF       STD  SPN
+            BEQ  FF_RET
+            LDD  GAPS                  ; the text before the gap moves up n
+            SUBD #ARENA_LO
+            BEQ  FF_MOVED
+            TFR  D,W
+            LDX  GAPS
+            LEAX -1,X
+            TFR  X,D
+            ADDD SPN
+            TFR  D,Y
+            TFM  X-,Y-
+FF_MOVED    LDD  GAPS
+            ADDD SPN
+            STD  GAPS
+            LDQ  BLEN
+            SUBW SPN
+            SBCD #0
+            STQ  BLEN
+            STQ  XVA
+            LDD  #ARENA_LO
+            STD  XRAM
+            LDD  SPN
+            STD  XLEN
+            LDA  #1
+            STA  XDIR
+            JSR  XFER
+            LDX  #ARENA_LO
+            LDD  SPN
+            JSR  COUNTLF
+            STD  SPLF
+            LDD  BLINES
+            SUBD SPLF
+            STD  BLINES
+            LDD  MARKPOS
+            ADDD SPN
+            STD  MARKPOS
+            LDD  CPSAVE
+            ADDD SPN
+            STD  CPSAVE
+FF_RET      RTS
+; D = n: the window's last n characters (all after the gap) go on the front of the
+; store's back part. Carry set if the store can't take them (then nothing moves).
+SPILLB      STD  SPN
+            BEQ  SB_OK
+            LDD  CUTLO
+            SUBD SPN
+            STD  XRAM
+            TFR  D,X
+            LDD  SPN
+            JSR  COUNTLF
+            STD  SPLF
+            LDQ  VTOP
+            SUBW ALEN+2
+            SBCD ALEN
+            SUBW SPN
+            SBCD #0
+            STQ  XVA
+            LDD  SPN
+            STD  XLEN
+            CLR  XDIR
+            JSR  XFER
+            BCS  SB_RET
+            LDQ  ALEN
+            ADDW SPN
+            ADCD #0
+            STQ  ALEN
+            LDD  ALINES
+            ADDD SPLF
+            STD  ALINES
+            LDD  CUTLO                 ; the rest after the gap moves up n
+            SUBD SPN
+            SUBD GAPE
+            BEQ  SB_MOVED
+            TFR  D,W
+            LDD  CUTLO
+            SUBD SPN
+            SUBD #1
+            TFR  D,X
+            LDY  CUTLO
+            LEAY -1,Y
+            TFM  X-,Y-
+SB_MOVED    LDD  GAPE
+            ADDD SPN
+            STD  GAPE
+SB_OK       ANDCC #$FE
+SB_RET      RTS
+; D = n (at most ALEN, and at most the gap): the first n characters of the store's
+; back part come back to the end of the window.
+FILLB       STD  SPN
+            BEQ  FB_RET
+            LDD  CUTLO                 ; the text after the gap moves down n
+            SUBD GAPE
+            BEQ  FB_MOVED
+            TFR  D,W
+            LDX  GAPE
+            TFR  X,D
+            SUBD SPN
+            TFR  D,Y
+            TFM  X+,Y+
+FB_MOVED    LDD  GAPE
+            SUBD SPN
+            STD  GAPE
+            LDQ  VTOP
+            SUBW ALEN+2
+            SBCD ALEN
+            STQ  XVA
+            LDD  CUTLO
+            SUBD SPN
+            STD  XRAM
+            LDD  SPN
+            STD  XLEN
+            LDA  #1
+            STA  XDIR
+            JSR  XFER
+            LDD  CUTLO
+            SUBD SPN
+            TFR  D,X
+            LDD  SPN
+            JSR  COUNTLF
+            STD  SPLF
+            LDD  ALINES
+            SUBD SPLF
+            STD  ALINES
+            LDQ  ALEN
+            SUBW SPN
+            SBCD #0
+            STQ  ALEN
+FB_RET      RTS
+; -> D = what the window may spill into the store: the free space less STRESERVE
+; (kept for GOTOABS), at most $FFFF. SHIFTROOM: all the free space.
+SPILLROOM   JSR  STOREFREE
+            SUBW #STRESERVE
+            SBCD #0
+            BCC  CLAMPQ
+            CLRD
+            RTS
+SHIFTROOM   JSR  STOREFREE
+; Q = a 32-bit number: -> D = it, or $FFFF if it's bigger.
+CLAMPQ      CMPD #0
+            BNE  CQ_MAX
+            TFR  W,D
+            RTS
+CQ_MAX      LDD  #$FFFF
+            RTS
+; -> Q = the store's free space.
+STOREFREE   LDQ  VTOP
+            SUBW BLEN+2
+            SBCD BLEN
+            SUBW ALEN+2
+            SBCD ALEN
+            RTS
+; Q = a 32-bit number: Z set if it is 0.
+ISZERO      CMPD #0
+            BNE  IZ_RET
+            CMPW #0
+IZ_RET      RTS
+; D = n: WANT = the smaller of WANT and n.
+MINWANT     CMPD WANT
+            BHS  MW_RET
+            STD  WANT
+MW_RET      RTS
+; -> D = the gap a fill may take: all of it but GAPLOW.
+GAPROOM     LDD  GAPE
+            SUBD GAPS
+            SUBD #GAPLOW
+            BHI  GR_RET
+            CLRD
+GR_RET      RTS
+; -> Q = the length of the whole text. CURABS: -> Q = the cursor's position in it.
+DOCLEN      JSR  TEXTLEN
+            STD  TMPW
+            LDQ  BLEN
+            ADDW ALEN+2
+            ADCD ALEN
+            BRA  DA_ADD
+CURABS      JSR  CURPOS
+            STD  TMPW
+            LDQ  BLEN
+DA_ADD      ADDW TMPW
+            ADCD #0
+            RTS
+; Keeps the window around the cursor. When the gap runs low, or the text on one
+; side of the cursor runs short while the store has more of it, each side is
+; brought to HALF (what the arena holds with GAPMIN of gap), as far as the store
+; allows. While the mark is set, the marked text stays in the window.
+ENSUREWIN   LDD  CUTLO
+            SUBD #ARENA_LO+GAPMIN
+            BHI  EW_HALF
+            CLRD
+EW_HALF     LSRA
+            RORB
+            STD  HALF
+            LSRA
+            RORB
+            STD  LOWM
+            LDD  GAPE                  ; the gap running low?
+            SUBD GAPS
+            CMPD #GAPLOW
+            BLO  EW_GO
+            LDQ  BLEN                  ; the text before the cursor running short?
+            JSR  ISZERO
+            BEQ  EW_AFTER
+            LDD  GAPS
+            SUBD #ARENA_LO
+            CMPD LOWM
+            BLO  EW_GO
+EW_AFTER    LDQ  ALEN                  ; or after it?
+            JSR  ISZERO
+            BEQ  EW_RET
+            LDD  CUTLO
+            SUBD GAPE
+            CMPD LOWM
+            BLO  EW_GO
+EW_RET      RTS
+EW_GO       LDD  GAPS                  ; more than HALF before the cursor: spill
+            SUBD #ARENA_LO
+            SUBD HALF
+            BLS  EW_BACK
+            STD  WANT
+            JSR  SPILLROOM
+            JSR  MINWANT
+            TST  MARKON
+            BEQ  EW_F1
+            LDD  MARKPOS               ; (not past the mark)
+            JSR  MINWANT
+EW_F1       LDD  WANT
+            JSR  SPILLF
+EW_BACK     LDD  CUTLO                 ; more than HALF after it
+            SUBD GAPE
+            SUBD HALF
+            BLS  EW_FILL
+            STD  WANT
+            JSR  SPILLROOM
+            JSR  MINWANT
+            TST  MARKON
+            BEQ  EW_B1
+            JSR  TEXTLEN               ; (not before the mark)
+            SUBD MARKPOS
+            JSR  MINWANT
+EW_B1       LDD  WANT
+            JSR  SPILLB
+EW_FILL     LDD  GAPS                  ; less than HALF before it: fill from the store
+            SUBD #ARENA_LO
+            STD  TMPW
+            LDD  HALF
+            SUBD TMPW
+            BLS  EW_FILLB
+            STD  WANT
+            LDQ  BLEN
+            JSR  CLAMPQ
+            JSR  MINWANT
+            JSR  GAPROOM
+            JSR  MINWANT
+            LDD  WANT
+            JSR  FILLF
+EW_FILLB    LDD  CUTLO                 ; and after it
+            SUBD GAPE
+            STD  TMPW
+            LDD  HALF
+            SUBD TMPW
+            BLS  EW_DONE
+            STD  WANT
+            LDQ  ALEN
+            JSR  CLAMPQ
+            JSR  MINWANT
+            JSR  GAPROOM
+            JSR  MINWANT
+            LDD  WANT
+            JMP  FILLB
+EW_DONE     RTS
+; D = n: makes the gap at least n, spilling text around it to the store if it has
+; to (never past the mark). Carry set if it can't.
+MAKEROOM    STD  MKN
+            LDD  GAPS                  ; the text before the cursor first
+            SUBD #ARENA_LO
+            STD  WANT
+            TST  MARKON
+            BEQ  MM_1
+            LDD  MARKPOS
+            JSR  MINWANT
+MM_1        JSR  SPILLROOM
+            JSR  MINWANT
+            JSR  NEEDGAP
+            BEQ  MM_OK
+            JSR  MINWANT
+            LDD  WANT
+            JSR  SPILLF
+            LDD  CUTLO                 ; then the text after it
+            SUBD GAPE
+            STD  WANT
+            TST  MARKON
+            BEQ  MM_2
+            JSR  TEXTLEN
+            SUBD MARKPOS
+            JSR  MINWANT
+MM_2        JSR  SPILLROOM
+            JSR  MINWANT
+            JSR  NEEDGAP
+            BEQ  MM_OK
+            JSR  MINWANT
+            LDD  WANT
+            JSR  SPILLB
+            JSR  NEEDGAP
+            BEQ  MM_OK
+            ORCC #1
+            RTS
+MM_OK       ANDCC #$FE
+            RTS
+; -> D = how much more gap MAKEROOM needs (Z set if none).
+NEEDGAP     LDD  GAPE
+            SUBD GAPS
+            STD  MMT
+            LDD  MKN
+            SUBD MMT
+            BHI  NG_RET
+            CLRD
+NG_RET      RTS
+; GOTP = a position in the whole text: the cursor goes there. If it is outside
+; the window, the window moves through the store to it, a step at a time: text
+; from one end goes to the store and as much comes in at the other (the mark is
+; dropped). CURLINE follows.
+GOTOABS     LDQ  GOTP                  ; before the window?
+            CMPD BLEN
+            BLO  GA_BACK
+            BHI  GA_REL
+            CMPW BLEN+2
+            BLO  GA_BACK
+GA_REL      SUBW BLEN+2                ; Q = the place in the window
+            SBCD BLEN
+            CMPD #0
+            BNE  GA_FWD
+            STW  TMPW
+            JSR  TEXTLEN
+            CMPD TMPW
+            BLO  GA_FWD                ; past its end
+            LDD  TMPW
+            JMP  MOVEGAP
+GA_BACK     JSR  GA_NOMARK
+            CLRD                       ; the window's text all after the gap
+            JSR  MOVEGAP
+            LDQ  BLEN                  ; GDIST = how far back to go
+            SUBW GOTP+2
+            SBCD GOTP
+            JSR  CLAMPQ
+            STD  GDIST
+            STD  WANT
+            JSR  SHIFTROOM             ; the window's end goes to the store ...
+            JSR  MINWANT
+            LDD  CUTLO
+            SUBD GAPE
+            JSR  MINWANT
+            LDD  WANT
+            JSR  SPILLB
+            LDD  GDIST                 ; ... and the store's front part comes in
+            STD  WANT
+            LDQ  BLEN
+            JSR  CLAMPQ
+            JSR  MINWANT
+            LDD  GAPE
+            SUBD GAPS
+            JSR  MINWANT
+            LDD  WANT
+            BEQ  GA_STUCK
+            JSR  FILLF
+            LBRA GOTOABS
+GA_FWD      JSR  GA_NOMARK
+            JSR  TEXTLEN               ; the window's text all before the gap
+            JSR  MOVEGAP
+            JSR  TEXTLEN               ; GDIST = how far past the window's end
+            STD  TMPW
+            LDQ  GOTP
+            SUBW BLEN+2
+            SBCD BLEN
+            SUBW TMPW
+            SBCD #0
+            JSR  CLAMPQ
+            STD  GDIST
+            STD  WANT
+            JSR  SHIFTROOM             ; the window's start goes to the store ...
+            JSR  MINWANT
+            LDD  GAPS
+            SUBD #ARENA_LO
+            JSR  MINWANT
+            LDD  WANT
+            JSR  SPILLF
+            LDD  GDIST                 ; ... and the store's back part comes in
+            STD  WANT
+            LDQ  ALEN
+            JSR  CLAMPQ
+            JSR  MINWANT
+            LDD  GAPE
+            SUBD GAPS
+            JSR  MINWANT
+            LDD  WANT
+            BEQ  GA_STUCK
+            JSR  FILLB
+            LBRA GOTOABS
+GA_STUCK    RTS                        ; (no room at all to move in: it stays)
+GA_NOMARK   TST  MARKON
+            BEQ  GN_RET
+            CLR  MARKON
+            JMP  MARKALL
+GN_RET      RTS
+; Copies DCN characters of the whole text, from position DCP, to DCD (they must
+; all be in the text). DCP and DCD move along; DCN ends at 0.
+DOCCOPY     LDD  DCN
+            LBEQ DY_RET
+            LDQ  DCP
+            CMPD BLEN                  ; in the store's front part?
+            BLO  DY_FRONT
+            BHI  DY_WIN
+            CMPW BLEN+2
+            BHS  DY_WIN
+DY_FRONT    STQ  XVA
+            LDQ  BLEN                  ; (up to its end)
+            SUBW DCP+2
+            SBCD DCP
+            JSR  CLAMPQ
+            LBRA DY_STORE
+DY_WIN      SUBW BLEN+2                ; the place in the window
+            SBCD BLEN
+            CMPD #0
+            BNE  DY_BACK
+            STW  DYREL
+            LDD  GAPS                  ; before the gap?
+            SUBD #ARENA_LO
+            CMPD DYREL
+            BLS  DY_NOTB
+            SUBD DYREL
+            STD  DYLEN
+            LDD  #ARENA_LO
+            ADDD DYREL
+            BRA  DY_RAM
+DY_NOTB     STD  TMPW                  ; after it?
+            LDD  DYREL
+            SUBD TMPW
+            STD  DYREL
+            LDD  CUTLO
+            SUBD GAPE
+            CMPD DYREL
+            BLS  DY_BACK
+            SUBD DYREL
+            STD  DYLEN
+            LDD  GAPE
+            ADDD DYREL
+DY_RAM      TFR  D,X                   ; in the arena: copied from X
+            LDD  DYLEN
+            CMPD DCN
+            BLS  DY_R1
+            LDD  DCN
+DY_R1       STD  DYLEN
+            TFR  D,W
+            LDY  DCD
+            TFM  X+,Y+
+            BRA  DY_NEXT
+DY_BACK     JSR  TEXTLEN               ; in the store's back part: VTOP - ALEN +
+            STD  TMPW                  ; (DCP - BLEN - the window's text)
+            LDQ  DCP
+            SUBW BLEN+2
+            SBCD BLEN
+            SUBW TMPW
+            SBCD #0
+            ADDW VTOP+2
+            ADCD VTOP
+            SUBW ALEN+2
+            SBCD ALEN
+            STQ  XVA
+            LDD  DCN
+DY_STORE    CMPD DCN                   ; D = what there is: at most DCN
+            BLS  DY_S1
+            LDD  DCN
+DY_S1       STD  DYLEN
+            STD  XLEN
+            LDD  DCD
+            STD  XRAM
+            LDA  #1
+            STA  XDIR
+            JSR  XFER
+DY_NEXT     LDQ  DCP
+            ADDW DYLEN
+            ADCD #0
+            STQ  DCP
+            LDD  DCD
+            ADDD DYLEN
+            STD  DCD
+            LDD  DCN
+            SUBD DYLEN
+            STD  DCN
+            LBRA DOCCOPY
+DY_RET      RTS
+; The whole text a character at a time (for SAVEFILE): RDSTART, then RDBYTE ->
+; A = the next character; carry set at the end. RDBYTE keeps B, X, Y, U and W.
+RDSTART     CLRD
+            STD  RDPOS
+            STD  RDPOS+2
+            CLR  RDI
+            CLR  RDN
+            RTS
+RDBYTE      PSHS B,X,Y,U
+            PSHSW
+            LDB  RDI
+            CMPB RDN
+            BLO  RB_HAVE
+            JSR  DOCLEN                ; RDBUF is used up: the next RDMAX (or what's left)
+            SUBW RDPOS+2
+            SBCD RDPOS
+            JSR  CLAMPQ
+            CMPD #RDMAX
+            BLS  RB_N
+            LDD  #RDMAX
+RB_N        TSTB
+            BEQ  RB_END
+            STB  RDN
+            STD  DCN
+            LDQ  RDPOS
+            STQ  DCP
+            LDD  #RDBUF
+            STD  DCD
+            JSR  DOCCOPY
+            LDQ  DCP
+            STQ  RDPOS
+            CLRB
+            STB  RDI
+RB_HAVE     LDX  #RDBUF
+            ABX
+            LDA  ,X
+            INC  RDI
+            PULSW
+            ANDCC #$FE
+            PULS B,X,Y,U,PC
+RB_END      PULSW
+            ORCC #1
+            PULS B,X,Y,U,PC
+;------------------------------------------------------------------------------
 ; Editing.
 ;------------------------------------------------------------------------------
 C_ENTER     LDA  #LF
@@ -600,10 +1347,18 @@ C_ENTER     LDA  #LF
 C_TAB       LDA  #9
 ; A = a character: typed in at the cursor.
 INSCHAR     STA  ICH
-            LDD  GAPE
+            CMPA #LF                   ; (65535 lines at most)
+            BNE  IC_GAP
+            LDD  NLINES
+            CMPD #$FFFF
+            BEQ  IC_NOMEM
+IC_GAP      LDD  GAPE
             CMPD GAPS
             BNE  IC_ROOM
-            LDX  #M_NOMEM
+            LDD  #1                    ; the gap is full: some text to the store
+            JSR  MAKEROOM
+            BCC  IC_ROOM
+IC_NOMEM    LDX  #M_NOMEM
             JMP  SETMSG
 IC_ROOM     TST  MARKON                ; a mark after the cursor moves along
             BEQ  IC_PUT
@@ -833,10 +1588,9 @@ CO_MARK     JSR  MARKREGION            ; the highlight goes
             LDD  CPSAVE
             JMP  MOVEGAP
 CO_TAKE     JSR  PREPCUT
-            LDD  GAPE
-            SUBD GAPS
-            CMPD CTN
-            BLO  CO_NOMEM
+            LDD  CTN                   ; the gap must hold the copy
+            JSR  MAKEROOM
+            BCS  CO_NOMEM
             INC  COPYONLY
             LDD  CTN
             JSR  TAKE
@@ -851,14 +1605,14 @@ C_PASTE     LDD  #ARENA_HI
             SUBD CUTLO
             BEQ  PA_RET
             STD  CTN
-            LDD  GAPE
-            SUBD GAPS
-            CMPD CTN
-            BLO  PA_NOMEM
             LDX  CUTLO
-            LDD  CTN
             JSR  COUNTLF
             STD  TKLF
+            ADDD NLINES                ; (65535 lines at most)
+            BCS  PA_NOMEM
+            LDD  CTN
+            JSR  MAKEROOM
+            BCS  PA_NOMEM
             TST  MARKON
             BEQ  PA_COPY
             JSR  CURPOS
@@ -1013,47 +1767,52 @@ C_SEARCHNEXT TST SEARCHSTR
             LDX  #M_NOPATTERN
             JMP  SETMSG
 ; From just after the cursor to the end, then from the start round to the cursor.
-DOSEARCH    JSR  CURPOS
-            STD  SSAVE
-            JSR  TEXTLEN               ; all of the text before the gap, in one piece
-            STD  TMPW
-            JSR  MOVEGAP
-            LDX  #SEARCHSTR
+; Positions here are in the whole text (32 bits), and the window moves to a find.
+DOSEARCH    LDX  #SEARCHSTR
             JSR  STRLEN
             STD  SPLEN
-            LDD  TMPW
-            SUBD SPLEN
-            BCS  SE_NOTFOUND           ; longer than the text
-            STD  SLAST                 ; the last place it could start
-            LDD  SSAVE
-            ADDD #1
-            STD  SFROM
-            LDD  SLAST
-            STD  STO
+            JSR  CURABS
+            STQ  SSAVE
+            JSR  DOCLEN
+            SUBW SPLEN
+            SBCD #0
+            LBCS SE_NOTFOUND           ; longer than the text
+            STQ  SLAST                 ; the last place it could start
+            LDQ  SSAVE
+            ADDW #1
+            ADCD #0
+            STQ  SFROM
+            LDQ  SLAST
+            STQ  STO
             JSR  SCANRANGE
             BCC  SE_GO
             CLRD                       ; round from the start
-            STD  SFROM
-            LDD  SSAVE
+            CLRW
+            STQ  SFROM
+            LDQ  SSAVE                 ; to the cursor (or SLAST, if that's sooner)
             CMPD SLAST
+            BLO  SE_WTO
+            BHI  SE_LAST
+            CMPW SLAST+2
             BLS  SE_WTO
-            LDD  SLAST
-SE_WTO      STD  STO
+SE_LAST     LDQ  SLAST
+SE_WTO      STQ  STO
             JSR  SCANRANGE
             BCS  SE_NOTFOUND
-            STD  SFOUND
             LDX  #M_WRAPPED
+            LDQ  SFOUND
             CMPD SSAVE
+            BNE  SE_MSG
+            CMPW SSAVE+2
             BNE  SE_MSG
             LDX  #M_ONLYONE
 SE_MSG      JSR  SETMSG
-            LDD  SFOUND
-SE_GO       JSR  MOVEGAP
+SE_GO       LDQ  SFOUND
+            STQ  GOTP
+            JSR  GOTOABS
             INC  UPDPREF
             RTS
-SE_NOTFOUND LDD  SSAVE
-            JSR  MOVEGAP
-            JSR  MB_START
+SE_NOTFOUND JSR  MB_START
             LDX  #M_QUOTE
             JSR  MB_STR
             LDX  #SEARCHSTR
@@ -1061,18 +1820,48 @@ SE_NOTFOUND LDD  SSAVE
             LDX  #M_NOTFOUND
             JSR  MB_STR
             JMP  MB_END
-; The first position from SFROM to STO where SEARCHSTR starts: -> D, carry clear;
-; carry set if none. (The text is all before the gap.)
-SCANRANGE   LDD  SFROM
-SR_LOOP     CMPD STO
-            BHI  SR_NONE
-            TFR  D,X
-            LEAX ARENA_LO,X
-            JSR  MATCHAT
+; The first position from SFROM to STO (both included) where SEARCHSTR starts:
+; -> SFOUND, carry clear; carry set if none. The text is copied into SBUF for
+; SCHUNK places at a time (and the SPLEN-1 characters the last one needs).
+SCANRANGE   LDQ  STO                   ; places left: STO - SFROM + 1
+            SUBW SFROM+2
+            SBCD SFROM
+            BCS  SR_NONE
+            ADDW #1
+            ADCD #0
+            JSR  CLAMPQ
+            CMPD #SCHUNK
+            BLS  SR_N
+            LDD  #SCHUNK
+SR_N        STD  SRN
+            ADDD SPLEN
+            SUBD #1
+            STD  DCN
+            LDQ  SFROM
+            STQ  DCP
+            LDD  #SBUF
+            STD  DCD
+            JSR  DOCCOPY
+            LDX  #SBUF
+            LDY  SRN
+SR_LOOP     JSR  MATCHAT
             BEQ  SR_HIT
-            ADDD #1
-            BRA  SR_LOOP
-SR_HIT      ANDCC #$FE
+            LEAX 1,X
+            LEAY -1,Y
+            BNE  SR_LOOP
+            LDQ  SFROM
+            ADDW SRN
+            ADCD #0
+            STQ  SFROM
+            BRA  SCANRANGE
+SR_HIT      TFR  X,D
+            SUBD #SBUF
+            STD  TMPW
+            LDQ  SFROM
+            ADDW TMPW
+            ADCD #0
+            STQ  SFOUND
+            ANDCC #$FE
             RTS
 SR_NONE     ORCC #1
             RTS
@@ -1153,7 +1942,8 @@ C_EXIT      TST  MODIFIED
             BEQ  QUIT
             JSR  ASKSAVE
             BCS  EX_RET
-QUIT        LDX  #S_QUIT
+QUIT        JSR  STFREE                ; the store's pages go back
+            LDX  #S_QUIT
             JSR  OUTS
             JSR  FLUSH
             LDA  #B_EXIT
@@ -1224,6 +2014,8 @@ LD_OPEN     STA  FH
             CLR  LASTCR
             CLR  SAWLF
             CLR  SAWCRLF
+            LDA  #LF                   ; (an empty file has no last line to end)
+            STA  LASTLD
 LD_READ     LDB  FH
             LDX  #IOBUF
             LDY  #512
@@ -1255,8 +2047,13 @@ LD_LF       TST  LASTCR
 LD_BARE     LDB  #1
             STB  SAWLF
 LD_PUT      CMPY GAPE
-            BHS  LD_FULL
-            STA  ,Y+
+            BLO  LD_STORE
+            STY  GAPS                  ; the window is full: its text goes to the store
+            JSR  LD_SPILL
+            BCS  LD_FULL
+            LDY  GAPS
+LD_STORE    STA  ,Y+
+            STA  LASTLD
 LD_NEXT     DECW
             BNE  LD_BYTE
             STY  GAPS
@@ -1275,14 +2072,16 @@ LD_EOF      JSR  LD_CLOSE
             JSR  CURPOS
             LDX  #ARENA_LO
             JSR  COUNTLF
-            STD  NLW                   ; lines read: the LFs ...
+            ADDD BLINES                ; lines read: the LFs ...
+            BCS  LD_TOOMANY
+            STD  NLW
             ADDD #1
+            BCS  LD_TOOMANY
+            TST  LFOVER
+            BNE  LD_TOOMANY
             STD  NLINES
             STD  CURLINE               ; (the cursor is at the end)
-            LDX  GAPS
-            CMPX #ARENA_LO
-            BEQ  LD_FORMAT
-            LDA  -1,X
+            LDA  LASTLD
             CMPA #LF
             BEQ  LD_FORMAT
             LDD  NLW                   ; ... and a last one with no LF
@@ -1294,17 +2093,39 @@ LD_FORMAT   TST  SAWLF                 ; a file with bare LFs only keeps them
             BNE  LD_TOP
             CLR  DOSFMT
 LD_TOP      CLRD
-            JSR  MOVEGAP
+            CLRW
+            STQ  GOTP
+            JSR  GOTOABS
             JSR  MB_START
             LDX  #M_READ
             JSR  MB_STR
             LDD  NLW
             JSR  MB_LINES
             JMP  MB_END
+LD_TOOMANY  JSR  NEWBUF                ; more than 65535 lines
+            CLR  FILENAME
+            LDX  #M_TOOBIG
+            JMP  SETMSG
 LD_CLOSE    LDB  FH
             LDA  #B_FCLOSE_NAME
             SWI2
             RTS
+; The window filled up while reading: its text goes to the store (the cursor is at
+; its end). Carry set if the store is full. Keeps A, X and W.
+LD_SPILL    PSHS A,X
+            PSHSW
+            LDD  GAPS
+            SUBD #ARENA_LO
+            STD  WANT
+            JSR  SPILLROOM
+            JSR  MINWANT
+            LDD  WANT
+            BEQ  LS_FULL
+            JSR  SPILLF
+            BRA  LS_RET
+LS_FULL     ORCC #1
+LS_RET      PULSW
+            PULS A,X,PC
 ; Writes the text to the file named in PBUF, ending every line with CR LF (or LF,
 ; see DOSFMT) -- the last one too. -> NLW = the lines written; carry + A = the
 ; error if it failed.
@@ -1319,8 +2140,8 @@ SAVEFILE    LDX  #PBUF
             LDA  #LF
             STA  LASTCH
             LDY  #IOBUF
-            LDX  #ARENA_LO
-SF_LOOP     JSR  NEXTCH
+            JSR  RDSTART
+SF_LOOP     JSR  RDBYTE
             BCS  SF_END
             STA  LASTCH
             CMPA #LF
@@ -1406,13 +2227,42 @@ CP_WIDE     STY  LINEW
             JSR  MB_FRAC
             LDX  #M_CPCHAR
             JSR  MB_STR
-            JSR  TEXTLEN
-            ADDD #1
-            TFR  D,X
-            JSR  CURPOS
-            ADDD #1
-            JSR  MB_FRAC
+            JSR  CURABS
+            ADDW #1
+            ADCD #0
+            STQ  FA
+            JSR  DOCLEN
+            ADDW #1
+            ADCD #0
+            STQ  FB
+            JSR  MB_FRAC32
             JMP  MB_END
+; FA = a, FB = b (32 bits, a <= b, b > 0): "a/b (p%)".
+MB_FRAC32   LDQ  FA
+            JSR  MB_DEC32
+            LDX  #S_SLASH
+            JSR  MB_STR
+            LDQ  FB
+            JSR  MB_DEC32
+            LDX  #M_PCTOPEN
+            JSR  MB_STR
+F32_SHIFT   LDD  FB                    ; both halved until b fits in 16 bits
+            BEQ  F32_PCT
+            LSR  FB
+            ROR  FB+1
+            ROR  FB+2
+            ROR  FB+3
+            LSR  FA
+            ROR  FA+1
+            ROR  FA+2
+            ROR  FA+3
+            BRA  F32_SHIFT
+F32_PCT     LDD  FA+2
+            LDX  FB+2
+            JSR  PCT
+            JSR  MB_DEC
+            LDX  #M_PCTCLOSE
+            JMP  MB_STR
 ; D = a, X = b: "a/b (p%)".
 MB_FRAC     PSHS D,X
             JSR  MB_DEC
@@ -2538,6 +3388,35 @@ DS_SKIP     PULS D
             BNE  DS_POW
             CLR  ,X
             PULS D,Y,U,PC
+; Q = a number (32 bits): -> its decimal digits at X, NUL-terminated.
+DEC32       STQ  D32
+            LDY  #POW32
+            CLR  DSTART
+D3_POW      CLR  DDIG
+D3_SUB      LDQ  D32
+            SUBW 2,Y
+            SBCD ,Y
+            BCS  D3_EMIT
+            STQ  D32
+            INC  DDIG
+            BRA  D3_SUB
+D3_EMIT     LDA  DDIG
+            BNE  D3_PUT
+            TST  DSTART
+            BNE  D3_PUT
+            CMPY #POW32_LAST
+            BNE  D3_SKIP
+D3_PUT      ADDA #'0'
+            STA  ,X+
+            INC  DSTART
+D3_SKIP     LEAY 4,Y
+            CMPY #POW32_END
+            BLO  D3_POW
+            CLR  ,X
+            RTS
+POW32       FQB  1000000000,100000000,10000000,1000000,100000,10000,1000,100,10
+POW32_LAST  FQB  1
+POW32_END
 DECPOW      FDB  10000,1000,100,10
 DECPOW_LAST FDB  1
 DECPOW_END
@@ -2572,6 +3451,13 @@ MB_DEC      PSHS D,X
             LDX  #DECBUF
             JSR  MB_STR
             PULS D,X,PC
+; Q = a number (32 bits): added to the message.
+MB_DEC32    PSHS X,Y
+            LDX  #DECBUF
+            JSR  DEC32
+            LDX  #DECBUF
+            JSR  MB_STR
+            PULS X,Y,PC
 ; D = a number of lines: "3 lines", "1 line".
 MB_LINES    JSR  MB_DEC
             PSHS D
@@ -2924,12 +3810,51 @@ VP          SET  VARS
             VAR  SAWCRLF,1
             VAR  NLW,2
             VAR  LASTCH,1
-            VAR  SSAVE,2
-            VAR  SFROM,2
-            VAR  STO,2
-            VAR  SFOUND,2
+            VAR  SSAVE,4               ; the search (positions in the whole text)
+            VAR  SFROM,4
+            VAR  STO,4
+            VAR  SFOUND,4
             VAR  SPLEN,2
-            VAR  SLAST,2
+            VAR  SLAST,4
+            VAR  SRN,2
+            VAR  BLEN,4                ; the store (see "The window and the store")
+            VAR  ALEN,4
+            VAR  VTOP,4
+            VAR  BLINES,2
+            VAR  ALINES,2
+            VAR  LFOVER,1
+            VAR  NSP,1
+            VAR  ARPAGE,4              ; the pages banks 1..3 show (index = bank)
+            VAR  XRAM,2                ; XFER
+            VAR  XVA,4
+            VAR  XLEN,2
+            VAR  XDIR,1
+            VAR  XRP,1
+            VAR  XSP,1
+            VAR  XRO,2
+            VAR  XSO,2
+            VAR  XC,2
+            VAR  SPN,2                 ; SPILLF / FILLF / SPILLB / FILLB
+            VAR  SPLF,2
+            VAR  HALF,2                ; ENSUREWIN
+            VAR  LOWM,2
+            VAR  WANT,2
+            VAR  MKN,2                 ; MAKEROOM
+            VAR  MMT,2
+            VAR  GOTP,4                ; GOTOABS
+            VAR  GDIST,2
+            VAR  DCP,4                 ; DOCCOPY
+            VAR  DCN,2
+            VAR  DCD,2
+            VAR  DYREL,2
+            VAR  DYLEN,2
+            VAR  RDPOS,4               ; RDBYTE
+            VAR  RDI,1
+            VAR  RDN,1
+            VAR  LASTLD,1              ; the last character read in
+            VAR  FA,4                  ; MB_FRAC32
+            VAR  FB,4
+            VAR  D32,4                 ; DEC32
             VAR  PA,2
             VAR  PB,2
             VAR  PACC,3
@@ -2945,7 +3870,7 @@ VP          SET  VARS
             VAR  SCUSED,1
             VAR  LINEEND,2
             VAR  OUTBUF,OUTMAX+8
-            VAR  DECBUF,8
+            VAR  DECBUF,12
             VAR  MSGBUF,MSGMAX+4
             VAR  STATTXT,STATMAX+4
             VAR  SHOWNTXT,STATMAX+4
@@ -2958,6 +3883,9 @@ VP          SET  VARS
             VAR  DIRTY,MAXROWS
             VAR  STATBUF,16
             VAR  IOBUF,512
+            VAR  STPAGES,256           ; the RAM page of each store page (0: not yet)
+            VAR  RDBUF,RDMAX
+            VAR  SBUF,SCHUNK+NAMEMAX
             VAR  STACKB,STACKSIZE
 STACKTOP    equ  VP
 ARENA_LO    equ  VP                    ; the text and the cut buffer: to ARENA_HI

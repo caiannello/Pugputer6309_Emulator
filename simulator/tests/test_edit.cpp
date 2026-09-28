@@ -168,6 +168,7 @@ struct Editor {
     Screen scr;
     std::string img;
     int reply_rows = 0, reply_cols = 0; // 0: the terminal doesn't answer size queries
+    bool hog = false; // first run HOG.COM, which takes every free RAM page (so EDIT gets none)
     size_t scanned = 0, fed = 0;
     int queries = 0;
 
@@ -179,10 +180,23 @@ struct Editor {
         if (!f) return false;
         edit.data.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         files.push_back(std::move(edit));
+        if (hog) {
+            // HOG.COM: LDA #B_PAGE_ALLOC ; SWI2 ; BCC (back) ; LDA #B_EXIT ; SWI2. Pages a
+            // program takes stay taken after it ends.
+            pugputer::Fat16File h;
+            h.name = "HOG.COM";
+            h.data = {'P', 'X', 0x40, 0x00, 0x40, 0x00, 0, 0, 0x86, 0x2F, 0x10, 0x3F, 0x24, 0xFA, 0x86, 0x2B, 0x10, 0x3F};
+            files.push_back(std::move(h));
+        }
         img = build_image(image_name, 16384, 2, std::move(files));
         if (img.empty() || !s.boot_shell(PUGBIOS_S19_PATH, img.c_str())) return false;
         if (reply_rows) scr.resize(reply_rows, reply_cols);
         sync();
+        if (hog) {
+            for (char ch : std::string("HOG\r")) s.send_byte(static_cast<uint8_t>(ch));
+            settle();
+            if (!at_shell()) return false;
+        }
         for (char ch : cmdline) s.send_byte(static_cast<uint8_t>(ch));
         s.send_byte('\r');
         settle();
@@ -221,9 +235,9 @@ struct Editor {
     }
     // Runs until the status line shows `needle` (for work that takes a while
     // with nothing to show: loading or writing a big file).
-    bool wait_status(const std::string& needle) {
+    bool wait_status(const std::string& needle, uint64_t budget = 400000000) {
         uint64_t spent = 0;
-        while (status().find(needle) == std::string::npos && spent < 400000000) {
+        while (status().find(needle) == std::string::npos && spent < budget) {
             spent += s.bus.run(20000);
             sync();
         }
@@ -565,7 +579,114 @@ TEST(edit_screen_stays_true_to_the_text) {
     CHECK(e.at_shell());
 }
 
+TEST(edit_screen_stays_true_to_the_text_across_the_window) {
+    // The same, on a text twice the arena, with page bursts and jumps to the ends that
+    // move the window through the banked RAM between the edits.
+    std::string t;
+    for (int i = 1; i <= 1200; ++i) t += "row " + std::to_string(i) + std::string(56, '-') + "\r\n";
+    CHECK(static_cast<long>(t.size()) > 2 * arena_size());
+    Editor e;
+    CHECK(e.start("edit14.img", {text("R.TXT", t)}, "EDIT R.TXT"));
+    CHECK(e.wait_status("[ Read 1200 lines ]", 4000000000ull));
+    const std::string burst = PGDN + PGDN + PGDN + PGDN + PGDN + PGDN;
+    const std::vector<std::string> moves = {UP,  DOWN,       PGUP,       PGDN,       burst,     END,   HOME,
+                                            DEL, "\x7f",     "\r",       ctrl('K'),  ctrl('U'), "a",   meta('6'),
+                                            burst, meta('/'), meta('\\'), PGUP + PGUP + PGUP + PGUP + PGUP};
+    uint32_t seed = std::getenv("EDIT_SEED") ? static_cast<uint32_t>(std::atoi(std::getenv("EDIT_SEED"))) : 4242;
+    for (int i = 0; i < 200; ++i) {
+        seed = seed * 1103515245u + 12345u;
+        e.keys(moves[(seed >> 16) % moves.size()]);
+    }
+    e.keys(ctrl('C')); // (after everything before it is done)
+    CHECK(e.wait_status("char ", 4000000000ull));
+    std::string pos = e.status();
+    std::vector<std::string> shown;
+    for (int r = 3; r <= 21; ++r) shown.push_back(e.row(r));
+    e.keys(ctrl('O') + "\r");
+    CHECK(e.wait_status("[ Wrote ", 4000000000ull));
+    std::string saved = e.file("R.TXT");
+    std::vector<std::string> lines;
+    size_t p = 0, chars = 0;
+    while (p < saved.size()) {
+        size_t q = saved.find("\r\n", p);
+        lines.push_back(saved.substr(p, q - p));
+        chars += q - p + 1;
+        p = q + 2;
+    }
+    lines.push_back("");
+    // (A line longer than the screen shows its first 79 columns and a "$".)
+    auto same = [](const std::string& row, const std::string& line) {
+        if (row.size() == 80 && row.back() == '$') return line.size() > 79 && line.compare(0, 79, row, 0, 79) == 0;
+        return row == line;
+    };
+    bool match = false;
+    for (size_t start = 0; start < lines.size() && !match; ++start) {
+        bool ok = true;
+        for (size_t k = 0; k < shown.size() && ok; ++k) ok = same(shown[k], start + k < lines.size() ? lines[start + k] : "");
+        match = ok;
+    }
+    CHECK(match);
+    if (!match && std::getenv("EDIT_DEBUG")) {
+        std::printf("  status: %s\n  screen:\n", pos.c_str());
+        for (auto& s : shown) std::printf("    [%s]\n", s.c_str());
+        for (size_t start = 0; start < lines.size(); ++start)
+            if (lines[start] == shown[0] || lines[start] == shown[1]) {
+                std::printf("  file from line %zu:\n", start + 1);
+                for (size_t k = start; k < lines.size() && k < start + 20; ++k) std::printf("    [%s]\n", lines[k].c_str());
+            }
+    }
+    // ^C's count of the whole text (+1) agrees with the file (its lines all end in LF).
+    CHECK(has(pos, "/" + std::to_string(chars + 1) + " (") || has(pos, "/" + std::to_string(chars) + " ("));
+    e.keys(ctrl('X'));
+    CHECK(e.at_shell());
+}
+
+TEST(edit_window_moves_keep_the_text_intact) {
+    // Random moves and jumps through a text three times the arena, typing a "#" here
+    // and there: take the "#"s out of what is written, and it is the text as read.
+    std::string t;
+    for (int i = 1; i <= 1600; ++i) t += "L" + std::to_string(i) + ":" + std::string(i % 97, 'a' + i % 26) + "\r\n";
+    CHECK(static_cast<long>(t.size()) > 2 * arena_size());
+    Editor e;
+    CHECK(e.start("edit15.img", {text("T.TXT", t)}, "EDIT T.TXT"));
+    CHECK(e.wait_status("[ Read 1600 lines ]", 4000000000ull));
+    const std::string burst = PGDN + PGDN + PGDN + PGDN + PGDN + PGDN + PGDN + PGDN;
+    const std::vector<std::string> moves = {UP,   DOWN, LEFT, RIGHT,     PGUP,       PGDN,
+                                            HOME, END,  "#",  meta('/'), meta('\\'), burst,
+                                            "#",  PGUP + PGUP + PGUP + PGUP + PGUP + PGUP + PGUP, ctrl('W') + "L7\r"};
+    uint32_t seed = std::getenv("EDIT_SEED") ? static_cast<uint32_t>(std::atoi(std::getenv("EDIT_SEED"))) : 777;
+    int hashes = 0;
+    for (int i = 0; i < 250; ++i) {
+        seed = seed * 1103515245u + 12345u;
+        const std::string& m = moves[(seed >> 16) % moves.size()];
+        if (m == "#") ++hashes;
+        e.keys(m);
+    }
+    e.keys(ctrl('O') + "\r");
+    CHECK(e.wait_status("[ Wrote ", 4000000000ull));
+    std::string saved = e.file("T.TXT"), stripped;
+    int found = 0;
+    for (char ch : saved)
+        if (ch == '#')
+            ++found;
+        else
+            stripped += ch;
+    CHECK(found == hashes);
+    // (A "#" typed after the last line is a line of its own, which is written with its CR LF.)
+    if (stripped.size() == t.size() + 2 && stripped.compare(t.size(), 2, "\r\n") == 0) stripped.resize(t.size());
+    CHECK(stripped == t);
+    if (stripped != t) {
+        size_t d = 0;
+        while (d < t.size() && d < stripped.size() && t[d] == stripped[d]) ++d;
+        std::printf("  sizes %zu %zu, first difference at %zu:\n  want [%s]\n  got  [%s]\n", t.size(), stripped.size(), d,
+                    t.substr(d > 40 ? d - 40 : 0, 100).c_str(), stripped.substr(d > 40 ? d - 40 : 0, 100).c_str());
+    }
+    e.keys(ctrl('X'));
+    CHECK(e.at_shell());
+}
+
 TEST(edit_cut_with_memory_full_and_too_large_files) {
+    // With no RAM pages free, EDIT has only its window: the arena above the program.
     long room = arena_size();
     CHECK(room > 30000);
     // "A", then lines of 99 characters + CR LF (100 bytes in the editor, with just
@@ -582,6 +703,7 @@ TEST(edit_cut_with_memory_full_and_too_large_files) {
     body += std::string(room - 4 - used - 1, 'z') + "\r\n"; // exactly room-4 bytes
     t += body;
     Editor e;
+    e.hog = true;
     CHECK(e.start("edit11.img", {text("FULL.TXT", t)}, "EDIT FULL.TXT"));
     CHECK(e.wait_status("[ Read " + std::to_string(n + 2) + " lines ]"));
     e.keys("xyzw");                                   // the space is full now
@@ -603,9 +725,98 @@ TEST(edit_cut_with_memory_full_and_too_large_files) {
     CHECK(e.at_shell());
 
     Editor big;                                       // more than fits: refused
+    big.hog = true;
     CHECK(big.start("edit12.img", {text("BIG.TXT", std::string(room + 10, 'q'))}, "EDIT BIG.TXT"));
     CHECK(big.wait_status("[ File too large to edit ]"));
     CHECK(has(big.row(1), "New Buffer"));
     big.keys(ctrl('X'));
     CHECK(big.at_shell());
+}
+
+TEST(edit_big_files_live_in_banked_ram) {
+    // Five times what the arena holds: the rest of the text is in RAM pages above
+    // 64KB, and the window moves through it.
+    const int N = 2500;
+    std::string body;
+    for (int i = 1; i <= N; ++i) {
+        char line[80];
+        std::snprintf(line, sizeof line, "Line %05d: %s", i, std::string(60, 'a' + i % 26).c_str());
+        body += line + std::string("\r\n");
+    }
+    CHECK(static_cast<long>(body.size()) > 5 * arena_size());
+    Editor e;
+    CHECK(e.start("edit13.img", {text("BIG.TXT", body)}, "EDIT BIG.TXT"));
+    CHECK(e.wait_status("[ Read 2500 lines ]", 4000000000ull));
+    CHECK(e.row(3).substr(0, 10) == "Line 00001");
+    auto number = [](const std::string& row) { return row.compare(0, 5, "Line ") == 0 ? std::atoi(row.c_str() + 5) : -1; };
+    // Page down well past the window: every row shows the line after the last.
+    for (int i = 0; i < 60; ++i) e.keys(PGDN);
+    int first = number(e.row(3));
+    CHECK(first > 900);
+    for (int r = 4; r <= 21; ++r) CHECK(number(e.row(r)) == first + (r - 3));
+    for (int i = 0; i < 25; ++i) e.keys(PGUP); // and back up some
+    int back = number(e.row(3));
+    CHECK(back > 1 && back < first);
+    for (int r = 4; r <= 21; ++r) CHECK(number(e.row(r)) == back + (r - 3));
+    // The last line, and the position in the whole text.
+    // (Jumps across the text take a while with nothing on the screen: they wait for
+    // the status line.)
+    const uint64_t LONG = 4000000000ull;
+    e.keys(meta('/'));
+    CHECK(e.wait_status("line 2501/2501", LONG));
+    e.keys("END");
+    e.keys(ctrl('C'));
+    const long total = N * 73L + 3; // (in the editor, lines end in just LF)
+    CHECK(has(e.status(), "char " + std::to_string(total + 1) + "/" + std::to_string(total + 1) + " (100%)"));
+    // Search: from the end round to a line near the start, then on to one in the middle.
+    e.keys(ctrl('W') + "line 00077\r");
+    CHECK(e.wait_status("Search Wrapped", LONG));
+    CHECK(number(e.row(3)) <= 77);
+    e.keys(ctrl('C'));
+    CHECK(has(e.status(), "line 77/2501"));
+    e.keys(ctrl('W') + "line 01500\r");
+    CHECK(e.wait_status("line 1500/2501", LONG));
+    // Cut that line, paste it at the top.
+    e.keys(ctrl('K'));
+    e.keys(meta('\\'));
+    CHECK(e.wait_status("line 1/2500", LONG));  // (one line fewer: it was cut)
+    CHECK(e.row(3).substr(0, 10) == "Line 00001");
+    e.keys(ctrl('U'));
+    CHECK(e.row(3).substr(0, 10) == "Line 01500");
+    CHECK(e.row(4).substr(0, 10) == "Line 00001");
+    e.keys("TOP");
+    e.keys(ctrl('O') + "\r");
+    CHECK(e.wait_status("[ Wrote 2501 lines ]", LONG));
+    size_t at = body.find("Line 01500");
+    std::string cut = body.substr(at, 74);
+    std::string want = cut + "TOP" + body.substr(0, at) + body.substr(at + 74) + "END\r\n";
+    CHECK(e.file("BIG.TXT") == want);
+    // Mark the first lines (more than a screen, some of the window), cut them and
+    // paste them at the far end.
+    e.keys(meta('\\'));
+    CHECK(e.wait_status("line 1/2501", LONG));
+    e.keys(meta('A'));
+    for (int i = 0; i < 9; ++i) e.keys(PGDN);
+    std::string st = e.status();
+    size_t lp = st.find("line ");
+    CHECK(lp != std::string::npos);
+    int k = std::atoi(st.c_str() + lp + 5) - 1; // whole lines marked
+    CHECK(k > 100);
+    e.keys(ctrl('K'));
+    e.keys(meta('/'));
+    CHECK(e.wait_status("line " + std::to_string(2501 - k) + "/", LONG));
+    e.keys(ctrl('U'));
+    e.keys(ctrl('O') + "\r");
+    CHECK(e.wait_status("[ Wrote 2500 lines ]", LONG)); // ("END" and the first pasted line joined)
+    size_t cutlen = 0;
+    for (int i = 0; i < k; ++i) cutlen = want.find("\r\n", cutlen) + 2;
+    std::string moved = want.substr(cutlen, want.size() - cutlen - 2) + want.substr(0, cutlen);
+    CHECK(e.file("BIG.TXT") == moved);
+    // The pages go back when it ends.
+    e.keys(ctrl('X'));
+    CHECK(e.at_shell());
+    size_t from = e.s.received.size();
+    for (char ch : std::string("MEM\r")) e.s.send_byte(static_cast<uint8_t>(ch));
+    e.settle();
+    CHECK(has(e.s.received.substr(from), "960 KB free"));
 }

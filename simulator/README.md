@@ -526,7 +526,11 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   status and shortcut lines, inverse video) as well as the files it writes: editing and writing
   back, the exit and overwrite questions, search, mark / cut / copy / paste, opening other files,
   help, scrolling long files and lines, fitting to a terminal size reported (or never reported),
-  a random editing session whose screen must match the file written, and a full memory.
+  a random editing session whose screen must match the file written, and a full memory (with
+  every RAM page taken first, so that EDIT has only its window). Big files: a text five times
+  the window read, paged through, searched, cut and pasted across it, and written back exactly;
+  random sessions on texts bigger than the window whose screen must match the file, and whose
+  text must come through random moves and jumps intact.
 - `test_dos_bigfiles.cpp` -- 32-bit sizes/positions and block numbers: a 100MB volume with two
   33MB files (read at offsets across block 65536 and 131072, so the SD device's high address word
   is used), new files placed beyond block 131072, files past 64KB appended/updated/gap-filled/
