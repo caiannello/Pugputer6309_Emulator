@@ -47,7 +47,7 @@ MINROWS     equ  6
 MINCOLS     equ  20
 MAXROWS     equ  100
 MAXCOLS     equ  250
-TEXTTOP     equ  3                 ; screen row of the first text row (1 = title bar)
+TEXTTOP     equ  2                 ; screen row of the first text row (1 = title bar)
 NAMEMAX     equ  64                ; longest file name / search string
 OUTMAX      equ  200               ; output is sent with one B_PUT when this is full
 MSGMAX      equ  100
@@ -2422,7 +2422,7 @@ AY_DONE     PSHS A
             JSR  PM_END
             PULS A,PC
 ;------------------------------------------------------------------------------
-; The screen: row 1 the title bar, row 2 blank, rows 3 .. ROWS-3 the text (a
+; The screen: row 1 the title bar, rows 2 .. ROWS-3 the text (a
 ; scroll region), row ROWS-2 the status line, the last two rows the shortcuts.
 ;------------------------------------------------------------------------------
 ; Keeps the cursor's line on the screen: one line off scrolls by one, further
@@ -3102,7 +3102,7 @@ AZ_RET      RTS
 ; From ROWS and COLS: the text rows, and the shortcut slots (at least 13 columns
 ; each, at most 6 a line, none reaching the last column).
 SIZEVARS    LDA  ROWS
-            SUBA #5
+            SUBA #TEXTTOP+2            ; (the status line, the two shortcut lines)
             STA  TROWS
             LDA  COLS
             CLRB
@@ -3737,7 +3737,7 @@ VARS        equ  *
 VP          SET  VARS
             VAR  ROWS,1
             VAR  COLS,1
-            VAR  TROWS,1               ; text rows: ROWS-5
+            VAR  TROWS,1               ; text rows: ROWS-4
             VAR  NSLOT,1               ; shortcut slots a line
             VAR  SLOTW,1               ; and their width
             VAR  GAPS,2                ; the gap buffer (see the top of the file)

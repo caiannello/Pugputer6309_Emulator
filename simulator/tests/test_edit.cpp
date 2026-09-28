@@ -315,24 +315,24 @@ TEST(edit_shows_a_file_edits_it_and_writes_it_back) {
     CHECK(e.start("edit1.img", {text("NOTE.TXT", "alpha\r\nbeta\r\n")}, "edit note.txt"));
     CHECK(has(e.row(1), "NANO6309 1.0") && has(e.row(1), "File: note.txt") && !has(e.row(1), "Modified"));
     CHECK(e.scr.inv[0].find(' ') == std::string::npos); // the title bar is all inverse
-    CHECK(e.row(3) == "alpha");
-    CHECK(e.row(4) == "beta");
-    CHECK(e.row(5) == "");
+    CHECK(e.row(2) == "alpha");
+    CHECK(e.row(3) == "beta");
+    CHECK(e.row(4) == "");
     CHECK(has(e.status(), "[ Read 2 lines ]"));
     CHECK(has(e.row(23), "^G Get Help") && has(e.row(23), "^O WriteOut") && has(e.row(23), "^C Cur Pos"));
     CHECK(has(e.row(24), "^X Exit") && has(e.row(24), "^W Where Is") && has(e.row(24), "M-6 Copy Text"));
 
     e.keys(ctrl('E') + "!");                 // end of the line, type
-    CHECK(e.row(3) == "alpha!");
+    CHECK(e.row(2) == "alpha!");
     CHECK(has(e.row(1), "Modified"));
     CHECK(has(e.status(), "[ line 1/3, col 7 ]"));
     e.keys(DOWN + ctrl('K'));                // cut "beta"
-    CHECK(e.row(3) == "alpha!");
-    CHECK(e.row(4) == "");
+    CHECK(e.row(2) == "alpha!");
+    CHECK(e.row(3) == "");
     CHECK(has(e.status(), "[ line 2/2, col 1 ]"));
     e.keys(UP + ctrl('U'));                  // paste it above
-    CHECK(e.row(3) == "beta");
-    CHECK(e.row(4) == "alpha!");
+    CHECK(e.row(2) == "beta");
+    CHECK(e.row(3) == "alpha!");
     CHECK(has(e.status(), "[ line 2/3, col 1 ]"));
 
     e.keys(ctrl('O'));                       // write out, keeping the name
@@ -352,14 +352,14 @@ TEST(edit_a_new_file_asks_to_save_on_exit) {
     CHECK(has(e.status(), "[ New File ]"));
     CHECK(has(e.row(1), "File: NEW.TXT"));
     e.keys("hello\rworld");
-    CHECK(e.row(3) == "hello");
-    CHECK(e.row(4) == "world");
+    CHECK(e.row(2) == "hello");
+    CHECK(e.row(3) == "world");
     e.keys(ctrl('X'));
     CHECK(has(e.status(), "Save modified buffer (ANSWERING \"No\" WILL DESTROY CHANGES) ?"));
     CHECK(has(e.row(23), "Y Yes") && has(e.row(24), "N No") && has(e.row(24), "^C Cancel"));
     e.keys(ctrl('C'));                       // not after all
     CHECK(has(e.status(), "[ Cancelled ]"));
-    CHECK(e.row(4) == "world");
+    CHECK(e.row(3) == "world");
     e.keys(ctrl('X') + "y");
     CHECK(has(e.status(), "File Name to Write: NEW.TXT"));
     e.keys("\r");
@@ -385,12 +385,12 @@ TEST(edit_search_mark_copy_and_paste) {
     e.keys(meta('a'));
     CHECK(has(e.status(), "[ Mark Set ]"));
     e.keys(RIGHT + RIGHT + RIGHT);           // "two" marked: in inverse
-    CHECK(e.scr.inv[2].substr(0, 14) == "    III       ");
+    CHECK(e.scr.inv[1].substr(0, 14) == "    III       ");
     e.keys(meta('6'));                       // copy it; the mark goes
-    CHECK(e.scr.inv[2].find('I') == std::string::npos);
+    CHECK(e.scr.inv[1].find('I') == std::string::npos);
     CHECK(has(e.status(), "[ line 1/3, col 8 ]"));
     e.keys(meta('/') + ctrl('U'));           // the end of the text, paste
-    CHECK(e.row(5) == "two");
+    CHECK(e.row(4) == "two");
     e.keys(ctrl('W'));
     CHECK(has(e.status(), "Search [TWO]:"));
     e.keys("\r");                            // again: round from the top
@@ -410,15 +410,15 @@ TEST(edit_cuts_collect_lines_and_other_keys) {
     Editor e;
     CHECK(e.start("edit5.img", {text("L.TXT", "1\n2\n3\n4\n5\n")}, "EDIT L.TXT"));
     e.keys(DOWN + ctrl('K') + ctrl('K'));    // two cuts in a row: "2" and "3" together
-    CHECK(e.row(3) == "1" && e.row(4) == "4" && e.row(5) == "5");
+    CHECK(e.row(2) == "1" && e.row(3) == "4" && e.row(4) == "5");
     e.keys(DOWN + DOWN + ctrl('U'));         // paste both at the end
-    CHECK(e.row(5) == "5" && e.row(6) == "2" && e.row(7) == "3" && e.row(8) == "");
+    CHECK(e.row(4) == "5" && e.row(5) == "2" && e.row(6) == "3" && e.row(7) == "");
     e.keys(HOME + ctrl('U'));                // the same again
-    CHECK(e.row(8) == "2" && e.row(9) == "3");
+    CHECK(e.row(7) == "2" && e.row(8) == "3");
     e.keys(meta('\\') + "x" + DEL + DEL + "\x7f");  // Del joins lines, Backspace
-    CHECK(e.row(3) == "4");
+    CHECK(e.row(2) == "4");
     e.keys(ctrl('E') + ctrl('H') + ctrl('D') + ctrl('B') + ctrl('F')); // ^H, ^D at the end
-    CHECK(e.row(3) == "5");
+    CHECK(e.row(2) == "5");
     e.keys(ctrl('O') + "\r" + ctrl('X'));
     CHECK(e.at_shell());
     CHECK(e.file("L.TXT") == "5\n2\n3\n2\n3\n"); // bare LFs stay bare
@@ -433,11 +433,11 @@ TEST(edit_open_another_file_and_a_new_buffer) {
     CHECK(has(e.status(), "File to Read (Enter alone: New Buffer):"));
     e.keys("b.txt\r");
     CHECK(has(e.row(1), "File: b.txt"));
-    CHECK(e.row(3) == "bbb");
+    CHECK(e.row(2) == "bbb");
     CHECK(has(e.status(), "[ Read 1 line ]"));
     e.keys(ctrl('R') + "\r");                // Enter alone: an empty new buffer
     CHECK(has(e.row(1), "New Buffer"));
-    CHECK(e.row(3) == "");
+    CHECK(e.row(2) == "");
     e.keys("new" + ctrl('O'));
     CHECK(has(e.status(), "File Name to Write:"));
     e.keys("b.txt\r");                       // there already: asks
@@ -472,8 +472,8 @@ TEST(edit_fits_itself_to_the_terminal_size) {
     e.reply_cols = 100;
     CHECK(e.start("edit8.img", {text("T.TXT", "hello\r\n")}, "EDIT T.TXT"));
     CHECK(e.queries == 1);
-    CHECK(has(e.s.received, "\x1b[3;27r"));  // the scroll region: rows 3..ROWS-3
-    CHECK(e.row(3) == "hello");
+    CHECK(has(e.s.received, "\x1b[2;27r"));  // the scroll region: rows 2..ROWS-3
+    CHECK(e.row(2) == "hello");
     CHECK(e.scr.inv[0].find(' ') == std::string::npos && e.scr.inv[0].size() == 100);
     CHECK(has(e.row(29), "^G Get Help"));
     CHECK(has(e.row(28), "[ Read 1 line ]"));
@@ -481,8 +481,8 @@ TEST(edit_fits_itself_to_the_terminal_size) {
     e.reply_cols = 60;
     e.scr.resize(20, 60);
     e.keys(ctrl('L'));                       // ^L asks again
-    CHECK(has(e.s.received, "\x1b[3;17r"));
-    CHECK(e.row(3) == "hello");
+    CHECK(has(e.s.received, "\x1b[2;17r"));
+    CHECK(e.row(2) == "hello");
     CHECK(has(e.row(19), "^G Get Help"));
     CHECK(has(e.row(20), "^X Exit"));
     e.reply_rows = 24;                       // and after typing, it asks by itself
@@ -493,7 +493,7 @@ TEST(edit_fits_itself_to_the_terminal_size) {
     e.s.bus.run(4000000);
     e.settle();
     CHECK(e.queries > before);
-    CHECK(e.row(3) == "xhello");
+    CHECK(e.row(2) == "xhello");
     CHECK(has(e.row(23), "^G Get Help"));
     e.keys(ctrl('X') + "n");
     CHECK(e.at_shell());
@@ -505,22 +505,22 @@ TEST(edit_scrolls_long_files_and_lines) {
     t += std::string(150, 'w') + "END\r\n";
     Editor e;
     CHECK(e.start("edit9.img", {text("LONG.TXT", t)}, "EDIT LONG.TXT"));
-    CHECK(e.row(3) == "line 1" && e.row(21) == "line 19");
-    e.keys(PGDN);                            // a page is the 19 text rows less 2
-    CHECK(e.row(3) == "line 18" && e.row(21) == "line 36");
-    CHECK(has(e.status(), "[ line 18/62, col 1 ]"));
+    CHECK(e.row(2) == "line 1" && e.row(21) == "line 20");
+    e.keys(PGDN);                            // a page is the 20 text rows less 2
+    CHECK(e.row(2) == "line 19" && e.row(21) == "line 38");
+    CHECK(has(e.status(), "[ line 19/62, col 1 ]"));
     e.keys(PGUP);
-    CHECK(e.row(3) == "line 1");
-    for (int i = 0; i < 19; ++i) e.keys(DOWN); // one past the bottom: scrolls by one
-    CHECK(e.row(3) == "line 2" && e.row(21) == "line 20");
+    CHECK(e.row(2) == "line 1");
+    for (int i = 0; i < 20; ++i) e.keys(DOWN); // one past the bottom: scrolls by one
+    CHECK(e.row(2) == "line 2" && e.row(21) == "line 21");
     e.keys(UP + UP);
     for (int i = 0; i < 18; ++i) e.keys(UP);  // one above the top
-    CHECK(e.row(3) == "line 1" && e.row(4) == "line 2" && e.row(21) == "line 19");
+    CHECK(e.row(2) == "line 1" && e.row(3) == "line 2" && e.row(21) == "line 20");
     e.keys(meta('/') + UP);                  // the long line, 153 columns
     CHECK(has(e.status(), "[ line 61/62, col 1 ]"));
-    CHECK(e.row(3 + 61 - std::stoi(e.row(3).substr(5))) == std::string(79, 'w') + "$");
+    CHECK(e.row(2 + 61 - std::stoi(e.row(2).substr(5))) == std::string(79, 'w') + "$");
     e.keys(END);                             // shown a page further on, with "$" first
-    int r = 3 + 61 - std::stoi(e.row(3).substr(5));
+    int r = 2 + 61 - std::stoi(e.row(2).substr(5));
     CHECK(e.row(r).substr(0, 1) == "$");
     CHECK(has(e.row(r), "wEND"));
     CHECK(has(e.status(), "col 154 ]"));
@@ -547,7 +547,7 @@ TEST(edit_screen_stays_true_to_the_text) {
     }
     for (size_t i = 0; i < script.size(); i += 12) e.keys(script.substr(i, 12));
     std::vector<std::string> shown;
-    for (int r = 3; r <= 21; ++r) shown.push_back(e.row(r));
+    for (int r = 2; r <= 21; ++r) shown.push_back(e.row(r));
     e.keys(ctrl('O') + "\r");
     CHECK(has(e.status(), "[ Wrote "));
     std::string saved = e.file("R.TXT");
@@ -601,7 +601,7 @@ TEST(edit_screen_stays_true_to_the_text_across_the_window) {
     CHECK(e.wait_status("char ", 4000000000ull));
     std::string pos = e.status();
     std::vector<std::string> shown;
-    for (int r = 3; r <= 21; ++r) shown.push_back(e.row(r));
+    for (int r = 2; r <= 21; ++r) shown.push_back(e.row(r));
     e.keys(ctrl('O') + "\r");
     CHECK(e.wait_status("[ Wrote ", 4000000000ull));
     std::string saved = e.file("R.TXT");
@@ -709,15 +709,15 @@ TEST(edit_cut_with_memory_full_and_too_large_files) {
     e.keys("xyzw");                                   // the space is full now
     e.keys("Q");
     CHECK(has(e.status(), "[ Out of memory ]"));
-    CHECK(e.row(3) == "xyzwA");
+    CHECK(e.row(2) == "xyzwA");
     e.keys(HOME + ctrl('K'));                         // no room in the gap: the cut line
-    CHECK(has(e.row(3), "0000...."));                 // is rotated into the cut buffer
+    CHECK(has(e.row(2), "0000...."));                 // is rotated into the cut buffer
     e.keys(ctrl('U'));                                // it still takes the space
     CHECK(has(e.status(), "[ Out of memory ]"));
     e.keys(DEL + DEL + DEL + DEL + DEL + DEL);        // make room ...
     e.keys(ctrl('U'));                                // ... and paste it back
-    CHECK(e.row(3) == "xyzwA");
-    CHECK(e.row(4).substr(0, 10) == "..........");
+    CHECK(e.row(2) == "xyzwA");
+    CHECK(e.row(3).substr(0, 10) == "..........");
     e.keys(ctrl('O') + "\r");
     CHECK(e.wait_status("[ Wrote "));
     CHECK(e.file("FULL.TXT") == "xyzwA\r\n" + body.substr(6));
@@ -747,17 +747,17 @@ TEST(edit_big_files_live_in_banked_ram) {
     Editor e;
     CHECK(e.start("edit13.img", {text("BIG.TXT", body)}, "EDIT BIG.TXT"));
     CHECK(e.wait_status("[ Read 2500 lines ]", 4000000000ull));
-    CHECK(e.row(3).substr(0, 10) == "Line 00001");
+    CHECK(e.row(2).substr(0, 10) == "Line 00001");
     auto number = [](const std::string& row) { return row.compare(0, 5, "Line ") == 0 ? std::atoi(row.c_str() + 5) : -1; };
     // Page down well past the window: every row shows the line after the last.
     for (int i = 0; i < 60; ++i) e.keys(PGDN);
-    int first = number(e.row(3));
+    int first = number(e.row(2));
     CHECK(first > 900);
-    for (int r = 4; r <= 21; ++r) CHECK(number(e.row(r)) == first + (r - 3));
+    for (int r = 3; r <= 21; ++r) CHECK(number(e.row(r)) == first + (r - 2));
     for (int i = 0; i < 25; ++i) e.keys(PGUP); // and back up some
-    int back = number(e.row(3));
+    int back = number(e.row(2));
     CHECK(back > 1 && back < first);
-    for (int r = 4; r <= 21; ++r) CHECK(number(e.row(r)) == back + (r - 3));
+    for (int r = 3; r <= 21; ++r) CHECK(number(e.row(r)) == back + (r - 2));
     // The last line, and the position in the whole text.
     // (Jumps across the text take a while with nothing on the screen: they wait for
     // the status line.)
@@ -771,7 +771,7 @@ TEST(edit_big_files_live_in_banked_ram) {
     // Search: from the end round to a line near the start, then on to one in the middle.
     e.keys(ctrl('W') + "line 00077\r");
     CHECK(e.wait_status("Search Wrapped", LONG));
-    CHECK(number(e.row(3)) <= 77);
+    CHECK(number(e.row(2)) <= 77);
     e.keys(ctrl('C'));
     CHECK(has(e.status(), "line 77/2501"));
     e.keys(ctrl('W') + "line 01500\r");
@@ -780,10 +780,10 @@ TEST(edit_big_files_live_in_banked_ram) {
     e.keys(ctrl('K'));
     e.keys(meta('\\'));
     CHECK(e.wait_status("line 1/2500", LONG));  // (one line fewer: it was cut)
-    CHECK(e.row(3).substr(0, 10) == "Line 00001");
+    CHECK(e.row(2).substr(0, 10) == "Line 00001");
     e.keys(ctrl('U'));
-    CHECK(e.row(3).substr(0, 10) == "Line 01500");
-    CHECK(e.row(4).substr(0, 10) == "Line 00001");
+    CHECK(e.row(2).substr(0, 10) == "Line 01500");
+    CHECK(e.row(3).substr(0, 10) == "Line 00001");
     e.keys("TOP");
     e.keys(ctrl('O') + "\r");
     CHECK(e.wait_status("[ Wrote 2501 lines ]", LONG));
