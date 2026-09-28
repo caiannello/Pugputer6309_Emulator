@@ -3,7 +3,8 @@
 # the .tar.gz next to it. Everything is rebuilt from source: the BIOS, DOS, shell, editor and
 # BASIC (needs lwtools -- see README.md), then the emulator in Release configuration, linked
 # fully statically (so it runs on any x86-64 Linux, with no library versions to match), then
-# a disk image holding the shell, the editor, BASIC and the demo programs.
+# a disk image holding the shell, the editor, BASIC, the demo programs and the sources of
+# every program in /CMD (in /ASM, for rebuilding them on the Pugputer).
 # (The Linux counterpart of make_release.bat, whose VERSION it uses.)
 #
 # Needs: lwtools, CMake, g++ with the static C and C++ libraries (Ubuntu/Debian: build-essential).
@@ -38,7 +39,7 @@ mkdir -p "$OUT"
 cp "$BUILD/tools/basic309_sdboot_demo" "$OUT/pugputer"
 strip "$OUT/pugputer" 2>/dev/null || true
 cp "$ROOT/bios/pugbios.s19" "$OUT/pugbios.s19"
-"$BUILD/tools/mkdiskimg" --out "$OUT/disk-original.img" --add-dir "$ROOT/demo/programs"
+"$BUILD/tools/mkdiskimg" --out "$OUT/disk-original.img" --add-dir "$ROOT/demo/programs" --sources "$ROOT"
 cp "$OUT/disk-original.img" "$OUT/disk.img"
 cp "$ROOT/demo/release/start-console.sh" "$ROOT/demo/release/start-serial.sh" \
    "$ROOT/demo/release/reset-disk.sh" "$OUT/"

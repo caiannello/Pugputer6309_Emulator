@@ -5,7 +5,9 @@ The Pugputer6309's BASIC: Microsoft 6809 Extended Color BASIC, adapted to run as
 calls) and extended with disk file I/O in the style of GW-BASIC. This is the project's
 only BASIC.
 
-- `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`).
+- `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`). With `COMFILE` defined,
+  raw output is `BASIC.COM` itself (its program header and `$C000-$EFFF`): the demo disk carries
+  the source as `/ASM/BASIC.ASM`, with `/ASM/BASICCOM.ASM` to rebuild it with ASM on the Pugputer.
 - `build_basic.bat` -- builds `exbasrom309.s19` **and** `exbasrom309.lst` with a symbol
   table (`--symbols`). Always build through it: the token-audit test reads the symbols.
 - `../reinit_disk.bat` -- rebuilds the BIOS, `dos/dos.asm`, the shell and BASIC, then

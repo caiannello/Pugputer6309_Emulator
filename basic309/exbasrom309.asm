@@ -175,6 +175,16 @@ EXECJP    RMB  2              LB4AA
 * THIS ROUTINE PICKS UP THE NEXT INPUT CHARACTER FROM                      
 * BASIC. THE ADDRESS OF THE NEXT BASIC BYTE TO BE                      
 * INTERPRETED IS STORED AT CHARAD.                      
+; basic309: with COMFILE defined (BASICCOM.ASM on the demo disk does that), the
+; output is BASIC.COM itself: its program header and $C000-$EFFF, nothing else. The
+; routine below is copied down from LA10D at start-up anyway, so then it's only
+; space here.
+          IFDEF COMFILE
+GETNCH    RMB  6
+GETCCH    RMB  1
+CHARAD    RMB  2
+          RMB  3
+          ELSE
 GETNCH    INC  <CHARAD+1      *PV INCREMENT LS BYTE OF INPUT POINTER 
           BNE  GETCCH         *PV BRANCH IF NOT ZERO (NO CARRY) 
           INC  <CHARAD        *PV INCREMENT MS BYTE OF INPUT POINTER 
@@ -183,6 +193,7 @@ CHARAD    RMB  2              *PV THESE 2 BYTES CONTAIN ADDRESS OF THE CURRENT
 *         *    CHARACTER WHICH THE BASIC INTERPRETER IS  
 *         *    PROCESSING      
           JMP  BROMHK         JUMP BACK INTO THE BASIC RUM 
+          ENDC
                                
 VAB       RMB  1              = LOW ORDER FOUR BYTES OF THE PRODUCT 
 VAC       RMB  1              = OF A FLOATING POINT MULTIPLICATION 
@@ -291,6 +302,11 @@ PROGST     RMB  1              START OF PROGRAM SPACE
                                
                                
                                
+          IFDEF COMFILE
+          ORG  $C000-8        basic309: BASIC.COM's program header (EXE_* in
+          FCC  /PX/           bios/defines.d): load $C000, entry $C000, flags 0
+          FDB  $C000,$C000,0
+          ENDC
           ORG  $C000
 ; Fixed entry point: dos/dos.asm (BASIC_ENTRY), the test harnesses and the demo tools all start
 ; BASIC by jumping to $C000, so they never depend on where RESVEC happens to land as code is
@@ -7035,6 +7051,9 @@ LINE      CMPA #TOK_INPUT     �INPUT� TOKEN
                                
                                
 * END OF EXTENDED BASIC                      
+          IFDEF COMFILE
+          ZMB  $F000-*        basic309: BASIC.COM is all of $C000-$EFFF
+          ELSE
 * INTERRUPT VECTORS                      
           ORG  $FFF0           
 LBFF0     FDB  $0000          RESERVED 
@@ -7045,3 +7064,4 @@ LBFF8     FDB  IRQVEC         IRQ
 LBFFA     FDB  SWIVEC         SWI 
 LBFFC     FDB  NMIVEC         NMI 
 LBFFE     FDB  RESVEC         RESET 
+          ENDC

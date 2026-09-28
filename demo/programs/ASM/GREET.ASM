@@ -1,6 +1,6 @@
 * GREET.ASM -- a first program for ASM, the Pugputer's own assembler.
 *
-*   ASM -f com greet.asm        makes GREET.COM
+*   ASM -f com greet.asm           makes GREET.COM
 *   GREET Ada                      prints "Hello, Ada!"
 *
 * A program is a file with an 8-byte header (ASM's "com" format writes it);

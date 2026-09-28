@@ -18,6 +18,7 @@
 
 #include "basic309_session.hpp"
 #include "disk_images.hpp"
+#include "pugputer/demo_sources.hpp"
 #include "fat16_reader.hpp"
 #include "test_framework.hpp"
 
@@ -76,6 +77,7 @@ struct Machine {
     }
     // Types a shell command; what it printed up to the next prompt ("<<TIMEOUT>>"
     // if the prompt never came back).
+    uint64_t cycles = 0; // what the last run() took
     std::string run(const std::string& cmd, uint64_t budget = 20000000000ull) {
         s.received.clear();
         for (char c : cmd) s.send_byte(static_cast<uint8_t>(c));
@@ -83,6 +85,7 @@ struct Machine {
         uint64_t spent = 0;
         while (spent < budget) {
             spent += s.bus.run(20000);
+            cycles = spent;
             const std::string& r = s.received;
             if (r.size() > cmd.size() + 2 && r.compare(r.size() - 2, 2, "> ") == 0) return r;
         }
@@ -271,6 +274,44 @@ TEST(asm_assembles_basic_as_s_records_like_lwasm) {
     const std::string from = "(  exbasrom309.asm)", to = "(        exbas.asm)";
     for (size_t k = 0; (k = lst.find(from, k)) != std::string::npos; k += to.size()) lst.replace(k, from.size(), to);
     CHECK(same("BASIC's listing", lst, no_cr(m.file("EXBAS.LST"))));
+}
+
+TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
+    // The sources as the demo disk has them in /ASM (mkdiskimg --sources), rebuilt with
+    // the commands /ASM/README.TXT gives: each program comes out as it was built.
+    std::vector<pugputer::Fat16File> files;
+    for (const auto& src : pugputer::kDemoSources) CHECK(add(files, repo(src.repo), src.disk));
+    Machine m;
+    CHECK(m.start("asm_sources.img", files));
+    m.run("PATH /"); // (ASM.COM and LINK.COM are in the root on this disk)
+    m.run("CD /ASM");
+    struct Build {
+        const char* cmd;
+        const char* out;
+        std::string built;
+    };
+    std::vector<uint8_t> image(65536, 0);
+    CHECK(pugputer::load_srec_file(EXBASROM309_S19_PATH, image.data(), image.size()).ok);
+    std::string basic_com = std::string("PX\xC0\x00\xC0\x00\x00\x00", 8) +
+                            std::string(image.begin() + 0xC000, image.begin() + 0xF000);
+    for (const Build& b : {Build{"ASM -o SHELL.COM shell.asm", "/ASM/SHELL.COM", host_text(repo("shell/shell.bin"))},
+                           Build{"ASM -o EDIT.COM edit.asm", "/ASM/EDIT.COM", host_text(EDIT_BIN_PATH)},
+                           Build{"ASM -o HEXDUMP.COM hexdump.asm", "/ASM/HEXDUMP.COM", host_text(HEXDUMP_BIN_PATH)},
+                           Build{"ASM -o MOVE.COM move.asm", "/ASM/MOVE.COM", host_text(MOVE_BIN_PATH)},
+                           Build{"ASM -o BASIC.COM basiccom.asm", "/ASM/BASIC.COM", basic_com}}) {
+        std::string out = m.run(b.cmd);
+        CHECK(out.find("ERROR") == std::string::npos);
+        CHECK(same(b.out, b.built, m.file(b.out)));
+        if (std::getenv("ASM_TIMING")) std::printf("  %s: %.1f s at 3.58 MHz\n", b.cmd, m.cycles / 3.58e6);
+    }
+    m.run("CD ASMLINK");
+    CHECK(m.run("ASM -o ASM.COM asm.asm").find("ERROR") == std::string::npos);
+    CHECK(same("/ASM/ASMLINK/ASM.COM", host_text(ASM_BIN_PATH), m.file("/ASM/ASMLINK/ASM.COM")));
+    CHECK(m.run("ASM -o LINK.COM link.asm").find("ERROR") == std::string::npos);
+    CHECK(same("/ASM/ASMLINK/LINK.COM", host_text(LINK_BIN_PATH), m.file("/ASM/ASMLINK/LINK.COM")));
+    // A new program runs from where it was made, ahead of the search path.
+    m.run("CD ..");
+    CHECK(m.run("HEXDUMP basiccom.asm").find("000000  2A 20 42 41 53 49 43 43") != std::string::npos);
 }
 
 TEST(asm_assembles_itself_and_the_copy_works) {

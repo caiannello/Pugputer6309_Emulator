@@ -29,7 +29,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII) and `MOVE.COM` (move or rename a file). |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
-| `demo/` | The sample BASIC programs and launcher scripts that go into the binary release. |
+| `demo/` | The sample BASIC programs and launcher scripts that go into the binary release, and (in `demo/sources/`) the notes that go with the programs' sources in the release disk's `/ASM`. |
 
 Every folder has its own `README.md` with the details.
 

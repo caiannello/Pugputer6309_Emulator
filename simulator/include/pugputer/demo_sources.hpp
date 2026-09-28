@@ -1,0 +1,40 @@
+// The sources of the programs in /CMD, as the demo disk carries them in /ASM so that
+// they can be rebuilt (and changed) on the Pugputer with ASM: each file's path in the
+// repository and its path on the disk. mkdiskimg --sources adds them; test_asmlink.cpp
+// rebuilds the programs from them.
+#pragma once
+
+namespace pugputer {
+
+struct DemoSource {
+    const char* repo; // relative to the repository's root
+    const char* disk;
+};
+
+inline constexpr DemoSource kDemoSources[] = {
+    {"demo/sources/README.TXT", "ASM/README.TXT"},
+    {"bios/defines.d", "ASM/DEFINES.D"},
+    {"shell/shell.asm", "ASM/SHELL.ASM"},
+    {"edit/edit.asm", "ASM/EDIT.ASM"},
+    {"utils/hexdump.asm", "ASM/HEXDUMP.ASM"},
+    {"utils/move.asm", "ASM/MOVE.ASM"},
+    {"basic309/exbasrom309.asm", "ASM/BASIC.ASM"},
+    {"demo/sources/BASICCOM.ASM", "ASM/BASICCOM.ASM"},
+    {"bios/defines.d", "ASM/ASMLINK/DEFINES.D"},
+    {"asmlink/asm.asm", "ASM/ASMLINK/ASM.ASM"},
+    {"asmlink/link.asm", "ASM/ASMLINK/LINK.ASM"},
+    {"asmlink/pa_util.asm", "ASM/ASMLINK/PA_UTIL.ASM"},
+    {"asmlink/pa_heap.asm", "ASM/ASMLINK/PA_HEAP.ASM"},
+    {"asmlink/pa_io.asm", "ASM/ASMLINK/PA_IO.ASM"},
+    {"asmlink/pa_strm.asm", "ASM/ASMLINK/PA_STRM.ASM"},
+    {"asmlink/pa_sym.asm", "ASM/ASMLINK/PA_SYM.ASM"},
+    {"asmlink/pa_expr.asm", "ASM/ASMLINK/PA_EXPR.ASM"},
+    {"asmlink/pa_line.asm", "ASM/ASMLINK/PA_LINE.ASM"},
+    {"asmlink/pa_insn.asm", "ASM/ASMLINK/PA_INSN.ASM"},
+    {"asmlink/pa_dir.asm", "ASM/ASMLINK/PA_DIR.ASM"},
+    {"asmlink/pa_out.asm", "ASM/ASMLINK/PA_OUT.ASM"},
+    {"asmlink/pa_obj.asm", "ASM/ASMLINK/PA_OBJ.ASM"},
+    {"asmlink/pa_itab.asm", "ASM/ASMLINK/PA_ITAB.ASM"},
+};
+
+} // namespace pugputer

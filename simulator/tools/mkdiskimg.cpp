@@ -3,8 +3,9 @@
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
 // EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM and MOVE.COM (shell/shell.bin,
 // edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, utils/hexdump.bin and
-// utils/move.bin as assembled -- they carry their own program headers) and BASIC.COM (the $C000-$EFFF window of basic309's S-record,
-// given a program header: load $C000, entry $C000 -- see EXE_* in bios/defines.d).
+// utils/move.bin as assembled -- they carry their own program headers) and
+// BASIC.COM (the $C000-$EFFF window of basic309's S-record, given a program
+// header: load $C000, entry $C000 -- see EXE_* in bios/defines.d).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
 //
@@ -14,11 +15,13 @@
 //             --asm path/to/asm.bin --link path/to/link.bin
 //             --hexdump path/to/hexdump.bin --move path/to/move.bin
 //             --out path/to/disk.img
-//             [--add-dir path/to/folder]
+//             [--add-dir path/to/folder] [--sources path/to/repository]
 //
 // --add-dir copies a folder onto the disk as well: its files (8.3 names) into the
 // root directory and its subfolders, recursively, into directories of the same
 // names -- the binary release does this with demo/programs (BASIC/, ASM/).
+// --sources adds the programs' sources from the repository, in /ASM (see
+// pugputer/demo_sources.hpp), for rebuilding them on the Pugputer.
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -28,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "pugputer/demo_sources.hpp"
 #include "pugputer/fat16_image.hpp"
 #include "pugputer/srec_loader.hpp"
 
@@ -64,6 +68,7 @@ int main(int argc, char** argv) {
     std::string shell_path = SHELL_BIN_DEFAULT;
     std::string out_path = DISK_IMG_DEFAULT;
     std::string add_dir;
+    std::string sources;
     // The other programs in /CMD, each assembled with its own header: the option that
     // names another file for it, the file, and its name on the disk.
     struct Program {
@@ -92,6 +97,8 @@ int main(int argc, char** argv) {
             shell_path = argv[++i];
         } else if (std::strcmp(argv[i], "--add-dir") == 0 && i + 1 < argc) {
             add_dir = argv[++i];
+        } else if (std::strcmp(argv[i], "--sources") == 0 && i + 1 < argc) {
+            sources = argv[++i];
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             out_path = argv[++i];
         }
@@ -153,6 +160,15 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (!read_file((std::filesystem::path(add_dir) / rel).string(), f.data)) return 1;
+            std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
+            files.push_back(std::move(f));
+        }
+    }
+    if (!sources.empty()) {
+        for (const auto& src : pugputer::kDemoSources) {
+            Fat16File f;
+            f.name = src.disk;
+            if (!read_file((std::filesystem::path(sources) / src.repo).string(), f.data)) return 1;
             std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
             files.push_back(std::move(f));
         }

@@ -509,7 +509,9 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
 - `test_asmlink.cpp` -- ASM.COM and LINK.COM (`../asmlink/`) on the emulated machine. The
   lwtools build is the reference, byte for byte and listing for listing:
   - ASM must assemble the shell, the editor, DOS, BASIC (as S-records), itself, LINK, and
-    the BIOS's modules (as object files).
+    the BIOS's modules (as object files); and rebuild every program in `/CMD` from the sources
+    as the demo disk has them in `/ASM` (`pugputer/demo_sources.hpp`), with the commands its
+    `README.TXT` gives -- BASIC.COM included.
   - LINK must link the BIOS to lwlink's S-records and map, and the whole BIOS must build on
     the machine.
   - The copies they make must work, the programs they make must run, and errors must leave no

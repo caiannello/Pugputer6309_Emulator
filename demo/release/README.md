@@ -76,7 +76,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, and the sources of every program in `/CMD`) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -104,6 +104,18 @@ GREET Ada
 
 `EDIT GREET.ASM` shows how it works; `ASM` alone lists the options (`-l` makes a listing).
 **`LINK`** links object files (`ASM -f obj`) into a program, as lwlink does.
+
+`/ASM` also holds the sources of every program in `/CMD` -- the shell, the editor, BASIC,
+`HEXDUMP`, `MOVE`, and ASM and LINK themselves (in `/ASM/ASMLINK`) -- so you can change them and
+rebuild them on the Pugputer. `TYPE /ASM/README.TXT` lists the commands. For instance:
+
+```
+CD /ASM
+ASM -o HEXDUMP.COM hexdump.asm
+```
+
+makes `HEXDUMP.COM` there, which runs in place of `/CMD/HEXDUMP.COM` while `/ASM` is the
+current directory; `COPY HEXDUMP.COM /CMD` makes it the one everywhere.
 
 ## Other commands
 

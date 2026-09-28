@@ -3,7 +3,8 @@ rem Builds the Windows x64 binary demo release: dist\Pugputer6309-demo-<version>
 rem the zip next to it. Everything is rebuilt from source: the BIOS, DOS, shell, editor and BASIC
 rem (needs lwtools -- see README.md), then the emulator in Release configuration with the
 rem C++ runtime linked statically (so there are no DLLs to ship), then a disk image holding
-rem the shell, the editor, BASIC and the demo programs.
+rem the shell, the editor, BASIC, the demo programs and the sources of every program in /CMD
+rem (in /ASM, for rebuilding them on the Pugputer).
 rem
 rem Needs: lwtools, CMake and Visual Studio 2022 (or its Build Tools) with the C++ workload.
 rem Only this Windows release is replaced in dist\; a Linux one there (make_release.sh) is
@@ -37,7 +38,7 @@ if exist "%ROOT%dist\%NAME%" rmdir /s /q "%ROOT%dist\%NAME%"
 mkdir "%OUT%" || exit /b 1
 copy /y "%BUILD%\tools\Release\basic309_sdboot_demo.exe" "%OUT%\pugputer.exe" >nul || exit /b 1
 copy /y "%ROOT%bios\pugbios.s19" "%OUT%\pugbios.s19" >nul || exit /b 1
-"%BUILD%\tools\Release\mkdiskimg.exe" --out "%OUT%\disk-original.img" --add-dir "%ROOT%demo\programs" || exit /b 1
+"%BUILD%\tools\Release\mkdiskimg.exe" --out "%OUT%\disk-original.img" --add-dir "%ROOT%demo\programs" --sources "%ROOT%." || exit /b 1
 copy /y "%OUT%\disk-original.img" "%OUT%\disk.img" >nul
 copy /y "%ROOT%demo\release\start-console.bat" "%OUT%\" >nul || exit /b 1
 copy /y "%ROOT%demo\release\start-com-port.bat" "%OUT%\" >nul || exit /b 1
