@@ -1,6 +1,6 @@
 # Vibe-Coded Pugputer 6309 Simulator
 
-A homebrew computer built around the Hitachi **HD6309** CPU, with its complete software stack --
+A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD Card, OPL3 Sound chip, with its complete software stack --
 BIOS, DOS, shell, a text editor, an assembler and linker, and BASIC -- and a cycle-counted emulator that runs all of
 it on a PC.
 
