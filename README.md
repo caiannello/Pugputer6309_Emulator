@@ -86,7 +86,7 @@ Every folder has its own `README.md` with the details.
   the PC's sound (Nuked OPL3). `basic309_sdboot_demo` boots the real chain -- BIOS, SD boot,
   DOS, shell -- from a disk image, with the console on your terminal or on a serial port (a COM
   port on Windows; a tty or a pseudo-terminal on Linux). `demo/programs/ASM/VGM` has two songs
-  to play on it.
+  to play on it (ready to run in the release disk's `/DEMO`).
 
 ## Building from source
 

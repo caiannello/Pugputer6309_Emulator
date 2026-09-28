@@ -499,7 +499,8 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
 - `test_opl3.cpp` -- the YMF262 (`Opl3Device`): a note sounds and then goes idle, frames keep
   pace with CPU time, short idle spells are sent as the rests they are (long ones aren't), no
   sound without a sink, both register arrays, the timers and status flags (masking, reset); and
-  `demo/programs/ASM/VGM/VGXWINGF.ASM` assembled with ASM and played by the emulated machine:
+  `demo/programs/ASM/VGM/VGXWINGF.ASM` assembled with ASM (the same bytes as the release
+  disk's ready-made `/DEMO/VGXWINGF.COM`) and played by the emulated machine:
   every register write of the song, sound throughout, the tempo the real machine plays it at,
   back to the shell, and the chip idle afterwards.
 - `test_uart.cpp` -- register-level UART behavior direct against

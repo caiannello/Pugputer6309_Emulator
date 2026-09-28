@@ -93,7 +93,7 @@ lists the options (`--bios` and `--disk` select other images).
 |---|---|
 | `pugputer` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the music demos in `/ASM/VGM`, and the sources of every program in `/CMD`) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the music demos' sources in `/ASM/VGM`, and the sources of every program in `/CMD`) and `/DEMO` (the music demos, ready to run) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.sh` |
 | `start-console.sh`, `start-serial.sh`, `reset-disk.sh` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -147,7 +147,8 @@ VGMONKEY
 ```
 
 plays LeChuck's theme from *The Secret of Monkey Island*; `VGXWINGF.ASM` is from *Star Wars:
-X-Wing*. Ctrl-C stops a song. While music plays, the emulator runs at the real machine's speed
+X-Wing*. Both are also ready to run in `/DEMO`: `/DEMO/VGMONKEY`, `/DEMO/VGXWINGF`. Ctrl-C
+stops a song. While music plays, the emulator runs at the real machine's speed
 (3.58 MHz), so songs keep their tempo; the rest of the time it runs flat out.
 The sound goes out through `aplay` (ALSA), or `pacat` (PulseAudio) or `pw-cat` (PipeWire),
 whichever is installed -- Ubuntu has `aplay` already (package `alsa-utils`). With none of them,

@@ -191,6 +191,11 @@ TEST(opl3_a_demo_song_assembles_and_plays_in_time) {
     Fat16Volume::Entry e;
     CHECK(v.load(img.c_str()) && v.find("/VGXWINGF.COM", e));
     CHECK(opl3.register_writes() == 0 && c.frames == 0);
+    // The same as the release disk's ready-made /DEMO/VGXWINGF.COM: lwasm's raw image
+    // (demo/compile) with the header mkdiskimg gives it.
+    std::string raw = host_text(std::string(REPO_DIR) + "/demo/build/vgxwingf.bin");
+    std::vector<uint8_t> made = v.read(e);
+    CHECK(!raw.empty() && std::string(made.begin(), made.end()) == std::string("PX\x40\x00\x40\x00\x00\x00", 8) + raw);
 
     uint64_t cycles = run_cmd("VGXWINGF", 400000000ull);
     CHECK(cycles != 0);

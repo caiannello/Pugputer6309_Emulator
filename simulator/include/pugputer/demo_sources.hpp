@@ -1,8 +1,10 @@
 // The sources of the programs in /CMD, as the demo disk carries them in /ASM so that
 // they can be rebuilt (and changed) on the Pugputer with ASM: each file's path in the
 // repository and its path on the disk. mkdiskimg --sources adds them; test_asmlink.cpp
-// rebuilds the programs from them.
+// rebuilds the programs from them. It also adds the demo programs, ready to run.
 #pragma once
+
+#include <cstdint>
 
 namespace pugputer {
 
@@ -35,6 +37,19 @@ inline constexpr DemoSource kDemoSources[] = {
     {"asmlink/pa_out.asm", "ASM/ASMLINK/PA_OUT.ASM"},
     {"asmlink/pa_obj.asm", "ASM/ASMLINK/PA_OBJ.ASM"},
     {"asmlink/pa_itab.asm", "ASM/ASMLINK/PA_ITAB.ASM"},
+};
+
+// The demo programs in /DEMO: raw images (demo/compile.bat or .sh assembles them from
+// demo/programs/ASM/VGM), each given the program header ASM -f com would give it.
+struct DemoProgram {
+    const char* repo; // the raw image, relative to the repository's root
+    const char* disk;
+    uint16_t load;    // load and entry address
+};
+
+inline constexpr DemoProgram kDemoPrograms[] = {
+    {"demo/build/vgmonkey.bin", "DEMO/VGMONKEY.COM", 0x4000},
+    {"demo/build/vgxwingf.bin", "DEMO/VGXWINGF.COM", 0x4000},
 };
 
 } // namespace pugputer

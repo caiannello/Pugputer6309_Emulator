@@ -21,7 +21,8 @@
 // root directory and its subfolders, recursively, into directories of the same
 // names -- the binary release does this with demo/programs (BASIC/, ASM/).
 // --sources adds the programs' sources from the repository, in /ASM (see
-// pugputer/demo_sources.hpp), for rebuilding them on the Pugputer.
+// pugputer/demo_sources.hpp), for rebuilding them on the Pugputer, and the demo
+// programs, built (demo/compile.bat or .sh), in /DEMO.
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -170,6 +171,21 @@ int main(int argc, char** argv) {
             f.name = src.disk;
             if (!read_file((std::filesystem::path(sources) / src.repo).string(), f.data)) return 1;
             std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
+            files.push_back(std::move(f));
+        }
+        for (const auto& prog : pugputer::kDemoPrograms) {
+            Fat16File f;
+            f.name = prog.disk;
+            std::vector<uint8_t> body;
+            if (!read_file((std::filesystem::path(sources) / prog.repo).string(), body)) {
+                std::fprintf(stderr, "(the demos are built by demo/compile.bat, or compile.sh)\n");
+                return 1;
+            }
+            // Program header: "PX", load address, entry address, flags (all big-endian).
+            uint8_t hi = static_cast<uint8_t>(prog.load >> 8), lo = static_cast<uint8_t>(prog.load & 0xFF);
+            f.data = {'P', 'X', hi, lo, hi, lo, 0, 0};
+            f.data.insert(f.data.end(), body.begin(), body.end());
+            std::printf("Added /%s (%zu bytes with its header)\n", f.name.c_str(), f.data.size());
             files.push_back(std::move(f));
         }
     }
