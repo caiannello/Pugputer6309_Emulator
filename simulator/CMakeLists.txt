@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(hd6309_emulator CXX)
+project(hd6309_emulator C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,9 +47,19 @@ set(PUGPUTER_SOURCES
     src/pugputer/srec_loader.cpp
     src/pugputer/sdcard_device.cpp
     src/pugputer/fat16_image.cpp
+    src/pugputer/opl3_device.cpp
 )
 if(PUGPUTER_BUILD_COM_BRIDGE)
     list(APPEND PUGPUTER_SOURCES src/pugputer/com_port_bridge.cpp)
+endif()
+
+# Nuked OPL3 (third_party/nuked-opl3, LGPL-2.1+): the YMF262's sound, for Opl3Device. Its own
+# code, compiled as it comes (so without this project's warning levels).
+add_library(nuked_opl3 STATIC third_party/nuked-opl3/opl3.c)
+if(MSVC)
+    target_compile_options(nuked_opl3 PRIVATE /W1)
+else()
+    target_compile_options(nuked_opl3 PRIVATE -w)
 endif()
 
 # System-level library: SystemBus + IDevice + UartR65C51 (+ the serial-port
@@ -59,6 +69,7 @@ endif()
 add_library(pugputer_system STATIC ${PUGPUTER_SOURCES})
 target_include_directories(pugputer_system PUBLIC include)
 target_link_libraries(pugputer_system PUBLIC hd6309_static)
+target_link_libraries(pugputer_system PRIVATE nuked_opl3)
 if(PUGPUTER_BUILD_COM_BRIDGE)
     target_compile_definitions(pugputer_system PUBLIC PUGPUTER_HAVE_COM_BRIDGE)
 endif()

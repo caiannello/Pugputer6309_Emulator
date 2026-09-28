@@ -10,6 +10,9 @@ Pugputer, byte for byte as they were built.
                                  a minute or two)
   DEFINES.D    the BIOS and DOS calls, included by the others
 
+  VGM/         two songs for the OPL3 music chip (not programs in /CMD):
+                 ASM -f com vgmonkey.asm   then VGMONKEY
+
   ASMLINK/     the assembler and the linker:
                  CD ASMLINK
                  ASM -o ASM.COM asm.asm

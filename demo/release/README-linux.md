@@ -93,7 +93,7 @@ lists the options (`--bios` and `--disk` select other images).
 |---|---|
 | `pugputer` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, and the sources of every program in `/CMD`) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the music demos in `/ASM/VGM`, and the sources of every program in `/CMD`) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.sh` |
 | `start-console.sh`, `start-serial.sh`, `reset-disk.sh` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -135,6 +135,25 @@ ASM -o HEXDUMP.COM hexdump.asm
 makes `HEXDUMP.COM` there, which runs in place of `/CMD/HEXDUMP.COM` while `/ASM` is the
 current directory; `COPY HEXDUMP.COM /CMD` makes it the one everywhere.
 
+## Music
+
+The emulator plays the Pugputer's music card, a Yamaha **YMF262 (OPL3)**, through your PC's
+sound. `/ASM/VGM` holds two songs from classic PC games, as programs that drive the chip:
+
+```
+CD /ASM/VGM
+ASM -f com vgmonkey.asm
+VGMONKEY
+```
+
+plays LeChuck's theme from *The Secret of Monkey Island*; `VGXWINGF.ASM` is from *Star Wars:
+X-Wing*. Ctrl-C stops a song. While music plays, the emulator runs at the real machine's speed
+(3.58 MHz), so songs keep their tempo; the rest of the time it runs flat out.
+The sound goes out through `aplay` (ALSA), or `pacat` (PulseAudio) or `pw-cat` (PipeWire),
+whichever is installed -- Ubuntu has `aplay` already (package `alsa-utils`). With none of them,
+the emulator says so at start-up and runs without sound. `./pugputer --no-sound` keeps the chip
+quiet.
+
 ## Other commands
 
 **`HEXDUMP file`** shows a file as hex and ASCII, 16 bytes a line (Ctrl-C stops it).
@@ -144,9 +163,9 @@ current directory.
 
 ## Good to know
 
-- The emulator has no sound or graphics yet -- the Pugputer's console is a serial terminal.
-- It runs as fast as your PC allows (much faster than the real machine); it uses a full CPU core
-  while it is running.
+- The emulator has no graphics yet -- the Pugputer's console is a serial terminal.
+- It runs as fast as your PC allows (much faster than the real machine), except while music
+  plays; it uses a full CPU core while it is running.
 - The keyboard: your terminal is used as the Pugputer's ANSI terminal, so arrows, Home/End,
   PgUp/PgDn, Delete, F-keys and Alt+key reach the Pugputer as the terminal sends them.
   Backspace is sent as ^H, which is what BASIC expects. BASIC's own line editor cannot type

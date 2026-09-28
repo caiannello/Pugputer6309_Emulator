@@ -11,7 +11,7 @@ On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the 
 run `./start-console.sh` in a terminal. Nothing to install or compile; see the release's `README.md`.
 
 ## Future plans
-- Emulated Graphical display and OPL3 Sound
+- An emulated graphical display (the OPL3 sound is here: see `simulator/README.md`)
 
 ## Real Hardware Here!
 [Pugputer6309 on GitHub](https://github.com/caiannello/Pugputer6309)
@@ -27,7 +27,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `asmlink/` | `ASM.COM` and `LINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
 | `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII) and `MOVE.COM` (move or rename a file). |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
-| `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking), the emulator programs, and the test suite. |
+| `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking, the YMF262 music chip), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release, and (in `demo/sources/`) the notes that go with the programs' sources in the release disk's `/ASM`. |
 
 Every folder has its own `README.md` with the details.
@@ -43,7 +43,7 @@ Every folder has its own `README.md` with the details.
 | `$8000-$BFFF` | RAM bank 2 |
 | `$C000-$EFFF` | RAM bank 3 (BASIC.COM loads at `$C000`) |
 | `$F000-$FEFF` | BIOS ROM (about 3.1KB of the 3.8KB used) |
-| `$FF00-$FFEF` | I/O: SD storage `$FFD8`, UART `$FFE8`, bank registers `$FFEC-$FFEF`; addresses are reserved for a VDP (`$FFE4`), an OPL3 (`$FFE0`) and a VIA (`$FFB0`) |
+| `$FF00-$FFEF` | I/O: SD storage `$FFD8`, OPL3 music `$FFE0`, UART `$FFE8`, bank registers `$FFEC-$FFEF`; addresses are reserved for a VDP (`$FFE4`) and a VIA (`$FFB0`) |
 | `$FFF0-$FFFF` | Interrupt vectors |
 
 - **Memory banking.** The 64KB address space is four 16KB banks; each bank register (write-only)
@@ -82,9 +82,11 @@ Every folder has its own `README.md` with the details.
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
   `basic309/README.md` for the differences from GW-BASIC.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
-  card and banked RAM modeled to the register. `basic309_sdboot_demo` boots the real chain --
-  BIOS, SD boot, DOS, shell -- from a disk image, with the console on your terminal or on a
-  serial port (a COM port on Windows; a tty or a pseudo-terminal on Linux).
+  card and banked RAM modeled to the register, and the YMF262 (OPL3) music chip playing through
+  the PC's sound (Nuked OPL3). `basic309_sdboot_demo` boots the real chain -- BIOS, SD boot,
+  DOS, shell -- from a disk image, with the console on your terminal or on a serial port (a COM
+  port on Windows; a tty or a pseudo-terminal on Linux). `demo/programs/ASM/VGM` has two songs
+  to play on it.
 
 ## Building from source
 

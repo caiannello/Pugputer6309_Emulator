@@ -11,6 +11,7 @@
 //   basic309_sdboot_demo --com pty           -- (Linux) bridge to a new pseudo-terminal
 //   basic309_sdboot_demo --bios path\to.s19  -- load a different BIOS image
 //   basic309_sdboot_demo --disk path\to.img  -- load a different disk image
+//   basic309_sdboot_demo --no-sound          -- keep the OPL3 quiet
 //   basic309_sdboot_demo --help
 //
 // Unless --bios / --disk say otherwise, pugbios.s19 and disk.img are looked for
@@ -23,6 +24,10 @@
 // arrive as a terminal sends them -- arrows and function keys as escape sequences,
 // Alt+key as Esc then the key, Ctrl+C as ^C. Ctrl+Break (or closing the window)
 // quits; on Linux, Ctrl+\ (or closing the terminal) quits.
+//
+// The music card's YMF262 (OPL3) is at $FFE0-$FFE3 (pugputer/opl3_device.hpp), and plays
+// through the PC's sound (audio_out.hpp). While it plays, the emulator runs at the real
+// machine's speed, so that music keeps its tempo; the rest of the time, flat out.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -47,6 +52,8 @@
 #include <string>
 #include <vector>
 
+#include "audio_out.hpp"
+#include "pugputer/opl3_device.hpp"
 #include "pugputer/rom_device.hpp"
 #include "pugputer/sdcard_device.hpp"
 #include "pugputer/srec_loader.hpp"
@@ -58,6 +65,7 @@
 
 using pugputer::IrqLine;
 using pugputer::load_srec_file;
+using pugputer::Opl3Device;
 using pugputer::RomDevice;
 using pugputer::SdCardDevice;
 using pugputer::SrecLoadResult;
@@ -114,6 +122,7 @@ void usage() {
 #endif
         "  --bios FILE      BIOS image, Motorola S-record (default: pugbios.s19 beside this program)\n"
         "  --disk FILE      FAT16 disk image (default: disk.img beside this program)\n"
+        "  --no-sound       no sound from the OPL3 music chip (and no slowing to real time for it)\n"
         "  --help           this text\n"
         "\n"
         "In console mode, type at the prompt; %s quits.\n",
@@ -284,6 +293,7 @@ int main(int argc, char** argv) {
     std::string com_port;
     std::string bios_path = find_default("pugbios.s19", PUGBIOS_S19_DEFAULT);
     std::string disk_path = find_default("disk.img", DISK_IMG_DEFAULT);
+    bool sound = true;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "/?") == 0) {
             usage();
@@ -294,6 +304,8 @@ int main(int argc, char** argv) {
             bios_path = argv[++i];
         } else if (std::strcmp(argv[i], "--disk") == 0 && i + 1 < argc) {
             disk_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--no-sound") == 0) {
+            sound = false;
         }
     }
 
@@ -321,6 +333,18 @@ int main(int argc, char** argv) {
     bus.map_device("sdcard", 0xFFD8, 4, &sdcard, IrqLine::None);
     bus.map_device("uart", 0xFFE8, 4, &uart, IrqLine::IRQ);
     bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
+
+    Opl3Device opl3;
+    bus.map_device("opl3", 0xFFE0, 4, &opl3, IrqLine::None);
+    AudioOut audio;
+    if (!sound) {
+        std::printf("Sound off (--no-sound).\n");
+    } else if (audio.open(opl3.sample_rate())) {
+        opl3.set_sink(&audio);
+        std::printf("OPL3 sound through %s.\n", audio.description().c_str());
+    } else {
+        std::printf("No sound: %s.\n", audio.error().c_str());
+    }
 
     bool use_com = false;
 #ifdef PUGPUTER_HAVE_COM_BRIDGE

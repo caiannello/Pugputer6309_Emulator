@@ -28,12 +28,33 @@ more reliable than the OCR'd programming manual; those numbers are facts of the 
 instruction set, also documented in Hitachi's and Motorola's publications. The emulator's
 golden tests assemble small programs with `lwasm` (skipped when it isn't installed).
 
+## Nuke.YKT -- Nuked OPL3
+
+The emulator's YMF262 (OPL3) music chip sounds through **Nuked OPL3** by **Nuke.YKT**
+(<https://github.com/nukeykt/Nuked-OPL3>), a cycle-accurate emulation of the chip built from
+its decapped die. It is included, unmodified, in `simulator/third_party/nuked-opl3`, under the
+**GNU Lesser General Public License, version 2.1 or later** (the `LICENSE` file there); it is
+compiled into the emulator programs, whose complete source -- this repository -- is available,
+so you can change or replace it and rebuild them. Nuked OPL3 credits in turn the MAME team (the
+rhythm section), carbon14 and opl3 of forums.submarine.org.uk (tremolo and phase), Matthew
+Gambrell and Olli Niemitalo (the OPL2 ROMs) and John McMaster and digshadow of siliconpr0n.org
+(the die photographs).
+
+## The music in the demos
+
+`demo/programs/ASM/VGM` holds two VGM players by Craig Iannello, from the Pugputer 6309
+hardware project, each with a song logged from a classic PC game's OPL music: LeChuck's theme,
+by Michael Z. Land, from *The Secret of Monkey Island* (Lucasfilm Games, 1990), and "Death and
+Funeral" from *Star Wars: X-Wing* (LucasArts, 1993). The music remains the property of its
+composers and publishers; it is included, as a short demonstration of the hardware, in the same
+spirit as the VGM archives it came from.
+
 ## Hardware and standards
 
 - The **Hitachi HD6309** CPU (and Motorola MC6809 behind it), the **Rockwell R65C51** UART, the
   **Yamaha V9958** and **YMF262**, and the **WDC W65C22** VIA are the parts the Pugputer 6309 is
-  built around; the emulator models the CPU and UART, and the memory map reserves addresses for
-  the others.
+  built around; the emulator models the CPU, the UART and the YMF262 (the last through Nuked
+  OPL3, above), and the memory map reserves addresses for the others.
 - The disk format is **FAT16** (Microsoft's published file-system layout), 8.3 names, 512-byte
   sectors; images are raw and can be read with ordinary tools.
 - The BASIC file statements follow the **GW-BASIC User's Guide** (sections 5.2 and 5.3) in spirit.
@@ -42,7 +63,9 @@ golden tests assemble small programs with `lwasm` (skipped when it isn't install
 
 The Windows demo is built with Microsoft Visual C++ and links its C++ runtime **statically**,
 so there are no runtime DLLs to ship. The Microsoft runtime libraries are redistributable under
-the Visual Studio license terms. The program uses only Windows system libraries at run time.
+the Visual Studio license terms. The program uses only Windows system libraries at run time
+(winmm for sound). Both demos contain Nuked OPL3 (LGPL-2.1+, above); the Linux one plays its
+sound through a separate player program (`aplay`, `pacat` or `pw-cat`) it doesn't include.
 
 ## Optional tools you may want
 

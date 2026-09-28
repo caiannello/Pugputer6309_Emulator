@@ -372,6 +372,26 @@ stay in sync with it by convention (the same relationship `srec_loader`
 has with the S-record spec: two independent implementations of one
 well-known/self-defined format, not one calling the other).
 
+### `Opl3Device` + `AudioOut` -- the YMF262 (OPL3) music chip
+
+`include/pugputer/opl3_device.hpp`: the Pugputer's music card, a Yamaha YMF262 at
+`$FFE0-$FFE3` (address / data for register array 0, then for array 1; a read of `$FFE0` gives
+the status). The sound is **Nuked OPL3** (`third_party/nuked-opl3`, LGPL-2.1+, a cycle-accurate
+model of the chip); the device adds the chip's two timers and status register, which Nuked OPL3
+leaves to its host.
+
+Time is the CPU's: every step's cycles become stereo frames (48 kHz) for an `AudioSink`, so a
+program that times its music by counting cycles (like the VGM players in
+`demo/programs/ASM/VGM`) keeps its tempo however fast the emulator runs. The chip is *active*
+from a register write until it has been silent, with no writes, for a second; only then are
+frames made. `basic309_sdboot_demo`'s sink, `tools/audio_out.cpp`, blocks while a quarter of
+a second of sound is queued, which holds the emulator to real time while music plays and lets
+it run flat out the rest of the time. A write less than ten seconds (of CPU time) after the
+chip went idle was a rest in the music: its silence is sent first, so the rest keeps its
+length. On Windows the sound goes to the waveOut API (winmm); on Linux it is piped to `aplay`,
+`pacat` or `pw-cat`, whichever is installed, so the fully static Linux build links no sound
+library. `--no-sound` turns it off.
+
 ### `basic309_demo` / `basic309_sdboot_demo` -- running BASIC interactively
 
 ```
@@ -379,6 +399,7 @@ basic309_sdboot_demo                     # the real thing: BIOS -> SD boot -> DO
 basic309_sdboot_demo --com COM10         # bridge the UART to a COM port instead (com0com setup above)
 basic309_sdboot_demo --com pty           # (Linux) ... or to a new pseudo-terminal (or --com /dev/ttyUSB0)
 basic309_sdboot_demo --bios x.s19 --disk y.img
+basic309_sdboot_demo --no-sound          # the OPL3 makes no sound (and never slows the emulator)
 basic309_demo                            # BASIC copied into RAM and started directly, no disk (LOAD/SAVE/OPEN unavailable)
 ```
 
@@ -475,6 +496,12 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   `LWTOOLS` environment variable works too).
 
 `pugputer_tests` (the `SystemBus`/`UartR65C51` suite):
+- `test_opl3.cpp` -- the YMF262 (`Opl3Device`): a note sounds and then goes idle, frames keep
+  pace with CPU time, short idle spells are sent as the rests they are (long ones aren't), no
+  sound without a sink, both register arrays, the timers and status flags (masking, reset); and
+  `demo/programs/ASM/VGM/VGXWINGF.ASM` assembled with ASM and played by the emulated machine:
+  every register write of the song, sound throughout, the tempo the real machine plays it at,
+  back to the shell, and the chip idle afterwards.
 - `test_uart.cpp` -- register-level UART behavior direct against
   `IDevice`: TDRE/RDRF timing against the configured baud rate,
   overrun (a byte completing while RDRF is still set gets dropped),

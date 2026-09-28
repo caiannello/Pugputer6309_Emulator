@@ -45,8 +45,11 @@ endif()
 
 # The emulator itself: has its own console code for both Windows and POSIX terminals.
 set(DISK_IMG_SDBOOT_DEFAULT "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/disk.img")
-add_executable(basic309_sdboot_demo basic309_sdboot_demo.cpp)
+add_executable(basic309_sdboot_demo basic309_sdboot_demo.cpp audio_out.cpp)
 target_link_libraries(basic309_sdboot_demo PRIVATE pugputer_system)
+if(WIN32)
+    target_link_libraries(basic309_sdboot_demo PRIVATE winmm) # waveOut, for the OPL3's sound
+endif()
 target_compile_definitions(basic309_sdboot_demo PRIVATE
     PUGBIOS_S19_DEFAULT="${PUGBIOS_S19_DEFAULT}"
     DISK_IMG_DEFAULT="${DISK_IMG_SDBOOT_DEFAULT}"
