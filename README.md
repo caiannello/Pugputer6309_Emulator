@@ -1,4 +1,4 @@
-# Vibe-Coded Pugputer 6309 Simulator and OS
+# Vibe-Coded Pugputer 6309 Simulator
 
 A homebrew computer built around the Hitachi **HD6309** CPU, with its complete software stack --
 BIOS, DOS, shell, a text editor, an assembler and linker, and BASIC -- and a cycle-counted emulator that runs all of
