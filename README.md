@@ -11,7 +11,6 @@ On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the 
 run `./start-console.sh` in a terminal. Nothing to install or compile; see the release's `README.md`.
 
 ## Future plans
-- (Soon) include all ASM source on the demo's SD card, to allow *in-system* customization of system.
 - Emulated Graphical display and OPL3 Sound
 
 ## Real Hardware Here!
