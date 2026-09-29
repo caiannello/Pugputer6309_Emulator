@@ -225,8 +225,6 @@ tests, a keyword-table audit, file and error-trapping tests driven with real key
   address range of a V9958 video card), and later the same on the real machine.
 - **Testing on the real Pugputer 6309:** the SD transport (SPI or VIA-driven), an SD card
   prepared off-line to bootstrap the hardware, and timing checks against the emulator.
-- **Programs that use banking:** an extension of the program-file header describing segments
-  in banked RAM, so applications bigger than 64KB can be loaded and run.
 - **More BASIC:** the remaining Color BASIC space is tight (about 160 bytes), so growing it
   means relocating BASIC lower in RAM, which the program header already allows.
 - **Emulator conveniences:** running at the real machine's clock speed, a debugger view,
