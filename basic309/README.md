@@ -163,6 +163,9 @@ are trappable like any other: `IF ERR=26 THEN ...` for a missing file.
 
 ## Statements for an ANSI terminal
 
+Output of COLORS.BAS in Tera Term terminal via UART.
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/colors.png?raw=true)
+
 The console is an ANSI terminal (the emulator's own window, or PuTTY, Tera Term, a Linux
 terminal on a serial port). These statements send its escape sequences, and keep BASIC's
 print position (`POS`, `TAB`, the comma zones, and the automatic new line at column 80) true
