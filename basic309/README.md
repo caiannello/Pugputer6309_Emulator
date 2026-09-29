@@ -2,8 +2,11 @@
 
 The Pugputer6309's BASIC: Microsoft 6809 Extended Color BASIC, adapted to run as a
 *guest of the BIOS* (no direct UART access -- console I/O goes through the BIOS's `SWI2`
-calls) and extended with disk file I/O in the style of GW-BASIC. This is the project's
-only BASIC.
+calls) and extended with disk file I/O in the style of GW-BASIC, with add'l commands
+to support ANSI terminal color, cursor, and video display graphics and sprites. This 
+is the project's only BASIC. 
+
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
 
 - `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`). With `COMFILE` defined,
   raw output is `BASIC.COM` itself (its program header and `$B400-$EFFF`): the demo disk carries
@@ -219,7 +222,6 @@ draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on t
   table (`$037C00`) and the text screen (`$038000`).
 - `/BASIC/VIDEO.BAS` on the demo disk uses them all.
 
-![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
 ## Differences from GW-BASIC you will run into
 
 - No `%` integer variables (write `CODE` where the guide has `CODE%`), no `MKD$`/`CVD`,
