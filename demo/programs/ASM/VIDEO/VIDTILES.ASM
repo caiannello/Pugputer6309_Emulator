@@ -21,7 +21,7 @@
 ;
 ;   ASM -f com vidtiles.asm        makes VIDTILES.COM
 ;------------------------------------------------------------------------------
-            INCLUDE "VIDCARD.D"
+            INCLUDE "vidcard.d"
 
 BIGMAP      equ  $020000    ; page 1, layer 0: 64x32 entries
 BIGTILES    equ  $021000    ;   16x16 tiles, 8 bits a pixel: 256 bytes each

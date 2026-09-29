@@ -17,7 +17,7 @@
 ;
 ;   ASM -f com vidtext.asm         makes VIDTEXT.COM
 ;------------------------------------------------------------------------------
-            INCLUDE "VIDCARD.D"
+            INCLUDE "vidcard.d"
 
 MARQMAP     equ  $030000    ; page 1's marquee layer: a 64x32 cell map
 MARQROW     equ  11         ; its row (lores: hires rows 22 and 23)

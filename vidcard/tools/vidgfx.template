@@ -24,7 +24,7 @@
 ;
 ;   ASM -f com vidgfx.asm          makes VIDGFX.COM
 ;------------------------------------------------------------------------------
-            INCLUDE "VIDCARD.D"
+            INCLUDE "vidcard.d"
 RAM_IRQV    equ  $0026      ; where the BIOS's IRQ entry jumps (see /ASM/DEFINES.D)
 
 SPINA       equ  $014000    ; page 2: the spinner's two buffers

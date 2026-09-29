@@ -17,7 +17,7 @@
 ;   ASM -f com viddemo.asm         makes VIDDEMO.COM
 ;   VIDDEMO                        runs it; any key stops it
 ;------------------------------------------------------------------------------
-            INCLUDE "VIDCARD.D"
+            INCLUDE "vidcard.d"
 F_STDIN     equ  $02        ; the BIOS calls used (see /ASM/DEFINES.D)
 B_GETC      equ  $0C
 B_EXIT      equ  $2B

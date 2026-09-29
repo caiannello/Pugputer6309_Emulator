@@ -23,7 +23,7 @@ the limits it may impose that the emulator doesn't.
 |---|---|
 | `core/vc.h`, `core/vc.c` | the card: registers, address space, commands, the scanline renderer |
 | `core/vc_font.c` | the font it starts with (Spleen 8x16, code page 437; see `../NOTICE.md`) |
-| `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "VIDCARD.D"`) |
+| `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
 | `tools/bdf2c.py` | makes `vc_font.c` from a BDF font |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
 | `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), and `VIDLIB.ASM`, the helpers they share |

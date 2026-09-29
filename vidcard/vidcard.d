@@ -3,7 +3,7 @@
 ;    FILE: vidcard.d
 ;
 ; The video card's registers, settings and drawing commands, for programs:
-;   INCLUDE "VIDCARD.D"
+;   INCLUDE "vidcard.d"
 ; What they do is in VIDCARD.TXT, in /ASM/VIDEO on the demo disk (vidcard/README.md
 ; in the project).
 ;
