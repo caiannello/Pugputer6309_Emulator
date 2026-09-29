@@ -208,6 +208,8 @@ the DOS (a randomized model-based test compared against an independent FAT16 rea
 injection at every disk write, 100MB volumes), the shell, and BASIC (exact-output regression
 tests, a keyword-table audit, file and error-trapping tests driven with real keystrokes).
 
+![Added ANSI color, CLS, HOME to BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/color_basic.png?raw=true)
+
 ## Where it is going
 
 - **A graphics display peripheral** for the emulator (the memory map already reserves the
@@ -227,3 +229,4 @@ Ideas and patches are welcome; open an issue to discuss before a big change.
 
 MIT License -- see `LICENSE`. BASIC descends from Microsoft's Extended Color BASIC, and the
 firmware is assembled with William Astle's lwtools; see `NOTICE.md` for these and other credits.
+
