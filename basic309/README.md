@@ -219,6 +219,7 @@ draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on t
   table (`$037C00`) and the text screen (`$038000`).
 - `/BASIC/VIDEO.BAS` on the demo disk uses them all.
 
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
 ## Differences from GW-BASIC you will run into
 
 - No `%` integer variables (write `CODE` where the guide has `CODE%`), no `MKD$`/`CVD`,
