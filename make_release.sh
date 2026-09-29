@@ -30,10 +30,15 @@ done
 
 echo "=== Building the emulator (Release, static) ==="
 "$ROOT/check_build_dir.sh" "$BUILD"
+# (CMAKE_EXE_LINKER_FLAGS is cleared explicitly: older versions of this script set it to
+# -static, and CMake keeps it in the cache, where it would also make pugputer-video try to
+# link SDL2 statically -- which fails. Only the targets PUGPUTER_STATIC_EXE names are static.)
 cmake -S "$ROOT/simulator" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DHD6309_BUILD_TESTS=OFF \
-      -DPUGPUTER_STATIC_EXE=ON
+      -DPUGPUTER_STATIC_EXE=ON -DCMAKE_EXE_LINKER_FLAGS=
 cmake --build "$BUILD" --parallel "$JOBS" --target basic309_sdboot_demo mkdiskimg
-if cmake --build "$BUILD" --parallel "$JOBS" --target pugputer-video 2>/dev/null; then
+if cmake --build "$BUILD" --target help | grep -q "pugputer-video"; then
+    # SDL2 was found, so the video window must build: a failure here stops the release.
+    cmake --build "$BUILD" --parallel "$JOBS" --target pugputer-video
     VIDEO=1
 else
     VIDEO=0
