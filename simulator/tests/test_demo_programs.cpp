@@ -128,3 +128,55 @@ TEST(demo_program_video_draws_on_the_video_card) {
     CHECK(s.run_until_ok(200000000));
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);
 }
+
+// MANDELGR.BAS: MANDEL.BAS's set in 320x240, colored by how soon each point escapes. The whole
+// picture takes over six billion cycles, so this draws its middle rows only (96-143: the top
+// half's last 24 and their mirror images), where the set is widest.
+TEST(demo_program_mandelgr_draws_the_set) {
+    std::string img = demo_disk();
+    Basic309Session s;
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
+    pugputer::VideoDevice v;
+    v.set_draw_all(true);
+    s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+    CHECK(s.run_line("LOAD \"MANDELGR\"").empty());
+    s.run_line("120 FOR Y=96 TO 119:D=(Y-119.5)*K:E=D*D:G=E/4:W=239-Y:C=L-H");
+    s.received.clear();
+    s.type("RUN");
+    CHECK(s.wait_for("PRESS ANY KEY", 3000000000ull));
+    CHECK(!contains(s.received, "ERROR"));
+    s.bus.run(3579545 / 30); // a frame or two, so the picture has it all
+    const vc_card& c = v.card();
+    auto shown = [&](int i) {
+        const uint8_t* p = c.cfg + 0x200 + 2 * i;
+        return vc_rgb888(static_cast<uint16_t>(p[0] << 8 | p[1]));
+    };
+    CHECK(shown(1) == vc_rgb888(0x07FF) && shown(24) == vc_rgb888(0xF81F)); // cyan to magenta
+    // The picture is doubled to 640x480. Inside the set: black; far outside: cyan.
+    CHECK(v.pixel(2 * 256, 240) == 0);     // c = 0: in the big cardioid
+    CHECK(v.pixel(2 * 142, 240) == 0);     // c = -1: in the circle left of it
+    CHECK(v.pixel(2, 2 * 96) == shown(1)); // c = -2.24-0.18i: out at once
+    // Every color, and the same above the axis and below.
+    bool used[256] = {};
+    int diff = 0;
+    for (int y = 96; y < 120; ++y)
+        for (int x = 0; x < 320; ++x) {
+            used[c.vram[y * 320 + x]] = true;
+            diff += c.vram[y * 320 + x] != c.vram[(239 - y) * 320 + x];
+        }
+    CHECK(diff == 0);
+    int colors = 0;
+    for (int i = 0; i < 256; ++i) colors += used[i];
+    CHECK(colors == 25 && used[24]);
+    if (const char* dump = std::getenv("VIDCARD_DUMP")) {
+        std::ofstream f(dump, std::ios::binary);
+        for (int i = 0; i < 640 * 480; ++i) {
+            uint32_t p = v.pixels()[i];
+            char rgb[3] = {static_cast<char>(p >> 16), static_cast<char>(p >> 8), static_cast<char>(p)};
+            f.write(rgb, 3);
+        }
+    }
+    s.send_byte('x');
+    CHECK(s.run_until_ok(200000000));
+    CHECK(c.cfg[VC_DC_CTRL] == 0x01);
+}
