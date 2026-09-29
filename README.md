@@ -47,7 +47,8 @@ Every folder has its own `README.md` with the details.
 | `$FFF0-$FFFF` | Interrupt vectors |
 
 - **Memory banking.** The 64KB address space is four 16KB banks; each bank register (write-only)
-  selects which of up to 256 physical 16KB RAM pages appears there, for up to **1MB of RAM**.
+  selects which of up to 256 physical 16KB RAM pages appears there, for up to **4MB of RAM**.
+  (1 MB are populated in the emulator, to match my current HW.)
   The BIOS probes how much RAM is installed and hands pages out through `B_PAGE_ALLOC`; bank 0
   stays fixed and applications may remap banks 1-3.
 - **Console.** A serial console: an R65C51 UART at 19200 baud, 8N1.
