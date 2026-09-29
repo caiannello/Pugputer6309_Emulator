@@ -101,6 +101,32 @@ const std::vector<Case>& cases() {
         {"err_return_without_gosub", {"RETURN"}, "?RG ERROR\r\n"},
         {"err_type_mismatch", {"PRINT \"A\"+1"}, "?TM ERROR\r\n"},
         {"err_in_program_line", {"10 X=1/0", "RUN"}, "?/0 ERROR IN 10\r\n"},
+        // --- ANSI terminal statements (HOME..RESET, GOTOXY) ---
+        {"home", {"PRINT \"AB\";:HOME:PRINT POS(0)"}, "AB\x1b[H 0 \r\n"},
+        {"cls", {"PRINT \"AB\";:CLS:PRINT POS(0)"}, "AB\x1b[2J\x1b[H 0 \r\n"},
+        {"gotoxy", {"GOTOXY(10,4):PRINT POS(0)"}, "\x1b[5;11H 10 \r\n"},
+        // (at column 255, "OK" starts on a new line)
+        {"gotoxy_limits", {"GOTOXY(0,255):GOTOXY(255,0)"}, "\x1b[256;1H\x1b[1;256H\r\n"},
+        {"gotoxy_lists_as_typed", {"10 GOTOXY(X+1,Y):GOTO 10", "LIST"}, "10 GOTOXY(X+1,Y):GOTO 10\r\n"},
+        {"gotoxy_needs_xy", {"GOTOXZ(1,2)"}, "?SN ERROR\r\n"},
+        {"goto_still_goes", {"10 GOTO 30", "20 PRINT \"NO\"", "30 PRINT \"YES\"", "RUN"}, "YES\r\n"},
+        {"lcolor", {"LCOLOR(196,17)"}, "\x1b[38;5;196;48;5;17m"},
+        {"hcolor", {"HCOLOR(255,128,0,0,0,64)"}, "\x1b[38;2;255;128;0;48;2;0;0;64m"},
+        {"reset", {"RESET"}, "\x1b[m"},
+        {"color_list", {"10 LCOLOR(1,2):HCOLOR(1,2,3,4,5,6):RESET:HOME:CLS", "LIST"},
+         "10 LCOLOR(1,2):HCOLOR(1,2,3,4,5,6):RESET:HOME:CLS\r\n"},
+        // An error sends nothing: every argument is read before the sequence goes out.
+        {"color_range", {"LCOLOR(1,256)"}, "?FC ERROR\r\n"},
+        {"color_syntax", {"HCOLOR(1,2,3)"}, "?SN ERROR\r\n"},
+        // Escape sequences PRINTed by hand take no room on the line either.
+        {"escape_not_counted", {"PRINT CHR$(27)+\"[31mAB\";CHR$(27);\"7\";POS(0)"}, "\x1b[31mAB\x1b" "7 2 \r\n"},
+        {"escapes_dont_wrap",
+         {"FOR I=1 TO 40:PRINT CHR$(27)+\"[1;31mX\";:NEXT:PRINT POS(0)"},
+         [] {
+             std::string r;
+             for (int i = 0; i < 40; ++i) r += "\x1b[1;31mX";
+             return r + " 40 \r\n";
+         }()},
     };
     return kCases;
 }

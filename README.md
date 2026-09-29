@@ -41,7 +41,7 @@ Every folder has its own `README.md` with the details.
 | `$0000-$3FFF` | RAM bank 0 -- always physical page 0: BIOS variables and stack (to `$052F`), then the resident DOS (`$0600` up) |
 | `$4000-$7FFF` | RAM bank 1 (the shell loads at `$4000`) |
 | `$8000-$BFFF` | RAM bank 2 |
-| `$C000-$EFFF` | RAM bank 3 (BASIC.COM loads at `$C000`) |
+| `$C000-$EFFF` | RAM bank 3 (BASIC.COM loads at `$BC00`, and starts at `$C000`) |
 | `$F000-$FEFF` | BIOS ROM (about 3.1KB of the 3.8KB used) |
 | `$FF00-$FFEF` | I/O: SD storage `$FFD8`, OPL3 music `$FFE0`, UART `$FFE8`, bank registers `$FFEC-$FFEF`; addresses are reserved for a VDP (`$FFE4`) and a VIA (`$FFB0`) |
 | `$FFF0-$FFFF` | Interrupt vectors |
@@ -79,7 +79,8 @@ Every folder has its own `README.md` with the details.
 - **Utilities.** `HEXDUMP file`: a file as offsets, hex and ASCII, 16 bytes a line.
   `MOVE from [to]`: move a file to another directory, or rename it. See `utils/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
-  `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`. See
+  `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`, and
+  `CLS`/`HOME`/`GOTOXY`/`LCOLOR`/`HCOLOR`/`RESET` for the ANSI terminal. See
   `basic309/README.md` for the differences from GW-BASIC.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
   card and banked RAM modeled to the register, and the YMF262 (OPL3) music chip playing through

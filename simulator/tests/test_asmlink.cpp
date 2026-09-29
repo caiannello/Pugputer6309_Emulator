@@ -292,8 +292,8 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     };
     std::vector<uint8_t> image(65536, 0);
     CHECK(pugputer::load_srec_file(EXBASROM309_S19_PATH, image.data(), image.size()).ok);
-    std::string basic_com = std::string("PX\xC0\x00\xC0\x00\x00\x00", 8) +
-                            std::string(image.begin() + 0xC000, image.begin() + 0xF000);
+    std::string basic_com = std::string("PX\xBC\x00\xC0\x00\x00\x00", 8) +
+                            std::string(image.begin() + 0xBC00, image.begin() + 0xF000);
     for (const Build& b : {Build{"ASM -o SHELL.COM shell.asm", "/ASM/SHELL.COM", host_text(repo("shell/shell.bin"))},
                            Build{"ASM -o EDIT.COM edit.asm", "/ASM/EDIT.COM", host_text(EDIT_BIN_PATH)},
                            Build{"ASM -o HEXDUMP.COM hexdump.asm", "/ASM/HEXDUMP.COM", host_text(HEXDUMP_BIN_PATH)},

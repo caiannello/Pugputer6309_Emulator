@@ -4,8 +4,8 @@
 // EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM and MOVE.COM (shell/shell.bin,
 // edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, utils/hexdump.bin and
 // utils/move.bin as assembled -- they carry their own program headers) and
-// BASIC.COM (the $C000-$EFFF window of basic309's S-record, given a program
-// header: load $C000, entry $C000 -- see EXE_* in bios/defines.d).
+// BASIC.COM (the $BC00-$EFFF window of basic309's S-record, given a program
+// header: load $BC00, entry $C000 -- see EXE_* in bios/defines.d).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
 //
@@ -42,9 +42,10 @@ using pugputer::load_srec_file;
 using pugputer::SrecLoadResult;
 
 namespace {
-constexpr uint16_t kBasicBase = 0xC000;
-constexpr uint32_t kBasicSize = 0x3000; // $C000-$EFFF, same window the
+constexpr uint16_t kBasicBase = 0xBC00;  // BASIC_LOAD in exbasrom309.asm
+constexpr uint32_t kBasicSize = 0x3400;  // $BC00-$EFFF, same window the
                                          // existing basic309 tools/tests use
+constexpr uint16_t kBasicEntry = 0xC000; // BASIC_ENTRY: JMP RESVEC
 
 bool is_8_3(const std::filesystem::path& path) {
     std::string stem = path.stem().string();
@@ -127,8 +128,8 @@ int main(int argc, char** argv) {
                       'X',
                       static_cast<uint8_t>(kBasicBase >> 8),
                       static_cast<uint8_t>(kBasicBase & 0xFF),
-                      static_cast<uint8_t>(kBasicBase >> 8),
-                      static_cast<uint8_t>(kBasicBase & 0xFF),
+                      static_cast<uint8_t>(kBasicEntry >> 8),
+                      static_cast<uint8_t>(kBasicEntry & 0xFF),
                       0,
                       0};
     basic_com.data.insert(basic_com.data.end(), basic_image.begin() + kBasicBase,

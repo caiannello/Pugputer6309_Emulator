@@ -441,7 +441,7 @@ dos/dos.asm (a real BIOS client, talks to BIOS purely via SWI2 block calls)
 `$FFFE` reset vector with no hand-wired PC hijack anywhere -- nothing in
 the test tells the emulator where `SHELL.COM` or `BASIC.COM` is; the disk/DOS chain
 finds them. `tools/mkdiskimg.cpp` builds `basic309/disk.img` (`dos/dos.bin`
-+ `SHELL.COM` + `EDIT.COM` + `ASM.COM` + `LINK.COM` + `HEXDUMP.COM` + `MOVE.COM` + `BASIC.COM`, the `$C000-$EFFF` image extracted from `exbasrom309.s19`
++ `SHELL.COM` + `EDIT.COM` + `ASM.COM` + `LINK.COM` + `HEXDUMP.COM` + `MOVE.COM` + `BASIC.COM`, the `$BC00-$EFFF` image extracted from `exbasrom309.s19`
 with a program header, the same bytes the no-disk `basic309_demo` path copies into RAM); `tools/basic309_sdboot_demo.cpp`
 is the interactive equivalent of `basic309_demo` for this path
 (`--com`/`--bios`/`--disk` flags). In console mode it makes the console an ANSI terminal both

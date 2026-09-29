@@ -20,8 +20,8 @@
 struct Basic309Session {
     static constexpr uint16_t kBiosBase = 0xF000;
     static constexpr uint32_t kBiosSize = 0x1000;
-    static constexpr uint16_t kBasicBase = 0xC000;
-    static constexpr uint32_t kBasicSize = 0x3000;
+    static constexpr uint16_t kBasicBase = 0xBC00; // BASIC_LOAD in exbasrom309.asm
+    static constexpr uint32_t kBasicSize = 0x3400;
     static constexpr uint16_t kBasicEntry = 0xC000; // fixed entry: JMP RESVEC (see exbasrom309.asm)
 
     pugputer::RomDevice bios_rom{static_cast<uint16_t>(kBiosSize)};

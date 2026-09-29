@@ -52,6 +52,7 @@ They are in the disk's `/BASIC` directory; `DIR /BASIC` at the shell prompt list
 | `SEQFILE` | sequential files: `OPEN`, `PRINT#`, `LINE INPUT#`, `EOF`, `KILL` |
 | `RANDFILE` | random-access files: `FIELD`, `LSET`, `PUT`, `GET` |
 | `ERRTRAP` | `ON ERROR GOTO`, `ERR`, `ERL`, `RESUME NEXT` |
+| `COLORS` | the terminal's colors: `CLS`, `GOTOXY`, `LCOLOR` (256 colors), `HCOLOR` (24-bit), `RESET` |
 
 ## Things to try
 

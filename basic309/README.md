@@ -6,7 +6,7 @@ calls) and extended with disk file I/O in the style of GW-BASIC. This is the pro
 only BASIC.
 
 - `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`). With `COMFILE` defined,
-  raw output is `BASIC.COM` itself (its program header and `$C000-$EFFF`): the demo disk carries
+  raw output is `BASIC.COM` itself (its program header and `$BC00-$EFFF`): the demo disk carries
   the source as `/ASM/BASIC.ASM`, with `/ASM/BASICCOM.ASM` to rebuild it with ASM on the Pugputer.
 - `build_basic.bat` -- builds `exbasrom309.s19` **and** `exbasrom309.lst` with a symbol
   table (`--symbols`). Always build through it: the token-audit test reads the symbols.
@@ -19,7 +19,7 @@ only BASIC.
 ## How it is loaded and where it lives
 
 `BASIC.COM` is an ordinary program file (see `../shell/README.md`): an 8-byte header
-("PX", load `$C000`, entry `$C000`, flags 0) followed by `$C000-$EFFF` (12288 bytes). At boot
+("PX", load `$BC00`, entry `$C000`, flags 0) followed by `$BC00-$EFFF` (13312 bytes). At boot
 DOS starts the shell (BIOS -> `SD_BOOT_TRY` -> DOS -> `SHELL.COM`); typing `BASIC` at its
 prompt has DOS load BASIC.COM and jump to `BASIC_ENTRY`. `SYSTEM` leaves BASIC: DOS closes
 every open file and starts the shell again. (On a disk with no `SHELL.COM`, DOS starts
@@ -30,15 +30,18 @@ every open file and starts the shell again. (On a disk with no `SHELL.COM`, DOS 
 | `$0600-$3331`  | resident DOS (code, variables, a FAT-sector cache, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE`; only its first ~6KB is on disk, the buffers are just RAM |
 | `$3400`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$34`); its top, `PROGST`, moves as variables are added. Must stay above `DOS_END` (`dos/dos.lst`); `test_bios_layout` checks it. |
 | `PROGST+1`     | start of the BASIC program, then variables, arrays, free memory |
-| `$BFFF`        | fixed top of string space (`TOPRAM_FIXED`) |
-| `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (DOS, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
+| `$BBFF`        | fixed top of string space (`TOPRAM_FIXED`, `BASIC_LOAD-1`) |
+| `$BC00`        | `BASIC_LOAD`: where `BASIC.COM` loads. The terminal statements (`HOME`..`RESET`), then free space up to `$C000` (about 820 bytes) |
+| `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (the program header, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
 | `$F000-$FFFF`  | BIOS ROM |
 
-The ROM window is nearly full (about 160 bytes left after error trapping). Growing BASIC
-further means trimming unused Color BASIC code or moving `BASIC.COM` lower: its program
-header (`shell/README.md`) already says where it loads, so the load address is just
-`ORG`, `BASIC_ENTRY` and `TOPRAM_FIXED` in `exbasrom309.asm` plus the constants in
-`mkdiskimg.cpp` and the test sessions.
+`$C000-$EFFF` is nearly full (about 70 bytes left), so new code goes in the space below
+`$C000`, where the terminal statements are (reached with `JMP`/`JSR`, or a long branch). When
+that runs out, lower `BASIC_LOAD` in `exbasrom309.asm` (each 1KB is 1KB less for programs) and
+the matching constants: `kBasicBase`/`kBasicSize` in `simulator/tools/mkdiskimg.cpp`,
+`basic309_demo.cpp`, `tests/basic309_session.hpp` and `test_basic309_golden.cpp`, the header
+and window in `tests/disk_images.hpp` and `test_asmlink.cpp`, and `BASIC.COM`'s size in the
+tests that list it.
 
 ## Disk commands and directories
 
@@ -156,6 +159,38 @@ are trappable like any other: `IF ERR=26 THEN ...` for a missing file.
 110 ON ERROR GOTO 0
 ```
 
+## Statements for an ANSI terminal
+
+The console is an ANSI terminal (the emulator's own window, or PuTTY, Tera Term, a Linux
+terminal on a serial port). These statements send its escape sequences, and keep BASIC's
+print position (`POS`, `TAB`, the comma zones, and the automatic new line at column 80) true
+to where the cursor really is:
+
+| Statement | Sends | |
+|---|---|---|
+| `HOME` | `ESC[H` | cursor to row 0, column 0 |
+| `CLS` | `ESC[2J ESC[H` | clear the screen, cursor home |
+| `GOTOXY(col,row)` | `ESC[row+1;col+1H` | cursor to that column and row, counted from 0 (0-255) |
+| `LCOLOR(fg,bg)` | `ESC[38;5;fg;48;5;bgm` | text colors from the 256-color palette: 0-15 the standard colors, 16-231 a 6x6x6 color cube, 232-255 grays |
+| `HCOLOR(r,g,b,r,g,b)` | `ESC[38;2;r;g;b;48;2;r;g;bm` | text colors in 24-bit color, foreground then background (each 0-255) |
+| `RESET` | `ESC[m` | colors and attributes back to the terminal's normal |
+
+- `HOME`, `CLS` and `GOTOXY` set the print position to the cursor's new column.
+- All the arguments are read before anything is sent, so an error (`?FC` for a number over
+  255, `?SN` for a missing one) leaves the terminal as it was.
+- **Escape sequences you `PRINT` yourself don't count either:** from `ESC` to the end of the
+  sequence (`ESC` and one more character, or `ESC [` up to its final letter), nothing moves the
+  print position. So `PRINT CHR$(27)+"[1m";"BOLD"` is 4 characters wide, and a line full of
+  color changes no longer wraps early. (A sequence that moves the cursor, like `ESC[5C`, still
+  leaves BASIC's position where it was: use `GOTOXY` for moves.)
+- `GOTOXY` isn't a word in the dictionary: it is `GO`, `TO` and `XY` to the tokenizer, and
+  `GO TO` followed by `XY` means `GOTOXY`. It `LIST`s as typed.
+- How the colors look is up to the terminal. Most today do 256 colors and 24-bit color
+  (Windows Terminal, the Windows 10+ console, GNOME Terminal, Konsole, xterm, recent PuTTY);
+  older ones may map 24-bit colors to the nearest palette color, or ignore them.
+- `POS` counts to 127: past that it goes negative (Color BASIC's own limit).
+- `/BASIC/COLORS.BAS` on the demo disk shows them all.
+
 ## Differences from GW-BASIC you will run into
 
 - No `%` integer variables (write `CODE` where the guide has `CODE%`), no `MKD$`/`CVD`,
@@ -166,7 +201,9 @@ are trappable like any other: `IF ERR=26 THEN ...` for a missing file.
 - Unquoted `INPUT` strings end at a comma (Color BASIC behaviour).
 - The line editor drops characters above `z`, so `|` (and `{ } ~`) can't be typed.
 - Keywords are matched anywhere a word starts, so a variable whose name *begins* with a
-  keyword (`GETX`, `LOCK`, `EOFLAG`) is tokenised as the keyword plus letters.
+  keyword (`GETX`, `LOCK`, `EOFLAG`, `HOMEX`) is tokenised as the keyword plus letters.
+- `RESET` resets the terminal's colors; GW-BASIC's `RESET` (close every file) is `CLOSE`
+  here. `CLS` clears an ANSI terminal's screen.
 
 ## The DOS interface BASIC uses
 

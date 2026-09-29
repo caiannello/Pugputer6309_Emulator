@@ -39,8 +39,8 @@ using pugputer::UartR65C51;
 namespace {
 constexpr uint16_t kBiosBase = 0xF000;
 constexpr uint32_t kBiosSize = 0x1000; // $F000-$FFFF
-constexpr uint16_t kBasicBase = 0xC000;
-constexpr uint32_t kBasicSize = 0x3000; // $C000-$EFFF
+constexpr uint16_t kBasicBase = 0xBC00;
+constexpr uint32_t kBasicSize = 0x3400; // $BC00-$EFFF (BASIC_LOAD in exbasrom309.asm)
 constexpr uint16_t kBasic309Entry = 0xC000; // fixed entry: JMP RESVEC (see exbasrom309.asm)
 } // namespace
 

@@ -31,8 +31,8 @@ inline std::string build_image(const char* name, uint32_t sectors, uint8_t spc, 
     if (!pugputer::load_srec_file(EXBASROM309_S19_PATH, image.data(), image.size()).ok) return "";
     pugputer::Fat16File basic;
     basic.name = "BASIC.COM";
-    basic.data = {'P', 'X', 0xC0, 0x00, 0xC0, 0x00, 0, 0}; // program header: load $C000, entry $C000
-    basic.data.insert(basic.data.end(), image.begin() + 0xC000, image.begin() + 0xC000 + 0x3000);
+    basic.data = {'P', 'X', 0xBC, 0x00, 0xC0, 0x00, 0, 0}; // program header: load $BC00, entry $C000
+    basic.data.insert(basic.data.end(), image.begin() + 0xBC00, image.begin() + 0xF000);
     pugputer::Fat16File shell;
     shell.name = "SHELL.COM";
     std::ifstream shell_file(SHELL_BIN_PATH, std::ios::binary);

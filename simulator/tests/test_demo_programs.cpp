@@ -2,6 +2,7 @@
 // RUN without an error, with the output it advertises. The disk is built here (mkdiskimg's
 // contents plus the demo folder, subfolders and all) so the test doesn't depend on the shared
 // disk.img. BASIC starts in /BASIC, where they are, so they load by bare name.
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -65,4 +66,17 @@ TEST(demo_programs_load_and_run_and_print_what_they_should) {
     out = run_demo(s, "ERRTRAP");
     CHECK(contains(out, "100 / 2 = 50") && contains(out, "100 /-2 =-50") && contains(out, "CAN'T DIVIDE BY ZERO: ERROR 10 IN LINE 40") &&
           contains(out, "DONE") && !contains(out, "?"));
+
+    out = run_demo(s, "COLORS");
+    CHECK(!contains(out, "ERROR") && contains(out, "\x1b[2J\x1b[H") && contains(out, "\x1b[3;6H\x1b[38;5;0;48;5;0m    ") &&
+          contains(out, "\x1b[18;66H\x1b[38;5;0;48;5;255m    "));
+    // The two 24-bit rows (red to blue, black to white) are a line each, 64 cells: the escape
+    // sequences don't count toward the width.
+    size_t first = out.find("\x1b[38;2;0;0;0;48;2;0;0;255m ");
+    size_t last = out.find("\x1b[38;2;0;0;0;48;2;255;255;255m ");
+    CHECK(first != std::string::npos && last != std::string::npos && last > first);
+    if (first != std::string::npos && last != std::string::npos && last > first) {
+        std::string rows = out.substr(first, last - first);
+        CHECK(std::count(rows.begin(), rows.end(), '\n') == 1); // only the one between them
+    }
 }

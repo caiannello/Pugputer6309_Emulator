@@ -130,7 +130,7 @@ TEST(shell_dir_lists_names_sizes_and_directories) {
     std::string dir = cmd(s, "dir");
     std::ifstream sf(SHELL_BIN_PATH, std::ios::binary | std::ios::ate);
     CHECK(has(dir, "SHELL.COM    " + std::to_string(static_cast<long>(sf.tellg())) + "\r\n"));
-    CHECK(has(dir, "BASIC.COM    12296\r\n"));
+    CHECK(has(dir, "BASIC.COM    13320\r\n"));
     CHECK(has(dir, "HELLO.TXT    14\r\n"));
     CHECK(has(dir, "BIG.DAT      70000\r\n"));
     CHECK(has(dir, "A            1\r\n"));
@@ -169,7 +169,7 @@ TEST(shell_file_commands_copy_type_rename_delete) {
 
     // A big file copies exactly (across sectors and clusters).
     CHECK(cmd(s, "copy basic.com big.com") == "        1 file copied\r\n");
-    CHECK(has(cmd(s, "dir"), "BIG.COM      12296\r\n"));
+    CHECK(has(cmd(s, "dir"), "BIG.COM      13320\r\n"));
 
     // Directories.
     CHECK(cmd(s, "mkdir d1") == "");

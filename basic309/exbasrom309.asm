@@ -61,8 +61,10 @@ WORKBASE    equ  $3400         ; base of BASIC's relocated fixed workspace. Must
                                ; buffers, variables -- DOS_END in dos/dos.lst; $33CC
                                ; with 8 file buffers). test_bios_layout checks it.
                                ; DP is derived from this, not hand-typed.
-TOPRAM_FIXED equ $BFFF         ; fixed top-of-RAM for BASIC's use (interpreter
-                               ; code itself is loaded at $C000, just above)
+BASIC_LOAD  equ  $BC00         ; where BASIC.COM loads: the terminal statements
+                               ; (HOME..RESET) sit below the fixed entry at $C000
+TOPRAM_FIXED equ BASIC_LOAD-1  ; fixed top-of-RAM for BASIC's use (the interpreter's
+                               ; code is loaded just above)
 
 BS        EQU  8              BACKSPACE
 LF        EQU  $A             LINEFEED
@@ -176,7 +178,7 @@ EXECJP    RMB  2              LB4AA
 * BASIC. THE ADDRESS OF THE NEXT BASIC BYTE TO BE                      
 * INTERPRETED IS STORED AT CHARAD.                      
 ; basic309: with COMFILE defined (BASICCOM.ASM on the demo disk does that), the
-; output is BASIC.COM itself: its program header and $C000-$EFFF, nothing else. The
+; output is BASIC.COM itself: its program header and BASIC_LOAD-$EFFF, nothing else. The
 ; routine below is copied down from LA10D at start-up anyway, so then it's only
 ; space here.
           IFDEF COMFILE
@@ -288,6 +290,9 @@ ERRSTMT   RMB  2              where that statement starts (RESUME runs it again)
 STMTSP    RMB  2              S at the top of the interpreter loop: the level every statement starts at
 FMTADDED  RMB  1              FMTNAME added the default ".BAS" to the name it just formatted
 OLDADDED  RMB  1              NAME: ... to the OLD name
+; The terminal statements (HOME..RESET, below BASIC_ENTRY)
+ANSIST    RMB  1              PUTCHR in an escape sequence: $FF just after ESC, $7F after ESC [
+ANSIARG   RMB  6              their arguments, all read before anything is sent
 
 PROGST     RMB  1              START OF PROGRAM SPACE
 *         INTERRUPT VECTORS                 
@@ -303,12 +308,129 @@ PROGST     RMB  1              START OF PROGRAM SPACE
                                
                                
           IFDEF COMFILE
-          ORG  $C000-8        basic309: BASIC.COM's program header (EXE_* in
-          FCC  /PX/           bios/defines.d): load $C000, entry $C000, flags 0
-          FDB  $C000,$C000,0
+          ORG  BASIC_LOAD-8   basic309: BASIC.COM's program header (EXE_* in
+          FCC  /PX/           bios/defines.d): load BASIC_LOAD, entry $C000, flags 0
+          FDB  BASIC_LOAD,BASIC_ENTRY,0
           ENDC
+          ORG  BASIC_LOAD
+
+; basic309: statements for an ANSI terminal (the console is one: see PUTCHR, which
+; doesn't count an escape sequence's bytes in the print position).
+;   HOME               cursor to row 0, column 0
+;   CLS                clear the screen, cursor home
+;   GOTOXY(col,row)    cursor to that column and row (0-based)
+;   LCOLOR(fg,bg)      text colors from the 256-color palette (0-255)
+;   HCOLOR(r,g,b,r,g,b) text colors in 24-bit color: foreground, then background
+;   RESET              colors and attributes back to normal
+; HOME, CLS and GOTOXY set the print position (POS, TAB, commas) to the new column.
+; GOTOXY isn't in the dictionary: it crunches as GO TO XY, which GO sends here.
+
+; CLS: ESC[2J clears the screen (the cursor stays), then HOME.
+CLS       BSR  ANSICSI
+          LDA  #'2
+          BSR  ANSIOUT
+          LDA  #'J
+          BSR  ANSIOUT
+; HOME: ESC[H.
+HOME      BSR  ANSICSI
+          LDA  #'H
+          BSR  ANSIOUT
+          CLR  LPTPOS         THE PRINT POSITION IS COLUMN 0
+          RTS
+; RESET: ESC[m.
+RESET     BSR  ANSICSI
+          LDA  #'m
+          BRA  ANSIOUT
+; GOTOXY(col,row): ESC[row+1;col+1H (the terminal counts from 1).
+GOTOXY    JSR  GETNCH         PAST THE X
+          CMPA #'Y
+          LBNE LB277          'SYNTAX ERROR' IF NOT XY
+          JSR  GETNCH
+          LDX  #ANSIXY
+          BSR  ANSIARGS
+          BSR  ANSICSI
+          LDB  ANSIARG+1      ROW
+          BSR  ANSIDEC1
+          LDA  #';
+          BSR  ANSIOUT
+          LDB  ANSIARG        COLUMN
+          STB  LPTPOS         IS THE PRINT POSITION
+          BSR  ANSIDEC1
+          LDA  #'H
+          BRA  ANSIOUT
+; LCOLOR(fg,bg): ESC[38;5;fg;48;5;bgm. HCOLOR(r,g,b,r,g,b): ESC[38;2;r;g;b;48;2;r;g;bm.
+LCOLOR    LDX  #ANSILC
+          BRA  ANSICOL
+HCOLOR    LDX  #ANSIHC
+ANSICOL   BSR  ANSIARGS
+          BSR  ANSICSI
+          LDU  #ANSIARG
+ANSICOL1  LDA  ,X+            THE TEMPLATE: A CHARACTER TO SEND ...
+          BMI  ANSICOL2       ... OR (BIT 7 SET) THE NEXT ARGUMENT
+          BEQ  ANSIRTS
+          BSR  ANSIOUT
+          BRA  ANSICOL1
+ANSICOL2  LDB  ,U+
+          CLRA
+          BSR  ANSIDEC
+          BRA  ANSICOL1
+; Reads the arguments the template at X asks for into ANSIARG: each byte with bit 7 set
+; is the character before an argument ('(' or ','), then the argument (0-255); then ')'.
+; Keeps X. Reading them all first means an error sends nothing.
+ANSIARGS  PSHS X
+          LDU  #ANSIARG
+ANSIARG1  LDB  ,X+
+          BEQ  ANSIARG2
+          BPL  ANSIARG1
+          ANDB #$7F
+          JSR  LB26F          SYNTAX CHECK FOR IT
+          PSHS X,U
+          JSR  LB70B          EVALUATE AN EXPRESSION: 0-255 IN ACCB
+          PULS X,U
+          STB  ,U+
+          BRA  ANSIARG1
+ANSIARG2  PULS X
+          JMP  LB267          SYNTAX CHECK FOR ')'
+; Sends ESC [.
+ANSICSI   LDA  #ESC
+          BSR  ANSIOUT
+          LDA  #'[
+ANSIOUT   JMP  PUTCHR_RAW
+; Sends ACCB+1 in decimal.
+ANSIDEC1  CLRA
+          INCD
+; Sends ACCD (0-1279) in decimal.
+ANSIDEC   DIVD #10            QUOTIENT IN ACCB, REMAINDER IN ACCA
+          PSHS A
+          CLRA
+          TSTB
+          BEQ  ANSIDEC2
+          BSR  ANSIDEC        THE DIGITS BEFORE IT
+ANSIDEC2  PULS A
+          ADDA #'0
+          BRA  ANSIOUT
+ANSIRTS   RTS
+; The templates (see ANSICOL1 and ANSIARGS).
+ANSIXY    FCB  '(+$80,',+$80,0
+ANSILC    FCC  "38;5;"
+          FCB  '(+$80
+          FCC  ";48;5;"
+          FCB  ',+$80
+          FCC  "m"
+          FCB  0
+ANSIHC    FCC  "38;2;"
+          FCB  '(+$80,';,',+$80,';,',+$80
+          FCC  ";48;2;"
+          FCB  ',+$80,';,',+$80,';,',+$80
+          FCC  "m"
+          FCB  0
+
+          IFDEF COMFILE
+          ZMB  $C000-*        BASIC.COM CARRIES THE GAP TOO
+          ELSE
           ORG  $C000
-; Fixed entry point: dos/dos.asm (BASIC_ENTRY), the test harnesses and the demo tools all start
+          ENDC
+; Fixed entry point: BASIC.COM's header, the test harnesses and the demo tools all start
 ; BASIC by jumping to $C000, so they never depend on where RESVEC happens to land as code is
 ; added above it. (Checked by test_basic309_token_audit.)
 BASIC_ENTRY JMP RESVEC
@@ -343,18 +465,37 @@ PUTCHR    TST  DEVNUM         basic309: PRINT# etc. send output to a file
           PSHS A
           CMPA #CR            IS IT CARRIAGE RETURN?
           BEQ  NEWLINE        YES
+; basic309: an ANSI escape sequence -- ESC and one more byte, or ESC [ up to its final
+; byte ($40-$7E) -- goes out, but takes no room on the line.
+          TST  ANSIST         IN AN ESCAPE SEQUENCE?
+          BNE  PUTESC         YES
+          CMPA #ESC
+          BEQ  PUTESC0
           BSR  PUTCHR_RAW     ; send the character via BIOS B_PUTC
           INC  LPTPOS         INCREMENT CHARACTER COUNTER
           LDA  LPTPOS         CHECK FOR END OF LINE PRINTER LINE
           CMPA LPTWID         AT END OF LINE PRINTER LINE?
           BLO  PUTEND         NO
 NEWLINE   CLR  LPTPOS         RESET CHARACTER COUNTER
+          CLR  ANSIST         (AND END ANY ESCAPE SEQUENCE)
           LDA  #CR
           BSR  PUTCHR_RAW     ; send CR via BIOS B_PUTC
           LDA  #LF            DO LINEFEED AFTER CR
           BSR  PUTCHR_RAW     ; send LF via BIOS B_PUTC
 PUTEND    PULS A
           RTS
+PUTESC0   COM  ANSIST         JUST AFTER ESC
+          BRA  PUTESC9
+PUTESC    BPL  PUTESC1        BRANCH IF AFTER ESC [
+          CMPA #'[            ESC [ STARTS A CONTROL SEQUENCE ...
+          BNE  PUTESC8        ... ANYTHING ELSE IS A TWO-BYTE ONE
+          LSR  ANSIST
+          BRA  PUTESC9
+PUTESC1   CMPA #$40           A CONTROL SEQUENCE ENDS WITH $40-$7E
+          BLO  PUTESC9
+PUTESC8   CLR  ANSIST
+PUTESC9   BSR  PUTCHR_RAW
+          BRA  PUTEND
 
 ; Sends the byte in A out through the BIOS console. B_PUTC blocks
 ; internally if the ring buffer is full, so (unlike the old WAITACIA/
@@ -818,6 +959,17 @@ TOK_NEXT  EQU  $8B
           FCB  $80+'R'
           FCC  "RESUM"         B1
           FCB  $80+'E'
+; ANSI terminal statements (HOME..RESET, below BASIC_ENTRY; GOTOXY is GO TO XY).
+          FCC  "HOM"           B2
+          FCB  $80+'E'
+          FCC  "CL"            B3
+          FCB  $80+'S'
+          FCC  "LCOLO"         B4
+          FCB  $80+'R'
+          FCC  "HCOLO"         B5
+          FCB  $80+'R'
+          FCC  "RESE"          B6
+          FCB  $80+'T'
 * END OF EXECUTABLE COMMANDS. THE REMAINDER OF THE TABLE ARE NON-EXECUTABLE TOKENS
           FCC  "TAB"          A4
           FCB  $80+'('
@@ -1007,6 +1159,11 @@ TOK_INPUT EQU  (*-CMD_TAB)/2+$7F
           FDB  ERRORCMD        B0
 TOK_ERROR EQU  (*-CMD_TAB)/2+$7F
           FDB  RESUME          B1
+          FDB  HOME            B2
+          FDB  CLS             B3
+          FDB  LCOLOR          B4
+          FDB  HCOLOR          B5
+          FDB  RESET           B6
 TOK_HIGH_EXEC EQU  (*-CMD_TAB)/2+$7F
                                
 * ERROR MESSAGES AND THEIR NUMBERS AS USED INTERNALLY                      
@@ -2796,7 +2953,11 @@ RUN       JSR  CLOSEALL       basic309: RUN CLOSES ALL DATA FILES
 GO        TFR  A,B            SAVE INPUT CHARACTER IN ACCB 
 LAE88     JSR  GETNCH         GET A CHARACTER FROM BASIC 
           CMPB #TOK_TO        �TO� TOKEN 
-          BEQ  LAEA4          BRANCH IF GOTO 
+          BNE  LAE8F          BRANCH IF NOT GOTO
+          CMPA #'X            basic309: GO TO XY( IS GOTOXY
+          BNE  LAEA4          GOTO
+          JMP  GOTOXY
+LAE8F
           CMPB #TOK_SUB       �SUB� TOKEN 
           BNE  LAED7          �SYNTAX ERROR� IF NEITHER 
           LDB  #3             =ROOM FOR 6 
@@ -7052,7 +7213,7 @@ LINE      CMPA #TOK_INPUT     �INPUT� TOKEN
                                
 * END OF EXTENDED BASIC                      
           IFDEF COMFILE
-          ZMB  $F000-*        basic309: BASIC.COM is all of $C000-$EFFF
+          ZMB  $F000-*        basic309: BASIC.COM is all of BASIC_LOAD-$EFFF
           ELSE
 * INTERRUPT VECTORS                      
           ORG  $FFF0           
