@@ -17,9 +17,6 @@ This is the project's only BASIC.
 - `disk.img` -- the FAT16 SD-card image the emulator boots from (see
   `../simulator/README.md`, "boot chain").
 
-Output of MANDELGR.BAS. It takes quite a while to draw. :)
-![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
-
 ## How it is loaded and where it lives
 
 `BASIC.COM` is an ordinary program file (see `../shell/README.md`): an 8-byte header
@@ -163,9 +160,6 @@ are trappable like any other: `IF ERR=26 THEN ...` for a missing file.
 
 ## Statements for an ANSI terminal
 
-Output of COLORS.BAS in Tera Term terminal via UART.
-![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/colors.png?raw=true)
-
 The console is an ANSI terminal (the emulator's own window, or PuTTY, Tera Term, a Linux
 terminal on a serial port). These statements send its escape sequences, and keep BASIC's
 print position (`POS`, `TAB`, the comma zones, and the automatic new line at column 80) true
@@ -196,6 +190,9 @@ to where the cursor really is:
 - `POS` counts to 127: past that it goes negative (Color BASIC's own limit).
 - `/BASIC/COLORS.BAS` on the demo disk shows them all.
 
+Output of COLORS.BAS, via UART in Tera Term:
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/colors.png?raw=true)
+
 ## Statements for the video card
 
 The video card (`../vidcard/README.md`) is an output device beside the console: what these
@@ -225,6 +222,9 @@ draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on t
 - BASIC keeps the sprite images at `$030000` and uses the card's reset places for the sprite
   table (`$037C00`) and the text screen (`$038000`).
 - `/BASIC/VIDEO.BAS` on the demo disk uses them all.
+
+Output of MANDELGR.BAS. It takes quite a while to draw. :)
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
 
 ## Differences from GW-BASIC you will run into
 
