@@ -25,7 +25,9 @@ the limits it may impose that the emulator doesn't.
 | `core/vc_font.c` | the font it starts with (Spleen 8x16, code page 437; see `../NOTICE.md`) |
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "VIDCARD.D"`) |
 | `tools/bdf2c.py` | makes `vc_font.c` from a BDF font |
-| `../demo/programs/ASM/VIDEO/VIDDEMO.ASM` | the demo: all three layers, sprites and commands |
+| `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
+| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), and `VIDLIB.ASM`, the helpers they share |
+| `../basic309/` | BASIC's statements for the card (`SCREEN`, `LINE`, `CIRCLE`, `SPRITE`, ...: `../basic309/README.md`) |
 
 ## Registers ($FF80-$FF9F)
 
@@ -133,7 +135,11 @@ or colors part-way down the screen.
 - Commands done (bit 2): the queue has emptied.
 
 A program can poll `ISR` (and write the bit back to clear it), or enable the interrupt in `IEN`
-and handle `/IRQ`, which it shares with the UART and the other cards.
+and handle `/IRQ`, which it shares with the UART and the other cards: take it through the BIOS's
+RAM jump table (`RAM_IRQV` in `bios/defines.d`: keep the old address, put your handler's, jump
+to the old one when the interrupt isn't the card's, and put it back before `B_EXIT`). A handler
+that writes the card while the program also does should keep a data port to itself -- `VIDGFX`
+sets port 1 on the backdrop with a step of 0 and changes it every 8 lines.
 
 ## Drawing commands
 
@@ -216,7 +222,8 @@ PICTURE     FCB  C_TARGET,0,0,0
 PICEND
 ```
 
-`/ASM/VIDEO/VIDDEMO.ASM` on the demo disk does much more.
+The demos in `/ASM/VIDEO` on the demo disk use everything the card has, and BASIC has
+statements for it (`../basic309/README.md`, "Statements for the video card").
 
 ## In the emulator
 

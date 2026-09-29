@@ -246,6 +246,14 @@ NUM_BCALLS  equ  B_DOS_END+8
 DOS_MAXSECT equ  ($4000-DOS_LOAD)/512 ; the most sectors SD_BOOT_TRY will load for DOS:
                              ; it has to fit in bank 0
 DOS_LOAD    equ  $0600       ; where SD_BOOT_TRY loads dos/dos.asm and jumps to it
+RAM_IRQV    equ  $0026       ; the IRQ entry of the BIOS's RAM jump table is a JMP; this is
+                             ; the address it jumps to. A program can take the interrupt:
+                             ; keep the old address, put its own, and JMP [old] when the
+                             ; interrupt isn't its own -- and put the old one back before
+                             ; B_EXIT (serio.asm does this for the UART; VIDGFX in
+                             ; /ASM/VIDEO for the video card). (Checked against the BIOS's
+                             ; map: JT_IRQ + 1.) Write >RAM_IRQV: it is below $100, and a
+                             ; program's DP needn't be 0.
                              ; (dos.asm ORGs here too, so nothing is hand-synced).
                              ; Must be above the BIOS's RAM (EndOfVars in
                              ; pugbios.map); test_bios_layout checks that.

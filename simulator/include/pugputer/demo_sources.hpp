@@ -56,6 +56,9 @@ inline constexpr DemoProgram kDemoPrograms[] = {
     {"demo/build/vgmonkey.bin", "DEMO/VGMONKEY.COM", 0x4000},
     {"demo/build/vgxwingf.bin", "DEMO/VGXWINGF.COM", 0x4000},
     {"demo/build/viddemo.bin", "DEMO/VIDDEMO.COM", 0x4000},
+    {"demo/build/vidtext.bin", "DEMO/VIDTEXT.COM", 0x4000},
+    {"demo/build/vidtiles.bin", "DEMO/VIDTILES.COM", 0x4000},
+    {"demo/build/vidgfx.bin", "DEMO/VIDGFX.COM", 0x4000},
 };
 
 } // namespace pugputer

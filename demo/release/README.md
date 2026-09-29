@@ -140,15 +140,21 @@ stops a song. While music plays, the emulator runs at the real machine's speed
 
 The emulator has the Pugputer's video card too: 640x480 in 256 colors (from 65536), with three
 layers of text, tiles or bitmaps, 128 sprites and drawing commands the card carries out itself.
-Its picture opens in a window the first time a program uses the card:
+Its picture opens in a window the first time a program uses the card; the console stays
+where it is, in the terminal. Keys typed into the window go to the Pugputer as well.
 
-```
-/DEMO/VIDDEMO
-```
+| Program | Shows |
+|---|---|
+| `/DEMO/VIDDEMO` | all at once: a bitmap drawn with commands, a scrolling row of tiles, text, bouncing sprites |
+| `/DEMO/VIDTEXT` | text: the 256 characters and 256 colors, a 320x240 marquee over them; then an 8x8 font made from the card's own, 80x60 cells scrolling under a heading that stays put |
+| `/DEMO/VIDTILES` | tiles and sprites: three layers scrolling at their own speeds (8x8 and 16x16 tiles, 2 and 8 bits a pixel, flipped, in palettes of their own), sprites of every size between and in front of them; then 128 sprites at 640x480, and the 32-a-line limit |
+| `/DEMO/VIDGFX` | bitmaps and drawing: every drawing command at 640x480 in 16 colors, palette cycling; then bitmaps of 8, 2 and 1 bits a pixel, bars of color set by a line interrupt, an animation drawn in the PSRAM |
+| `/BASIC/VIDEO.BAS` | the same from BASIC: `SCREEN`, `LINE`, `CIRCLE`, `SPRITE` and the rest |
 
-draws a scene with the card's commands and bounces balls over it; any key stops it. Its source is
-`/ASM/VIDEO/VIDDEMO.ASM`, with the card's registers in `/ASM/VIDEO/VIDCARD.D` and the card
-described in `/ASM/VIDEO/VIDCARD.TXT`. Keys typed into the window go to the Pugputer as well.
+A key moves a demo on to its next page, and after its last page back to the shell. Their sources
+are in `/ASM/VIDEO`, with the card's registers in `/ASM/VIDEO/VIDCARD.D` and the card described
+in `/ASM/VIDEO/VIDCARD.TXT`.
+
 While the window is open, the emulator runs at the real machine's speed (60 frames a second);
 `pugputer --turbo` lets it run flat out, `--scale 2` doubles the window, and `--no-video` does
 without it.

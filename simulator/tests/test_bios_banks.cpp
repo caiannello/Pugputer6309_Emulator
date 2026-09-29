@@ -387,3 +387,22 @@ TEST(bios_layout_bios_ram_ends_below_where_dos_is_loaded) {
     CHECK(dos_end <= workbase);
     CHECK(workbase % 0x100 == 0); // it is a direct page
 }
+
+TEST(bios_layout_ram_irqv_is_the_irq_jump_tables_address) {
+    // defines.d's RAM_IRQV is the address in JT_IRQ's JMP (pugbios.map: JT_IRQ).
+    std::ifstream map(PUGBIOS_MAP_PATH);
+    std::string line;
+    long jt_irq = -1, ram_irqv = -1;
+    std::regex sym(R"(Symbol: JT_IRQ \(.*\) = ([0-9A-Fa-f]+))");
+    while (std::getline(map, line)) {
+        std::smatch m;
+        if (std::regex_search(line, m, sym)) jt_irq = std::stol(m[1].str(), nullptr, 16);
+    }
+    std::ifstream defs(BIOS_DEFINES_PATH);
+    std::regex eq(R"(^RAM_IRQV\s+equ\s+\$([0-9A-Fa-f]+))");
+    while (std::getline(defs, line)) {
+        std::smatch m;
+        if (std::regex_search(line, m, eq)) ram_irqv = std::stol(m[1].str(), nullptr, 16);
+    }
+    CHECK(jt_irq > 0 && ram_irqv == jt_irq + 1);
+}

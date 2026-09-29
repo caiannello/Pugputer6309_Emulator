@@ -1,0 +1,395 @@
+;------------------------------------------------------------------------------
+; PROJECT: VIDEO CARD DEMOS
+;    FILE: vidgfx.asm
+;
+; (Made by vidcard/tools/make_vidgfx.py, which works out the drawing commands'
+; numbers: change that, not this.)
+;
+; The video card's bitmaps, drawing commands, palette, interrupts and PSRAM,
+; in two pages (a key goes on to the next; after the last, back to the shell):
+;
+;   1  640x480 in 16 colors (4 bits a pixel, palette offset 1): a panel for
+;      each drawing command, labelled with CHAR -- PLOT (stars placed by the
+;      program as it runs), LINE, RECT, FILLRECT, CIRCLE, DISC, TRIANGLE, and
+;      a stamp drawn in the PSRAM then BLITted with see-through 0s, stripes
+;      FILLed straight into the bitmap's bytes and rows of it COPYed. The
+;      rings and some stars turn by palette: 8 colors rotated every 3 frames.
+;      It waits for the card to say the commands are done (STATUS and ISR)
+;   2  three bitmaps: a tunnel of 8 bits a pixel at 320x240, turned by
+;      rotating 64 colors of the palette each frame; bars of color behind it
+;      set every 8 lines by an interrupt handler (the card's line interrupt,
+;      through the BIOS's RAM jump table); a spinner of 2 bits a pixel whose
+;      8 frames were drawn into the PSRAM, COPYed in, shown by turns from two
+;      buffers and moved by scrolling; and the words, 1 bit a pixel at 640x480
+;
+;   ASM -f com vidgfx.asm          makes VIDGFX.COM
+;------------------------------------------------------------------------------
+            INCLUDE "VIDCARD.D"
+RAM_IRQV    equ  $0026      ; where the BIOS's IRQ entry jumps (see /ASM/DEFINES.D)
+
+SPINA       equ  $014000    ; page 2: the spinner's two buffers
+SPINB       equ  $014800
+FRAMES      equ  $800000    ; its 8 frames, in the PSRAM, 1280 bytes each
+;------------------------------------------------------------------------------
+            ORG  $4000
+START       LDA  #$80
+            STA  VC_CTRL
+;------------------------------------------------------------------------------
+; Page 1: the drawing commands.
+;------------------------------------------------------------------------------
+            LDX  #PAL1
+            JSR  COLORS
+            LDA  #VC_CFG/$10000
+            LDX  #DC_CTRL
+            JSR  PORT0
+            LDX  #SETTINGS1
+            LDW  #SET1END-SETTINGS1
+            JSR  SENDDAT
+            LDX  #RAMP8         ; the cycling colors, entries 24-31
+            LDA  #24
+            LDB  #8
+            JSR  COLORRUN
+            LDA  #VC_I_CMD      ; (so the flag says these commands are done)
+            STA  VC_ISR
+            LDX  #PAGE1CMDS
+            LDW  #PAGE1END-PAGE1CMDS
+            JSR  SENDCMD
+; PLOT: 256 stars at random in the first panel, in colors 2-9 (8 and 9 cycle).
+            LDE  #0
+STARS       JSR  RANDOM
+            PSHS D
+            ANDB #7
+            ADDB #2
+            LDA  #C_COLOR
+            JSR  CMDD
+            LDA  #C_PLOT
+            STA  VC_CMD
+            PULS D
+            ANDB #127           ; x: 12 + 0..127
+            CLRA
+            ADDD #4+8
+            JSR  CMDD
+            JSR  RANDOM
+            ANDB #127           ; y: 48 + 0..127 + 0..63
+            ANDA #63
+            PSHS A
+            CLRA
+            ADDB ,S+
+            ADCA #0
+            ADDD #22+26
+            JSR  CMDD
+            DECE
+            BNE  STARS
+; The card has done them all when STATUS stops saying busy; ISR's flag says so too.
+DONE        LDA  VC_STATUS
+            BITA #VC_S_BUSY
+            BNE  DONE
+            LDA  VC_ISR
+            BITA #VC_I_CMD
+            BEQ  DONE1
+            LDX  #TEXTS1
+            JSR  TEXTS
+DONE1       LDX  #TEXTS1A
+            JSR  TEXTS
+; Each frame: every third, the cycling colors move on one.
+PAGE1       JSR  VBLANK
+            INC  CYCLE3
+            LDA  CYCLE3
+            CMPA #3
+            BLO  PAGE1A
+            CLR  CYCLE3
+            INC  RAMPPOS
+            LDB  RAMPPOS
+            ANDB #7
+            LSLB
+            LDX  #RAMP8
+            ABX
+            LDA  #24
+            LDB  #8
+            JSR  COLORRUN
+PAGE1A      JSR  GETKEY
+            BCS  PAGE1
+            BRA  PAGE2GO
+CYCLE3      FCB  0
+RAMPPOS     FCB  0
+;------------------------------------------------------------------------------
+; Page 2: three bitmaps, raster bars, the PSRAM.
+;------------------------------------------------------------------------------
+PAGE2GO     LDA  #$80
+            STA  VC_CTRL
+            LDX  #PAL2
+            JSR  COLORS
+            LDX  #BARS          ; the bars' colors, entries 128-159
+            LDA  #128
+            LDB  #32
+            JSR  COLORRUN
+            LDX  #RAMP64        ; the tunnel's, 32-95
+            LDA  #32
+            LDB  #64
+            JSR  COLORRUN
+            LDA  #VC_CFG/$10000
+            LDX  #DC_CTRL
+            JSR  PORT0
+            LDX  #SETTINGS2
+            LDW  #SET2END-SETTINGS2
+            JSR  SENDDAT
+            LDX  #PAGE2CMDS
+            LDW  #PAGE2END-PAGE2CMDS
+            JSR  SENDCMD
+; The interrupt handler writes the backdrop through port 1, set here once for
+; good: at DC_BACK, stepping 0, so every write goes there.
+            LDA  #VC_CFG/$10000
+            STA  VC_ADDR1
+            LDX  #DC_BACK
+            STX  VC_ADDR1M
+            LDX  #0
+            STX  VC_INC1
+            PSHS CC             ; take the IRQ: ours first, then the one before it
+            ORCC #$50
+            LDX  >RAM_IRQV      ; (">": $0026 is below $100, but DP isn't 0)
+            STX  OLDIRQ
+            LDX  #IRQ
+            STX  >RAM_IRQV
+            LDD  #0             ; the first line interrupt: line 0
+            STD  VC_LINE
+            LDA  #VC_I_LINE+VC_I_VSYNC
+            STA  VC_ISR
+            LDA  #VC_I_LINE
+            STA  VC_IEN
+            PULS CC
+PAGE2       JSR  VBLANK
+            INC  BARFRAME       ; the bars move down a line... every frame
+            LDD  VL_FRAMES      ; the tunnel: 64 colors, rotated one each frame
+            ANDB #63
+            LSLB
+            LDX  #RAMP64
+            ABX
+            LDA  #32
+            LDB  #64
+            JSR  COLORRUN
+            LDA  VL_FRAMES+1    ; every 4th frame the spinner's next frame
+            ANDA #3
+            BNE  PAGE2A
+            JSR  SPIN
+PAGE2A      JSR  MOVESPIN
+            JSR  GETKEY
+            BCS  PAGE2
+            PSHS CC             ; put the IRQ back, and go
+            ORCC #$50
+            CLR  VC_IEN
+            LDX  OLDIRQ
+            STX  >RAM_IRQV
+            PULS CC
+            JMP  QUIT
+;------------------------------------------------------------------------------
+; IRQ: the line interrupt. Sets the backdrop for the next 8 lines (one of the
+; bars' 32 colors, by line and frame), and asks for the interrupt again 8 lines
+; on (line 0 again after the last). Anything else: the handler before this.
+IRQ         LDA  VC_ISR
+            BITA #VC_I_LINE
+            BEQ  IRQ9
+            LDA  #VC_I_LINE
+            STA  VC_ISR         ; (a 1 clears the flag)
+            LDD  VC_LINE        ; the line now
+            LSRD
+            LSRD
+            LSRD
+            ADDB BARFRAME
+            ANDB #31
+            ADDB #128
+            STB  VC_DATA1       ; (port 1: the backdrop)
+            LDD  VC_LINE
+            ADDD #8
+            CMPD #480
+            BLO  IRQ1
+            CLRD
+IRQ1        STD  VC_LINE
+IRQ9        JMP  [OLDIRQ]
+OLDIRQ      FDB  0
+BARFRAME    FCB  0
+;------------------------------------------------------------------------------
+; SPIN: the spinner's next frame, COPYed from the PSRAM into the buffer not
+; being shown; when the card has done it, show that buffer.
+SPIN        LDA  SPINFRAME
+            INCA
+            ANDA #7
+            STA  SPINFRAME
+            LDB  #5             ; its address: FRAMES + frame * 1280
+            MUL
+            TFR  B,A
+            CLRB
+            ADDD #FRAMES&$FFFF
+            STD  SPINCOPY+2
+            LDD  SPINBACK       ; into the spare buffer
+            STD  SPINCOPY+5
+            LDX  #SPINCOPY
+            LDW  #10
+            JSR  SENDCMD
+SPIN1       LDA  VC_STATUS      ; (wait for the card)
+            BITA #VC_S_BUSY
+            BNE  SPIN1
+            LDA  #VC_CFG/$10000 ; show it
+            LDX  #LAYER1+L_MAPBASE
+            JSR  PORT0
+            LDA  #SPINA/$10000
+            STA  VC_DATA0
+            LDD  SPINBACK
+            STA  VC_DATA0
+            STB  VC_DATA0
+            EORA #((SPINA^SPINB)/$100)&$FF ; and the other is the spare now
+            STD  SPINBACK
+            RTS
+SPINFRAME   FCB  0
+SPINBACK    FDB  SPINB&$FFFF
+SPINCOPY    FCB  C_COPY,FRAMES/$10000,0,0,SPINA/$10000,0,0,0,$05,$00
+; MOVESPIN: it bounces around, placed by scrolling its layer (negative: to the
+; right and down).
+MOVESPIN    LDD  SPINX
+            ADDD SPINDX
+            BGE  MOVE1
+            LDD  SPINDX
+            NEGD
+            STD  SPINDX
+            CLRD
+MOVE1       CMPD #320-80
+            BLE  MOVE2
+            LDD  SPINDX
+            NEGD
+            STD  SPINDX
+            LDD  #320-80
+MOVE2       STD  SPINX
+            LDD  SPINY
+            ADDD SPINDY
+            BGE  MOVE3
+            LDD  SPINDY
+            NEGD
+            STD  SPINDY
+            CLRD
+MOVE3       CMPD #240-64
+            BLE  MOVE4
+            LDD  SPINDY
+            NEGD
+            STD  SPINDY
+            LDD  #240-64
+MOVE4       STD  SPINY
+            LDA  #VC_CFG/$10000
+            LDX  #LAYER1+L_HSCROLL
+            JSR  PORT0
+            LDD  SPINX
+            NEGD
+            STA  VC_DATA0
+            STB  VC_DATA0
+            LDD  SPINY
+            NEGD
+            STA  VC_DATA0
+            STB  VC_DATA0
+            RTS
+SPINX       FDB  20
+SPINY       FDB  30
+SPINDX      FDB  1
+SPINDY      FDB  1
+;------------------------------------------------------------------------------
+; COLORS: palette entries from a list at X: entry (0 ends it), RGB565.
+COLORS      LDA  ,X+
+            BEQ  COLORS9
+            PSHS X
+            LDX  ,X
+            JSR  SETCOLOR
+            PULS X
+            LEAX 2,X
+            BRA  COLORS
+COLORS9     RTS
+; COLORRUN: B palette entries from A on, from the RGB565 words at X.
+COLORRUN    PSHS B
+            LDB  #2
+            MUL
+            ADDD #VC_PAL&$FFFF
+            PSHS X
+            TFR  D,X
+            LDA  #VC_PAL/$10000
+            JSR  PORT0
+            PULS X
+            PULS B
+            CLRA
+            LSLB
+            ROLA
+            TFR  D,W
+            JMP  SENDDAT
+; TEXTS: the strings listed at X, each: column, row, color, background, the
+; words (0 at their end); a column of $FF ends the list.
+TEXTS       LDA  ,X+
+            CMPA #$FF
+            BEQ  TEXTS9
+            LDB  ,X+
+            PSHS X
+            JSR  TEXTAT
+            PULS X
+            LDB  ,X+
+            LDE  ,X+
+            JSR  PRINT
+            BRA  TEXTS
+TEXTS9      RTS
+;------------------------------------------------------------------------------
+            INCLUDE "VIDLIB.ASM"
+;------------------------------------------------------------------------------
+TEXTS1      FCB  50,29,120,236
+            FCN  "(COMMANDS DONE: STATUS, ISR)"
+            FCB  $FF
+TEXTS1A     FCB  0,0,231,236
+            FCN  "  640x480 IN 16 COLORS: THE CARD'S DRAWING COMMANDS, ONE PANEL EACH            "
+            FCB  0,29,231,236
+            FCN  "  A KEY: THE NEXT PAGE"
+            FCB  $FF
+; Page 1's settings from DC_CTRL: layers 0 and 2, the backdrop color 16; then
+; layer 0, a 640x480 bitmap of 4 bits a pixel, palette offset 1 (16-31); then
+; layer 2, the text screen.
+SETTINGS1   FCB  $05,16,0,0
+            FCB  VC_SPRITES/$10000,(VC_SPRITES/$100)&$FF,VC_SPRITES&$FF
+            FCB  0,0,0,0,0,0,0,0,0
+            FCB  LM_BITMAP+LM_HIRES+LM_4BPP,0,0,0,0,0,0,0
+            FDB  0,0,320
+            FCB  1,0
+            FCB  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+            FCB  LM_TEXT+LM_HIRES+LM_BIG,LW_128+LH_32
+            FCB  VC_TEXTMAP/$10000,(VC_TEXTMAP/$100)&$FF,VC_TEXTMAP&$FF
+            FCB  VC_FONT/$10000,(VC_FONT/$100)&$FF,VC_FONT&$FF
+            FDB  0,0,0
+            FCB  0,0
+SET1END
+; Page 2's: all three layers, the backdrop 128 (the bars change it); layer 0
+; the tunnel, 320x240 of 8 bits; layer 1 the spinner, 80x64 of 2 bits, palette
+; offset 7 (113-115); layer 2 the words, 640x480 of 1 bit, palette offset 15.
+SETTINGS2   FCB  $07,128,0,0
+            FCB  VC_SPRITES/$10000,(VC_SPRITES/$100)&$FF,VC_SPRITES&$FF
+            FCB  0,0,0,0,0,0,0,0,0
+            FCB  LM_BITMAP+LM_8BPP,0,0,0,0,0,0,0
+            FDB  0,0,320
+            FCB  0,0
+            FCB  LM_BITMAP+LM_2BPP,0
+            FCB  SPINA/$10000,(SPINA/$100)&$FF,SPINA&$FF,0,0,0
+            FDB  -20,-30,20
+            FCB  7,0
+            FCB  LM_BITMAP+LM_HIRES+LM_1BPP,0,$01,$80,$00,0,0,0
+            FDB  0,0,80
+            FCB  15,0
+SET2END
+PAL1        EQU  *
+@@PAL1@@
+            FCB  0
+PAL2        EQU  *
+@@PAL2@@
+            FCB  0
+RAMP8       EQU  *
+@@RAMP8@@
+RAMP64      EQU  *
+@@RAMP64@@
+BARS        EQU  *
+@@BARS@@
+PAGE1CMDS   EQU  *
+@@PAGE1@@
+PAGE1END
+PAGE2CMDS   EQU  *
+@@PAGE2@@
+PAGE2END
+
+            END  START

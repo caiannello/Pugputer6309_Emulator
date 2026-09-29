@@ -14,9 +14,12 @@ Pugputer, byte for byte as they were built.
   VGM/         two songs for the OPL3 music chip (ready to run in /DEMO):
                  ASM -f com vgmonkey.asm   then VGMONKEY
 
-  VIDEO/       the video card's demo (ready to run in /DEMO), VIDCARD.D again,
-               and the card described (VIDCARD.TXT):
-                 ASM -f com viddemo.asm    then VIDDEMO
+  VIDEO/       the video card's demos (ready to run in /DEMO), VIDCARD.D again,
+               VIDLIB.ASM (helpers they share) and the card described (VIDCARD.TXT):
+                 ASM -f com viddemo.asm    then VIDDEMO   (everything at once)
+                 ASM -f com vidtext.asm    then VIDTEXT   (text layers)
+                 ASM -f com vidtiles.asm   then VIDTILES  (tiles and sprites)
+                 ASM -f com vidgfx.asm     then VIDGFX    (bitmaps, commands, interrupts)
 
   ASMLINK/     the assembler and the linker:
                  CD ASMLINK

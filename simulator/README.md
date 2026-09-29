@@ -527,10 +527,14 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   layers draw (scrolling, flips, palette offsets, transparency), sprite priorities, order and the
   32-a-line limit, every drawing command (clipping, pixel packing, overlapping copies), and the
   beam's timing and interrupts against CPU time.
-- `test_vidcard_demo.cpp` -- `demo/programs/ASM/VIDEO/VIDDEMO.ASM` assembled with ASM (the same
-  bytes as the release disk's `/DEMO/VIDDEMO.COM`) and run with the card: the scene it draws, the
-  layer it scrolls and the sprites it moves, frame by frame, and the card reset when a key stops
-  it. (`VIDCARD_DUMP=file` saves its picture, 640x480 RGB bytes.)
+- `test_vidcard_demo.cpp` -- the demos in `demo/programs/ASM/VIDEO`, each assembled with ASM on
+  the machine (the same bytes as the release disk's `/DEMO/*.COM`) and run with the card, a page
+  at a time: what each page leaves on the card and in the picture (layers, maps, fonts, sprites
+  and their limit, every command's pixels, palette cycling, the line interrupt's handler in the
+  BIOS's IRQ chain and put back afterwards), and the card reset at the end.
+  (`VIDCARD_DUMP_DIR=folder` saves each page's picture, 640x480 RGB bytes.)
+- `test_basic309_video.cpp` -- BASIC's statements for the card: what each leaves on it, the
+  errors, and `LIST` giving them back as typed.
 - `test_uart.cpp` -- register-level UART behavior direct against
   `IDevice`: TDRE/RDRF timing against the configured baud rate,
   overrun (a byte completing while RDRF is still set gets dropped),
