@@ -227,3 +227,5 @@ Ideas and patches are welcome; open an issue to discuss before a big change.
 
 MIT License -- see `LICENSE`. BASIC descends from Microsoft's Extended Color BASIC, and the
 firmware is assembled with William Astle's lwtools; see `NOTICE.md` for these and other credits.
+
+![Added ANSI color, CLS, HOME to BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/color_mandel.png?raw=true)
