@@ -2,8 +2,9 @@
 # Builds the Linux x64 binary demo release: dist/Pugputer6309-demo-<version>-linux-x64/ and
 # the .tar.gz next to it. Everything is rebuilt from source: the BIOS, DOS, shell, editor and
 # BASIC (needs lwtools -- see README.md), then the emulator in Release configuration, linked
-# fully statically (so it runs on any x86-64 Linux, with no library versions to match), then
-# a disk image holding the shell, the editor, BASIC, the demo programs and the sources of
+# fully statically (so it runs on any x86-64 Linux, with no library versions to match), and
+# pugputer-video, its window for the video card (dynamically linked: it needs SDL2, and is
+# only built when SDL2's development files are installed -- libsdl2-dev), then a disk image holding the shell, the editor, BASIC, the demo programs and the sources of
 # every program in /CMD (in /ASM, for rebuilding them on the Pugputer).
 # (The Linux counterpart of make_release.bat, whose VERSION it uses.)
 #
@@ -30,14 +31,26 @@ done
 echo "=== Building the emulator (Release, static) ==="
 "$ROOT/check_build_dir.sh" "$BUILD"
 cmake -S "$ROOT/simulator" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DHD6309_BUILD_TESTS=OFF \
-      -DCMAKE_EXE_LINKER_FLAGS=-static
+      -DPUGPUTER_STATIC_EXE=ON
 cmake --build "$BUILD" --parallel "$JOBS" --target basic309_sdboot_demo mkdiskimg
+if cmake --build "$BUILD" --parallel "$JOBS" --target pugputer-video 2>/dev/null; then
+    VIDEO=1
+else
+    VIDEO=0
+    echo "WARNING: no pugputer-video (SDL2 isn't installed: sudo apt install libsdl2-dev);"
+    echo "         the release will have no window for the video card."
+fi
 
 echo "=== Assembling $NAME ==="
 rm -rf "$OUT"
 mkdir -p "$OUT"
 cp "$BUILD/tools/basic309_sdboot_demo" "$OUT/pugputer"
 strip "$OUT/pugputer" 2>/dev/null || true
+if [ "$VIDEO" = 1 ]; then
+    cp "$BUILD/tools/pugputer-video" "$OUT/pugputer-video"
+    strip "$OUT/pugputer-video" 2>/dev/null || true
+    chmod +x "$OUT/pugputer-video"
+fi
 cp "$ROOT/bios/pugbios.s19" "$OUT/pugbios.s19"
 "$BUILD/tools/mkdiskimg" --out "$OUT/disk-original.img" --add-dir "$ROOT/demo/programs" --sources "$ROOT"
 cp "$OUT/disk-original.img" "$OUT/disk.img"

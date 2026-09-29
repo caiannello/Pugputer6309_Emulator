@@ -392,6 +392,22 @@ length. On Windows the sound goes to the waveOut API (winmm); on Linux it is pip
 `pacat` or `pw-cat`, whichever is installed, so the fully static Linux build links no sound
 library. `--no-sound` turns it off.
 
+### `VideoDevice` + `VideoOut` -- the video card
+
+`include/pugputer/video_device.hpp`: the video card at `$FF80-$FF9F` (what it is to a program:
+`../vidcard/README.md`). The card itself is `../vidcard/core`, portable C that the card's
+firmware is to share; the device puts it on the bus and moves its beam in step with the CPU's
+clock -- 60 frames a second of CPU time, 525 lines each -- drawing each line as the beam reaches
+it and raising the vertical-blank and line interrupts on `/IRQ`. Nothing is drawn until a
+program first writes to the card, and then only the frames its `VideoSink` asks for.
+
+`basic309_sdboot_demo`'s sink, `tools/video_out.cpp`, is a window: a Win32 one on Windows, and
+on Linux `pugputer-video` (`tools/pugputer_video.cpp`), an SDL2 program beside the emulator that
+it feeds through a pipe, so that the emulator itself can stay statically linked. It is built
+when SDL2's development files are found (`libsdl2-dev`). The window opens with the first frame
+and holds the emulator to 60 frames a second of real time (`--turbo`: flat out, a frame shown
+every 1/60 s); keys typed into it go to the UART.
+
 ### `basic309_demo` / `basic309_sdboot_demo` -- running BASIC interactively
 
 ```
@@ -400,6 +416,9 @@ basic309_sdboot_demo --com COM10         # bridge the UART to a COM port instead
 basic309_sdboot_demo --com pty           # (Linux) ... or to a new pseudo-terminal (or --com /dev/ttyUSB0)
 basic309_sdboot_demo --bios x.s19 --disk y.img
 basic309_sdboot_demo --no-sound          # the OPL3 makes no sound (and never slows the emulator)
+basic309_sdboot_demo --no-video          # no window for the video card
+basic309_sdboot_demo --turbo             # the video card doesn't hold the emulator to real time
+basic309_sdboot_demo --scale 2           # the video card's window at 1280x960
 basic309_demo                            # BASIC copied into RAM and started directly, no disk (LOAD/SAVE/OPEN unavailable)
 ```
 
@@ -503,6 +522,15 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   disk's ready-made `/DEMO/VGXWINGF.COM`) and played by the emulated machine:
   every register write of the song, sound throughout, the tempo the real machine plays it at,
   back to the shell, and the chip idle afterwards.
+- `test_vidcard.cpp` -- the video card (`vidcard/core` and `VideoDevice`): the reset state and
+  palette, both data ports across VRAM, settings, palette and PSRAM, what text, tile and bitmap
+  layers draw (scrolling, flips, palette offsets, transparency), sprite priorities, order and the
+  32-a-line limit, every drawing command (clipping, pixel packing, overlapping copies), and the
+  beam's timing and interrupts against CPU time.
+- `test_vidcard_demo.cpp` -- `demo/programs/ASM/VIDEO/VIDDEMO.ASM` assembled with ASM (the same
+  bytes as the release disk's `/DEMO/VIDDEMO.COM`) and run with the card: the scene it draws, the
+  layer it scrolls and the sprites it moves, frame by frame, and the card reset when a key stops
+  it. (`VIDCARD_DUMP=file` saves its picture, 640x480 RGB bytes.)
 - `test_uart.cpp` -- register-level UART behavior direct against
   `IDevice`: TDRE/RDRF timing against the configured baud rate,
   overrun (a byte completing while RDRF is still set gets dropped),

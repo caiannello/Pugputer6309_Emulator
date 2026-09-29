@@ -1,6 +1,6 @@
 # Vibe-Coded Pugputer 6309 Simulator
 
-A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD Card, OPL3 Sound chip, with its complete software stack --
+A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD Card, OPL3 Sound chip, a color video card, with its complete software stack --
 BIOS, DOS, shell, a text editor, an assembler and linker, and BASIC -- and a cycle-counted emulator that runs all of
 it on a PC.
 
@@ -11,7 +11,8 @@ On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the 
 run `./start-console.sh` in a terminal. Nothing to install or compile; see the release's `README.md`.
 
 ## Future plans
-- An emulated graphical display (the OPL3 sound is here: see `simulator/README.md`)
+- The video card's firmware, for its RP2350 (the card is emulated now, in a window: see
+  `vidcard/README.md`)
 
 ## Real Hardware Here!
 [Pugputer6309 on GitHub](https://github.com/caiannello/Pugputer6309)
@@ -27,7 +28,8 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 | `asmlink/` | `ASM.COM` and `LINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
 | `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII) and `MOVE.COM` (move or rename a file). |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, and `ON ERROR`/`RESUME`. |
-| `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking, the YMF262 music chip), the emulator programs, and the test suite. |
+| `vidcard/` | The video card: 640x480 DVI from an RP2350, with text, tile and bitmap layers, 128 sprites and drawing commands. What it is to a program, and its behavior as portable C that the emulator runs (and the card's firmware is to). |
+| `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking, the YMF262 music chip, the video card), the emulator programs, and the test suite. |
 | `demo/` | The sample BASIC programs and launcher scripts that go into the binary release, and (in `demo/sources/`) the notes that go with the programs' sources in the release disk's `/ASM`. |
 
 Every folder has its own `README.md` with the details.
@@ -43,7 +45,7 @@ Every folder has its own `README.md` with the details.
 | `$8000-$BFFF` | RAM bank 2 |
 | `$C000-$EFFF` | RAM bank 3 (BASIC.COM loads at `$BC00`, and starts at `$C000`) |
 | `$F000-$FEFF` | BIOS ROM (about 3.1KB of the 3.8KB used) |
-| `$FF00-$FFEF` | I/O: SD storage `$FFD8`, OPL3 music `$FFE0`, UART `$FFE8`, bank registers `$FFEC-$FFEF`; addresses are reserved for a VDP (`$FFE4`) and a VIA (`$FFB0`) |
+| `$FF00-$FFEF` | I/O: the video card `$FF80-$FF9F`, SD storage `$FFD8`, OPL3 music `$FFE0`, UART `$FFE8`, bank registers `$FFEC-$FFEF`; addresses are reserved for a V9958 VDP (`$FFE4`) and a VIA (`$FFB0`) |
 | `$FFF0-$FFFF` | Interrupt vectors |
 
 - **Memory banking.** The 64KB address space is four 16KB banks; each bank register (write-only)
@@ -83,6 +85,10 @@ Every folder has its own `README.md` with the details.
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`, and
   `CLS`/`HOME`/`GOTOXY`/`LCOLOR`/`HCOLOR`/`RESET` for the ANSI terminal. See
   `basic309/README.md` for the differences from GW-BASIC.
+- **Video card.** 640x480 in 256 colors (from 65536): three layers of text (80x30), tile maps
+  or bitmaps, 128 sprites between them, and drawing commands the card carries out itself, for a
+  card built on an RP2350. `/DEMO/VIDDEMO` on the release disk shows it off. See
+  `vidcard/README.md`.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
   card and banked RAM modeled to the register, and the YMF262 (OPL3) music chip playing through
   the PC's sound (Nuked OPL3). `basic309_sdboot_demo` boots the real chain -- BIOS, SD boot,
@@ -140,7 +146,8 @@ simulator\build\tools\Release\basic309_sdboot_demo.exe
 You need:
 
 1. A C++17 compiler (g++ or clang++), **CMake** 3.15 or newer, and bash. On Ubuntu/Debian:
-   `sudo apt install build-essential cmake`.
+   `sudo apt install build-essential cmake libsdl2-dev` (SDL2 is only for `pugputer-video`, the
+   video card's window; without it everything else builds, and the emulator has no window).
 2. **lwtools** by **William Astle** -- <https://www.lwtools.ca>, built from the source release,
    <https://www.lwtools.ca/releases/lwtools/lwtools-4.20.tar.gz>:
 

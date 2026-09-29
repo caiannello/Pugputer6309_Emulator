@@ -80,6 +80,7 @@ set(PUGPUTER_TEST_SOURCES
     test_rom_device.cpp
     test_sdcard_device.cpp
     test_fat16_image.cpp
+    test_vidcard.cpp
 )
 
 if(EXISTS "${LWASM_EXE}")
@@ -142,6 +143,7 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     if(EXISTS "${ASM_BIN}" AND EXISTS "${LINK_BIN}")
         list(APPEND PUGPUTER_TEST_SOURCES test_asmlink.cpp)
         list(APPEND PUGPUTER_TEST_SOURCES test_opl3.cpp)
+        list(APPEND PUGPUTER_TEST_SOURCES test_vidcard_demo.cpp)
     endif()
     if(EXISTS "${HEXDUMP_BIN}" AND EXISTS "${MOVE_BIN}")
         list(APPEND PUGPUTER_TEST_SOURCES test_utils.cpp)

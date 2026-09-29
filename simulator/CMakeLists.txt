@@ -48,6 +48,7 @@ set(PUGPUTER_SOURCES
     src/pugputer/sdcard_device.cpp
     src/pugputer/fat16_image.cpp
     src/pugputer/opl3_device.cpp
+    src/pugputer/video_device.cpp
 )
 if(PUGPUTER_BUILD_COM_BRIDGE)
     list(APPEND PUGPUTER_SOURCES src/pugputer/com_port_bridge.cpp)
@@ -62,6 +63,12 @@ else()
     target_compile_options(nuked_opl3 PRIVATE -w)
 endif()
 
+# The video card (../vidcard/core): portable C that the card's firmware is to share, so it is
+# built as it would be there -- C99, no dependencies.
+add_library(vidcard_core STATIC ../vidcard/core/vc.c ../vidcard/core/vc_font.c)
+target_include_directories(vidcard_core PUBLIC ../vidcard/core)
+set_target_properties(vidcard_core PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+
 # System-level library: SystemBus + IDevice + UartR65C51 (+ the serial-port
 # bridge, when enabled), sitting on top of hd6309_static. Static
 # only for now -- this is an integration layer consumed in-process, not a
@@ -70,6 +77,7 @@ add_library(pugputer_system STATIC ${PUGPUTER_SOURCES})
 target_include_directories(pugputer_system PUBLIC include)
 target_link_libraries(pugputer_system PUBLIC hd6309_static)
 target_link_libraries(pugputer_system PRIVATE nuked_opl3)
+target_link_libraries(pugputer_system PUBLIC vidcard_core)
 if(PUGPUTER_BUILD_COM_BRIDGE)
     target_compile_definitions(pugputer_system PUBLIC PUGPUTER_HAVE_COM_BRIDGE)
 endif()

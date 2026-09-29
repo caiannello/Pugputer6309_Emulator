@@ -12,6 +12,9 @@
 //   basic309_sdboot_demo --bios path\to.s19  -- load a different BIOS image
 //   basic309_sdboot_demo --disk path\to.img  -- load a different disk image
 //   basic309_sdboot_demo --no-sound          -- keep the OPL3 quiet
+//   basic309_sdboot_demo --no-video          -- no window for the video card
+//   basic309_sdboot_demo --turbo             -- don't hold the video card to real time
+//   basic309_sdboot_demo --scale N           -- the video window N times 640x480
 //   basic309_sdboot_demo --help
 //
 // Unless --bios / --disk say otherwise, pugbios.s19 and disk.img are looked for
@@ -28,6 +31,11 @@
 // The music card's YMF262 (OPL3) is at $FFE0-$FFE3 (pugputer/opl3_device.hpp), and plays
 // through the PC's sound (audio_out.hpp). While it plays, the emulator runs at the real
 // machine's speed, so that music keeps its tempo; the rest of the time, flat out.
+//
+// The video card is at $FF80-$FF9F (pugputer/video_device.hpp, vidcard/README.md). Its
+// picture opens in a window (video_out.hpp) when a program first uses the card; from then
+// on the emulator keeps to the real machine's speed, 60 frames a second, unless --turbo.
+// Keys typed into the window go to the UART, just as the console's do.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -53,12 +61,14 @@
 #include <vector>
 
 #include "audio_out.hpp"
+#include "video_out.hpp"
 #include "pugputer/opl3_device.hpp"
 #include "pugputer/rom_device.hpp"
 #include "pugputer/sdcard_device.hpp"
 #include "pugputer/srec_loader.hpp"
 #include "pugputer/system_bus.hpp"
 #include "pugputer/uart_r65c51.hpp"
+#include "pugputer/video_device.hpp"
 #ifdef PUGPUTER_HAVE_COM_BRIDGE
 #include "pugputer/com_port_bridge.hpp"
 #endif
@@ -71,6 +81,7 @@ using pugputer::SdCardDevice;
 using pugputer::SrecLoadResult;
 using pugputer::SystemBus;
 using pugputer::UartR65C51;
+using pugputer::VideoDevice;
 
 namespace {
 constexpr uint16_t kBiosBase = 0xF000;
@@ -123,6 +134,10 @@ void usage() {
         "  --bios FILE      BIOS image, Motorola S-record (default: pugbios.s19 beside this program)\n"
         "  --disk FILE      FAT16 disk image (default: disk.img beside this program)\n"
         "  --no-sound       no sound from the OPL3 music chip (and no slowing to real time for it)\n"
+        "  --no-video       no window for the video card\n"
+        "  --turbo          run flat out even while the video card is in use (it is held to the\n"
+        "                   real machine's speed, 60 frames a second, otherwise)\n"
+        "  --scale N        the video window at N times 640x480 (default 1; it can be resized)\n"
         "  --help           this text\n"
         "\n"
         "In console mode, type at the prompt; %s quits.\n",
@@ -294,6 +309,9 @@ int main(int argc, char** argv) {
     std::string bios_path = find_default("pugbios.s19", PUGBIOS_S19_DEFAULT);
     std::string disk_path = find_default("disk.img", DISK_IMG_DEFAULT);
     bool sound = true;
+    bool video = true;
+    bool turbo = false;
+    int scale = 1;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "/?") == 0) {
             usage();
@@ -306,6 +324,12 @@ int main(int argc, char** argv) {
             disk_path = argv[++i];
         } else if (std::strcmp(argv[i], "--no-sound") == 0) {
             sound = false;
+        } else if (std::strcmp(argv[i], "--no-video") == 0) {
+            video = false;
+        } else if (std::strcmp(argv[i], "--turbo") == 0) {
+            turbo = true;
+        } else if (std::strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+            scale = std::atoi(argv[++i]);
         }
     }
 
@@ -344,6 +368,17 @@ int main(int argc, char** argv) {
         std::printf("OPL3 sound through %s.\n", audio.description().c_str());
     } else {
         std::printf("No sound: %s.\n", audio.error().c_str());
+    }
+
+    VideoDevice vcard;
+    bus.map_device("video", VideoDevice::kBase, VideoDevice::kSize, &vcard, IrqLine::IRQ);
+    VideoOut screen;
+    screen.set_turbo(turbo);
+    screen.set_scale(scale);
+    if (video) {
+        vcard.set_sink(&screen);
+    } else {
+        std::printf("Video window off (--no-video).\n");
     }
 
     bool use_com = false;
@@ -391,6 +426,8 @@ int main(int argc, char** argv) {
 
     for (;;) {
         bus.run(20000);
+        uint8_t key;
+        while (screen.poll_key(key)) uart.rx_enqueue(key);
         if (use_com) {
 #ifdef PUGPUTER_HAVE_COM_BRIDGE
             bridge.poll(uart);

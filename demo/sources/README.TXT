@@ -9,9 +9,14 @@ Pugputer, byte for byte as they were built.
                                  (BASICCOM.ASM includes BASIC.ASM; it takes
                                  a minute or two)
   DEFINES.D    the BIOS and DOS calls, included by the others
+  VIDCARD.D    the video card's registers and commands (for your own programs)
 
   VGM/         two songs for the OPL3 music chip (ready to run in /DEMO):
                  ASM -f com vgmonkey.asm   then VGMONKEY
+
+  VIDEO/       the video card's demo (ready to run in /DEMO), VIDCARD.D again,
+               and the card described (VIDCARD.TXT):
+                 ASM -f com viddemo.asm    then VIDDEMO
 
   ASMLINK/     the assembler and the linker:
                  CD ASMLINK

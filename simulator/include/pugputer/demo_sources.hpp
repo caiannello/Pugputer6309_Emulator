@@ -37,10 +37,15 @@ inline constexpr DemoSource kDemoSources[] = {
     {"asmlink/pa_out.asm", "ASM/ASMLINK/PA_OUT.ASM"},
     {"asmlink/pa_obj.asm", "ASM/ASMLINK/PA_OBJ.ASM"},
     {"asmlink/pa_itab.asm", "ASM/ASMLINK/PA_ITAB.ASM"},
+    // The video card: its include file, beside DEFINES.D and beside the demo that uses it
+    // (demo/programs/ASM/VIDEO), and its description.
+    {"vidcard/vidcard.d", "ASM/VIDCARD.D"},
+    {"vidcard/vidcard.d", "ASM/VIDEO/VIDCARD.D"},
+    {"vidcard/README.md", "ASM/VIDEO/VIDCARD.TXT"},
 };
 
 // The demo programs in /DEMO: raw images (demo/compile.bat or .sh assembles them from
-// demo/programs/ASM/VGM), each given the program header ASM -f com would give it.
+// demo/programs/ASM/VGM and VIDEO), each given the program header ASM -f com would give it.
 struct DemoProgram {
     const char* repo; // the raw image, relative to the repository's root
     const char* disk;
@@ -50,6 +55,7 @@ struct DemoProgram {
 inline constexpr DemoProgram kDemoPrograms[] = {
     {"demo/build/vgmonkey.bin", "DEMO/VGMONKEY.COM", 0x4000},
     {"demo/build/vgxwingf.bin", "DEMO/VGXWINGF.COM", 0x4000},
+    {"demo/build/viddemo.bin", "DEMO/VIDDEMO.COM", 0x4000},
 };
 
 } // namespace pugputer

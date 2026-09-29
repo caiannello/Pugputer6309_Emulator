@@ -77,7 +77,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the music demos' sources in `/ASM/VGM`, and the sources of every program in `/CMD`) and `/DEMO` (the music demos, ready to run) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the demos' sources in `/ASM/VGM` and `/ASM/VIDEO`, and the sources of every program in `/CMD`) and `/DEMO` (the music and video card demos, ready to run) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -134,6 +134,23 @@ X-Wing*. Both are also ready to run in `/DEMO`: `/DEMO/VGMONKEY`, `/DEMO/VGXWING
 stops a song. While music plays, the emulator runs at the real machine's speed
 (3.58 MHz), so songs keep their tempo; the rest of the time it runs flat out.
 `pugputer --no-sound` keeps the chip quiet.
+
+## The video card
+
+The emulator has the Pugputer's video card too: 640x480 in 256 colors (from 65536), with three
+layers of text, tiles or bitmaps, 128 sprites and drawing commands the card carries out itself.
+Its picture opens in a window the first time a program uses the card:
+
+```
+/DEMO/VIDDEMO
+```
+
+draws a scene with the card's commands and bounces balls over it; any key stops it. Its source is
+`/ASM/VIDEO/VIDDEMO.ASM`, with the card's registers in `/ASM/VIDEO/VIDCARD.D` and the card
+described in `/ASM/VIDEO/VIDCARD.TXT`. Keys typed into the window go to the Pugputer as well.
+While the window is open, the emulator runs at the real machine's speed (60 frames a second);
+`pugputer --turbo` lets it run flat out, `--scale 2` doubles the window, and `--no-video` does
+without it.
 
 ## Other commands
 

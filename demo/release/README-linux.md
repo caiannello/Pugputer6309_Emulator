@@ -93,8 +93,9 @@ lists the options (`--bios` and `--disk` select other images).
 | File | |
 |---|---|
 | `pugputer` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
+| `pugputer-video` | The video card's window (it needs the SDL2 library, `libsdl2-2.0-0`) |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the music demos' sources in `/ASM/VGM`, and the sources of every program in `/CMD`) and `/DEMO` (the music demos, ready to run) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the demos' sources in `/ASM/VGM` and `/ASM/VIDEO`, and the sources of every program in `/CMD`) and `/DEMO` (the music and video card demos, ready to run) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.sh` |
 | `start-console.sh`, `start-serial.sh`, `reset-disk.sh` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -155,6 +156,25 @@ The sound goes out through `aplay` (ALSA), or `pacat` (PulseAudio) or `pw-cat` (
 whichever is installed -- Ubuntu has `aplay` already (package `alsa-utils`). With none of them,
 the emulator says so at start-up and runs without sound. `./pugputer --no-sound` keeps the chip
 quiet.
+
+## The video card
+
+The emulator has the Pugputer's video card too: 640x480 in 256 colors (from 65536), with three
+layers of text, tiles or bitmaps, 128 sprites and drawing commands the card carries out itself.
+Its picture opens in a window the first time a program uses the card:
+
+```
+/DEMO/VIDDEMO
+```
+
+draws a scene with the card's commands and bounces balls over it; any key stops it. Its source is
+`/ASM/VIDEO/VIDDEMO.ASM`, with the card's registers in `/ASM/VIDEO/VIDCARD.D` and the card
+described in `/ASM/VIDEO/VIDCARD.TXT`. Keys typed into the window go to the Pugputer as well.
+While the window is open, the emulator runs at the real machine's speed (60 frames a second);
+`./pugputer --turbo` lets it run flat out, `--scale 2` doubles the window, and `--no-video` does
+without it. The window is `pugputer-video`, beside `pugputer`; it needs the SDL2 library
+(`sudo apt install libsdl2-2.0-0` if it isn't there already). Without it, or without a display,
+the emulator says so and goes on without the window.
 
 ## Other commands
 

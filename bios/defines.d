@@ -21,6 +21,8 @@ SD_BASE     equ  $FFD8      ; ffd8 - ffdb: SD/block storage (Built-in; see
                              ;              SD protocol, since the real
                              ;              transport hardware isn't decided)
 VIA_BASE    equ  $FFB0      ; ffb0 - ffbf: W65C22 VIA (optional card)
+VCARD_BASE  equ  $FF80      ; ff80 - ff9f: the video card (optional; its registers
+                             ;              are in vidcard/vidcard.d)
 
 ; Memory bank registers 0..3 (write-only; readable copies kept in
 ; SBANK_1...SBANK_3 -- see main.asm)
