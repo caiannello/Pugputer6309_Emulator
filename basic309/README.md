@@ -68,6 +68,7 @@ program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
 - `KILL`/`NAME` refuse a file that is open (`?AO`).
 
 Output of RANDFILE.BAS:
+
 ![RANDFILE.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/files.png?raw=true)
 
 ## File I/O statements (GW-BASIC guide, sections 5.2 and 5.3)
