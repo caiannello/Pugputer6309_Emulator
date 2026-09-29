@@ -1,6 +1,6 @@
 # Vibe-Coded Pugputer 6309 Simulator
 
-A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD Card, OPL3 Sound chip, a color video card, with its complete software stack --
+A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD Card, OPL3 Sound chip, an RP2350-based color video card, with its complete software stack --
 BIOS, DOS, shell, a text editor, an assembler and linker, and BASIC -- and a cycle-counted emulator that runs all of
 it on a PC.
 
@@ -222,7 +222,8 @@ tests, a keyword-table audit, file and error-trapping tests driven with real key
 ## Where it is going
 
 - **A graphics display peripheral** for the emulator (the memory map already reserves the
-  address range of a V9958 video card), and later the same on the real machine.
+  address range of a V9958 video card), and an RP2350-based video card, and later the same
+  on the real machine.
 - **Testing on the real Pugputer 6309:** the SD transport (SPI or VIA-driven), an SD card
   prepared off-line to bootstrap the hardware, and timing checks against the emulator.
 - **More BASIC:** the remaining Color BASIC space is tight (about 160 bytes), so growing it
