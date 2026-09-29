@@ -6,6 +6,8 @@ it on a PC.
 
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/demo.png?raw=true)
 
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basicgfx.png?raw=true)
+
 **Just want to try it?** Download the demo for Windows or Linux from the *Releases* page.
 On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the `.tar.gz` and
 run `./start-console.sh` in a terminal. Nothing to install or compile; see the release's `README.md`.
