@@ -35,6 +35,7 @@ run `./start-console.sh` in a terminal. Nothing to install or compile; see the r
 Every folder has its own `README.md` with the details.
 
 ![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/nano.png?raw=true)
+
 ![VIDGFX.COM Demo](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/vidgfx.png?raw=true)
 
 ## The machine
