@@ -61,8 +61,9 @@ WORKBASE    equ  $3400         ; base of BASIC's relocated fixed workspace. Must
                                ; buffers, variables -- DOS_END in dos/dos.lst; $33CC
                                ; with 8 file buffers). test_bios_layout checks it.
                                ; DP is derived from this, not hand-typed.
-BASIC_LOAD  equ  $BC00         ; where BASIC.COM loads: the terminal statements
-                               ; (HOME..RESET) sit below the fixed entry at $C000
+BASIC_LOAD  equ  $B400         ; where BASIC.COM loads: the keyword tables and the
+                               ; terminal and video card statements sit below the
+                               ; fixed entry at $C000
 TOPRAM_FIXED equ BASIC_LOAD-1  ; fixed top-of-RAM for BASIC's use (the interpreter's
                                ; code is loaded just above)
 
@@ -293,6 +294,18 @@ OLDADDED  RMB  1              NAME: ... to the OLD name
 ; The terminal statements (HOME..RESET, below BASIC_ENTRY)
 ANSIST    RMB  1              PUTCHR in an escape sequence: $FF just after ESC, $7F after ESC [
 ANSIARG   RMB  6              their arguments, all read before anything is sent
+; The video card statements (SCREEN..VPOKE, below BASIC_ENTRY)
+VMODE     RMB  1              the SCREEN mode (0-2)
+VPEN      RMB  1              COLOR's pen: drawing, and TPRINT's text (15 at start)
+VTBG      RMB  1              COLOR's background, for TPRINT
+GCOL      RMB  1              the color this statement draws in
+GBG       RMB  1              the background this TPRINT writes
+GFLG      RMB  1              LINE's B (1) or BF (2)
+VIMG      RMB  1              nonzero: drawing into a sprite image (IMAGE n)
+GSLEN     RMB  1              the string GPRINT or TPRINT is writing: its length ...
+GSADR     RMB  2              ... and where the rest of it is
+GSLOT     RMB  2              where GXY puts the (x,y) it reads
+GARG      RMB  16             the statement's numbers
 
 PROGST     RMB  1              START OF PROGRAM SPACE
 *         INTERRUPT VECTORS                 
@@ -425,11 +438,988 @@ ANSIHC    FCC  "38;2;"
           FCC  "m"
           FCB  0
 
-          IFDEF COMFILE
-          ZMB  $C000-*        BASIC.COM CARRIES THE GAP TOO
-          ELSE
-          ORG  $C000
-          ENDC
+; basic309: statements for the video card at $FF80 (vidcard/README.md), an output
+; device beside the console. The card draws; these send it what to draw:
+;   SCREEN n                  0: its text screen (as at reset); 1: a 320x240 bitmap in
+;                             256 colors; 2: 640x480 in 16. Modes 1 and 2 have the 80x30
+;                             text screen in front of the bitmap, and sprites.
+;   COLOR fg[,bg]             the pen (and TPRINT's background)
+;   GCLS [c]                  clear the bitmap (to c) and the text screen (in IMAGE n:
+;                             just the image)
+;   PSET (x,y)[,c]
+;   LINE (x1,y1)-(x2,y2)[,[c][,B|BF]]    (in LINE's handler)
+;   CIRCLE (x,y),r[,[c][,F]]  F: filled
+;   TRIANGLE (x1,y1)-(x2,y2)-(x3,y3)[,c]  filled
+;   GPRINT (x,y),s$[,c]       text drawn on the bitmap
+;   TPRINT (col,row),s$[,fg[,bg]]  text on the text screen
+;   PALETTE n,r,g,b           color n (0-255) from red, green, blue (0-255)
+;   SPRITE n[,x,y[,img[,f]]]  sprite n (0-127) at x,y showing image img (0-63, default
+;                             n); f: 1 flipped across, 2 down, 4 behind the text.
+;                             SPRITE n alone hides it.
+;   IMAGE n / IMAGE           draw into sprite image n (16x16) / onto the screen again
+;   VSYNC [n]                 wait for the n'th vertical blank from now (1)
+;   VPOKE a,v / VPEEK(a)      a byte of the card's address space (0 to 16777215)
+; The card's registers, those used here:
+VCADDR    EQU  $FF80          port 0's address (H, M, L)
+VCADDRM   EQU  $FF81
+VCINC     EQU  $FF83          its step
+VCDATA    EQU  $FF85          its data
+VCCTRL    EQU  $FF8C          $80: reset
+VCISR     EQU  $FF8F          interrupt flags (bit 0: vertical blank)
+VCCMD     EQU  $FF92          drawing commands
+; Where BASIC keeps things on the card: sprite images at $030000 (64 of 256 bytes),
+; the sprite table at $037C00 and the text screen at $038000 (both where the card
+; puts them at reset).
+
+; SCREEN n
+SCREEN    JSR  LB70B          THE MODE
+          CMPB #2
+          LBHI LB44A          'FC' ERROR IF > 2
+          STB  VMODE
+          LDA  #$80
+          STA  VCCTRL         THE CARD AS AT RESET
+          LDA  #15
+          STA  VPEN
+          CLR  VTBG
+          CLR  VIMG           DRAWING ON THE SCREEN
+          TSTB
+          BEQ  SCREEN9        MODE 0: THAT'S ALL
+          LDA  #$04           THE DISPLAY SETTINGS AND LAYER 0: THE BITMAP
+          LDX  #$0000
+          JSR  VCSET
+          LDX  #SCRTAB1
+          LDB  VMODE
+          DECB
+          BEQ  SCREEN1
+          LDX  #SCRTAB2
+SCREEN1   LDU  #VCDATA
+          LDB  #32
+          JSR  VCOUT
+          PSHS X              (ITS TARGET COMMAND FOLLOWS)
+          LDA  #$04           LAYER 2: THE TEXT SCREEN
+          LDX  #$0030
+          JSR  VCSET
+          LDX  #SCRL2
+          LDB  #16
+          JSR  VCOUT
+          PULS X
+          LDU  #VCCMD         DRAWING GOES ON THE BITMAP
+          LDB  #11
+          JSR  VCOUT
+SCREEN9   RTS
+
+; COLOR fg[,bg]
+COLOR     JSR  LB70B
+          STB  VPEN
+          JSR  VCPEN
+          JSR  GETCCH
+          CMPA #',
+          BNE  COLOR9
+          JSR  LB738          COMMA, THEN THE BACKGROUND
+          STB  VTBG
+COLOR9    RTS
+
+; GCLS [c]
+GCLS      BEQ  GCLS1          NO COLOR: 0
+          JSR  LB70B
+          FCB  SKP1
+GCLS1     CLRB
+          LDA  #2             COLOR c, CLEAR
+          JSR  VCCMDD
+          LDA  #9
+          STA  VCCMD
+          TST  VIMG           AND THE TEXT SCREEN -- UNLESS THIS WAS A SPRITE IMAGE
+          BNE  GCLS2
+          LDX  #GCLSCMD
+          LDB  #8
+          LDU  #VCCMD
+          JSR  VCOUT
+GCLS2     JMP  VCPEN          (THE PEN AGAIN)
+
+; PSET (x,y)[,c]
+PSET      LDX  #GARG
+          JSR  GXY
+          JSR  GOPTC
+          LDA  #3             PLOT
+          LDB  #4
+GDRAW     PSHS D              DRAW: COMMAND A WITH B BYTES FROM GARG, IN GCOL
+          LDA  #2
+          LDB  GCOL
+          JSR  VCCMDD
+          PULS D
+          STA  VCCMD
+          LDX  #GARG
+GDRAW1    LDU  #VCCMD
+          JSR  VCOUT
+          JMP  VCPEN
+
+; LINE (x1,y1)-(x2,y2)[,[c][,B|BF]]
+GLINE     LDX  #GARG
+          JSR  GXY
+          JSR  GMINUS
+          LDX  #GARG+4
+          JSR  GXY
+          JSR  GOPTC
+          CLR  GFLG
+          CMPA #',
+          BNE  GLINE2
+          JSR  GETNCH
+          CMPA #'B
+          LBNE LB277          'SYNTAX ERROR' IF NOT B OR BF
+          INC  GFLG
+          JSR  GETNCH
+          CMPA #'F
+          BNE  GLINE2
+          INC  GFLG
+          JSR  GETNCH
+GLINE2    LDA  GFLG
+          BNE  GLINE3
+          LDA  #4             LINE
+          LDB  #8
+          LBRA GDRAW
+GLINE3    LDX  #GARG          A BOX: THE CORNER AND SIZE, FROM THE ENDS
+          BSR  GSPAN
+          LEAX 2,X
+          BSR  GSPAN
+          LDA  #2
+          LDB  GCOL
+          JSR  VCCMDD
+          LDA  GFLG
+          ADDA #4             RECT (5) OR FILLRECT (6)
+          STA  VCCMD
+          LDX  #GARG+8
+          LDB  #8
+          LBRA GDRAW1
+; From ends at 0,X and 4,X: the lower one to 8,X and the distance + 1 to 12,X.
+GSPAN     LDD  ,X
+          CMPD 4,X
+          BLE  GSPAN1
+          LDD  4,X
+GSPAN1    STD  8,X
+          LDD  4,X
+          SUBD ,X
+          BPL  GSPAN2
+          NEGD
+GSPAN2    ADDD #1
+          STD  12,X
+          RTS
+
+; CIRCLE (x,y),r[,[c][,F]]
+CIRCLE    LDX  #GARG
+          JSR  GXY
+          JSR  LB26D
+          JSR  GEV16
+          STD  GARG+4
+          JSR  GOPTC
+          CMPA #',            ,F: FILLED
+          BNE  CIRCLE1
+          JSR  GETNCH
+          CMPA #'F
+          LBNE LB277
+          JSR  GETNCH
+          LDA  #8             ... OR DISC
+          FCB  SKP2
+CIRCLE1   LDA  #7
+          LDB  #6
+          LBRA GDRAW
+
+; TRIANGLE (x1,y1)-(x2,y2)-(x3,y3)[,c]
+TRIANG    LDX  #GARG
+          JSR  GXY
+          JSR  GMINUS
+          LDX  #GARG+4
+          JSR  GXY
+          JSR  GMINUS
+          LDX  #GARG+8
+          JSR  GXY
+          JSR  GOPTC
+          LDA  #$0D
+          LDB  #12
+          LBRA GDRAW
+
+; GPRINT (x,y),s$[,c]
+GPRINT    LDX  #GARG
+          JSR  GXY
+          JSR  LB26D
+          JSR  GSTR
+          JSR  GOPTC
+          LDA  #2
+          LDB  GCOL
+          JSR  VCCMDD
+GPRINT1   TST  GSLEN
+          BEQ  GPRINT9
+          LDA  #$0F           CHAR x,y,c
+          STA  VCCMD
+          LDD  GARG
+          JSR  VCCMDD
+          LDD  GARG+2
+          JSR  VCCMDD
+          LDX  GSADR
+          LDA  ,X+
+          STX  GSADR
+          STA  VCCMD
+          LDD  GARG           8 PIXELS ON
+          ADDD #8
+          STD  GARG
+          DEC  GSLEN
+          BRA  GPRINT1
+GPRINT9   JMP  VCPEN
+
+; TPRINT (col,row),s$[,fg[,bg]]
+TPRINT    LDX  #GARG
+          JSR  GXY
+          JSR  LB26D
+          JSR  GSTR
+          LDB  VPEN
+          STB  GCOL
+          LDB  VTBG
+          STB  GBG
+          JSR  GETCCH
+          CMPA #',
+          BNE  TPRINT1
+          JSR  LB738
+          STB  GCOL
+          CMPA #',
+          BNE  TPRINT1
+          JSR  LB738
+          STB  GBG
+TPRINT1   LDA  GARG+3         THE CELL: $038000 + (ROW*128 + COLUMN)*4
+          ANDA #31
+          LDB  GARG+1
+          ANDB #127
+          LSRA
+          BCC  TPRINT2
+          ORB  #$80
+TPRINT2   LSLD
+          LSLD
+          ADDD #$8000
+          TFR  D,X
+          LDA  #$03
+          JSR  VCSET
+TPRINT3   TST  GSLEN
+          BEQ  TPRINT9
+          LDX  GSADR
+          LDA  ,X+
+          STX  GSADR
+          STA  VCDATA         THE CHARACTER, ITS COLOR, ITS BACKGROUND, 0
+          LDA  GCOL
+          STA  VCDATA
+          LDA  GBG
+          STA  VCDATA
+          CLRA
+          STA  VCDATA
+          DEC  GSLEN
+          BRA  TPRINT3
+TPRINT9   RTS
+
+; PALETTE n,r,g,b
+PALETTE   JSR  LB70B
+          STB  GARG           N
+          JSR  LB738
+          STB  GARG+1         RED
+          JSR  LB738
+          STB  GARG+2         GREEN
+          JSR  LB738          BLUE
+          LSRB
+          LSRB
+          LSRB
+          STB  GARG+3
+          LDB  GARG+2         RGB565: RRRRRGGG GGGBBBBB
+          ANDB #$FC
+          CLRA
+          LSLD
+          LSLD
+          LSLD
+          ORB  GARG+3
+          STD  GARG+4
+          LDA  GARG+1
+          ANDA #$F8
+          ORA  GARG+4
+          STA  GARG+4
+          LDB  GARG           AT $040200 + N*2
+          CLRA
+          LSLD
+          ADDD #$0200
+          TFR  D,X
+          LDA  #$04
+          JSR  VCSET
+          LDD  GARG+4
+          STA  VCDATA
+          STB  VCDATA
+          RTS
+
+; SPRITE n[,x,y[,img[,f]]]
+SPRITE    JSR  LB70B
+          CMPB #127
+          LBHI LB44A
+          STB  GARG
+          CLRA                ITS ENTRY: $037C00 + N*8
+          LSLD
+          LSLD
+          LSLD
+          ADDD #$7C00
+          TFR  D,X
+          LDA  #$03
+          JSR  VCSET
+          JSR  GETCCH
+          CMPA #',
+          BEQ  SPRITE1
+          LDB  #8             SPRITE N: HIDE IT (ALL 0)
+          CLRA
+SPRITE0   STA  VCDATA
+          DECB
+          BNE  SPRITE0
+          RTS
+SPRITE1   JSR  LB26D
+          JSR  GEV16
+          STD  GARG+2         X
+          JSR  LB26D
+          JSR  GEV16
+          STD  GARG+4         Y
+          LDB  GARG
+          ANDB #63
+          STB  GARG+1         IMAGE N
+          CLR  GARG+6
+          JSR  GETCCH
+          CMPA #',
+          BNE  SPRITE2
+          JSR  LB738
+          CMPB #63
+          LBHI LB44A
+          STB  GARG+1
+          CMPA #',
+          BNE  SPRITE2
+          JSR  LB738
+          STB  GARG+6         FLAGS
+SPRITE2   LDB  GARG+1         THE IMAGE: ($030000 + IMG*256) / 32
+          CLRA
+          LSLD
+          LSLD
+          LSLD
+          ADDD #$1800
+          STA  VCDATA
+          STB  VCDATA
+          LDD  GARG+2
+          STA  VCDATA
+          STB  VCDATA
+          LDD  GARG+4
+          STA  VCDATA
+          STB  VCDATA
+          LDB  GARG+6         16x16, THE FLIPS, IN FRONT OF EVERYTHING ...
+          ANDB #3
+          LSLB
+          LSLB
+          LSLB
+          LSLB
+          ORB  #$C5
+          LDA  GARG+6
+          BITA #4
+          BEQ  SPRITE3
+          ANDB #$7F           ... OR BEHIND THE TEXT
+SPRITE3   STB  VCDATA
+          LDB  #$80           8 BITS A PIXEL
+          STB  VCDATA
+          RTS
+
+; IMAGE n / IMAGE
+IMAGE     BEQ  IMAGE1         NO NUMBER: THE SCREEN AGAIN
+          JSR  LB70B
+          CMPB #63
+          LBHI LB44A
+          LDA  #1             TARGET $03nn00, 16 BYTES A ROW, 16x16, 8 BITS
+          STA  VIMG
+          STA  VCCMD
+          LDA  #3
+          STA  VCCMD
+          STB  VCCMD
+          CLRA
+          STA  VCCMD
+          LDX  #IMGTGT
+          LDB  #7
+          BRA  IMAGE3
+IMAGE1    CLR  VIMG
+          LDX  #SCRTGT0
+          LDB  VMODE
+          BEQ  IMAGE2
+          LDX  #SCRTAB1+32
+          DECB
+          BEQ  IMAGE2
+          LDX  #SCRTAB2+32
+IMAGE2    LDB  #11
+IMAGE3    LDU  #VCCMD
+          JMP  VCOUT
+
+; VSYNC [n]
+VSYNC     BEQ  VSYNC0
+          JSR  LB70B
+          FCB  SKP2
+VSYNC0    LDB  #1
+VSYNC1    TSTB
+          BEQ  VSYNC9
+          LDA  #1             CLEAR THE FLAG, THEN WAIT FOR THE CARD TO SET IT
+          STA  VCISR
+VSYNC2    PSHS B
+          JSR  LADEB          (BREAK STILL WORKS)
+          PULS B
+          LDA  VCISR
+          BITA #1
+          BEQ  VSYNC2
+          DECB
+          BRA  VSYNC1
+VSYNC9    RTS
+
+; VPOKE a,v
+VPOKE     JSR  GADDR
+          JSR  VCSET
+          JSR  LB738
+          STB  VCDATA
+          RTS
+
+; VPEEK(a)
+VPEEK     JSR  GADDR1
+          JSR  VCSET
+          LDB  VCDATA
+          JMP  LB4F3          ACCB AS A NUMBER
+
+; An address (0-16777215) into A (bits 23-16) and X.
+GADDR     JSR  LB141
+GADDR1    JSR  LB143          'TM' ERROR IF A STRING
+          LDA  FP0SGN
+          LBMI LB44A
+          LDA  FP0EXP
+          CMPA #$98
+          LBHI LB44A          'FC' ERROR IF 2^24 OR MORE
+          JSR  LBCC8          AN INTEGER IN FPA0..FPA0+3
+          LDA  FPA0+1
+          LDX  FPA0+2
+          RTS
+
+; A number, -32768 to 32767, in D.
+GEV16     JSR  LB141
+          JMP  INTCNV
+
+; (x,y) into the two words at X.
+GXY       STX  GSLOT
+          JSR  LB26A          '('
+          BSR  GEV16
+          LDX  GSLOT
+          STD  ,X
+          JSR  LB26D          ','
+          BSR  GEV16
+          LDX  GSLOT
+          STD  2,X
+          JMP  LB267          ')'
+
+; The '-' between points.
+GMINUS    JSR  GETCCH
+          CMPA #TOK_MINUS
+          LBNE LB277
+          JMP  GETNCH
+
+; [,c]: the color to draw in (GCOL), the pen's if there is none (or ,,).
+; Returns the character after it in A.
+GOPTC     LDB  VPEN
+          STB  GCOL
+          JSR  GETCCH
+          CMPA #',
+          BNE  GOPTC9
+          JSR  GETNCH
+          CMPA #',
+          BEQ  GOPTC9
+          JSR  LB70B
+          STB  GCOL
+GOPTC9    RTS
+
+; A string: its address (GSADR) and length (GSLEN).
+GSTR      JSR  LB156
+          JSR  LB654
+          STX  GSADR
+          STB  GSLEN
+          RTS
+
+; Port 0 to A:X, step 1.
+VCSET     STA  VCADDR
+          STX  VCADDRM
+          LDX  #1
+          STX  VCINC
+          RTS
+; B bytes from X to the register at U.
+VCOUT     LDA  ,X+
+          STA  ,U
+          DECB
+          BNE  VCOUT
+          RTS
+; A command's two bytes: A, then B.
+VCCMDD    STA  VCCMD
+          STB  VCCMD
+          RTS
+; COLOR pen.
+VCPEN     LDA  #2
+          LDB  VPEN
+          BRA  VCCMDD
+
+; SCREEN's settings, from $040000: the display (4 bytes), the sprite table's
+; address, 9 spare bytes and layer 0 (32 bytes), then the bitmap's TARGET.
+SCRTAB1   FCB  $0D,0,0,128,$03,$7C,$00,0,0,0,0,0,0,0,0,0
+          FCB  $1A,0,0,0,0,0,0,0,0,0,0,0,$01,$40,0,0   320x240, 8 BITS
+          FCB  1,0,0,0,$01,$40,$01,$40,$00,$F0,8
+SCRTAB2   FCB  $0D,0,1,128,$03,$7C,$00,0,0,0,0,0,0,0,0,0
+          FCB  $16,0,0,0,0,0,0,0,0,0,0,0,$01,$40,0,0   640x480, 4 BITS
+          FCB  1,0,0,0,$01,$40,$02,$80,$01,$E0,4
+SCRL2     FCB  $24,$02,$03,$80,$00,$03,$F0,$00,0,0,0,0,0,0,0,0 TEXT 80x30
+SCRTGT0   FCB  1,0,0,0,0,0,0,0,0,0,0        (SCREEN 0: NOTHING TO DRAW ON)
+IMGTGT    FDB  16,16,16
+          FCB  8
+GCLSCMD   FCB  $0B,$03,$80,$00,$00,$40,$00,0     FILL THE TEXT SCREEN WITH 0
+
+* DISPATCH TABLE FOR SECONDARY FUNCTIONS                      
+* TOKENS ARE PRECEEDED BY $FF                      
+* FIRST SET ALWAYS HAS ONE PARAMETER                      
+FUNC_TAB                       
+LAA29     FDB  SGN            SGN 
+          FDB  INT            INT 
+          FDB  ABS            ABS 
+          FDB  USRJMP         USR 
+TOK_USR   EQU  (*-FUNC_TAB)/2+$7F  
+TOK_FF_USR EQU  (*-FUNC_TAB)/2+$FF7F  
+          FDB  RND            RND 
+          FDB  SIN            SIN 
+          FDB  PEEK           PEEK 
+          FDB  LEN            LEN
+TOK_LEN   EQU  (*-FUNC_TAB)/2+$7F 
+          FDB  STR            STR$ 
+          FDB  VAL            VAL 
+          FDB  ASC            ASC 
+          FDB  CHR            CHR$ 
+          FDB  ATN            ATN 
+          FDB  COS            COS 
+          FDB  TAN            TAN 
+          FDB  EXP            EXP 
+          FDB  FIX            FIX 
+          FDB  LOG            LOG 
+          FDB  POS            POS 
+          FDB  SQR            SQR 
+          FDB  HEXDOL         HEX$
+          FDB  EOFFN          EOF
+          FDB  LOFFN          LOF
+          FDB  LOCFN          LOC
+          FDB  CVIFN          CVI
+          FDB  CVSFN          CVS
+          FDB  MKIFN          MKI$
+          FDB  MKSFN          MKS$
+          FDB  VPEEK          VPEEK (the video card)
+* LEFT, RIGHT AND MID ARE TREATED SEPARATELY
+          FDB  LEFT           LEFT$ 
+TOK_LEFT  EQU  (*-FUNC_TAB)/2+$7F  
+          FDB  RIGHT          RIGHT$ 
+          FDB  MID            MID$ 
+TOK_MID   EQU  (*-FUNC_TAB)/2+$7F  
+* REMAINING FUNCTIONS                      
+          FDB  INKEY          INKEY$ 
+TOK_INKEY EQU  (*-FUNC_TAB)/2+$7F  
+          FDB  MEM            MEM
+          FDB  ERRFN          ERR
+          FDB  ERLFN          ERL
+          FDB  VARPT          VARPTR 
+          FDB  INSTR          INSTR 
+          FDB  STRING         STRING$ 
+NUM_SEC_FNS EQU  (*-FUNC_TAB)/2    
+                               
+* THIS TABLE CONTAINS PRECEDENCES AND DISPATCH ADDRESSES FOR ARITHMETIC                      
+* AND LOGICAL OPERATORS - THE NEGATION OPERATORS DO NOT ACT ON TWO OPERANDS                      
+* S0 THEY ARE NOT LISTED IN THIS TABLE. THEY ARE TREATED SEPARATELY IN THE                      
+* EXPRESSION EVALUATION ROUTINE. THEY ARE:                      
+* UNARY NEGATION (-), PRECEDENCE &7D AND LOGICAL NEGATION (NOT), PRECEDENCE $5A                      
+* THE RELATIONAL OPERATORS < > = ARE ALSO NOT LISTED, PRECEDENCE $64.                      
+* A PRECEDENCE VALUE OF ZERO INDICATES END OF EXPRESSION OR PARENTHESES                      
+*                              
+LAA51     FCB  $79             
+          FDB  LB9C5          + 
+          FCB  $79             
+          FDB  LB9BC          - 
+          FCB  $7B             
+          FDB  LBACC          * 
+          FCB  $7B             
+          FDB  LBB91          / 
+          FCB  $7F             
+          FDB  L8489          EXPONENTIATION 
+          FCB  $50             
+          FDB  LB2D5          AND 
+          FCB  $46             
+          FDB  LB2D4          OR 
+                               
+* THIS IS THE RESERVED WORD TABLE                      
+* FIRST PART OF THE TABLE CONTAINS EXECUTABLE COMMANDS                      
+LAA66     FCC  "FO"           80
+          FCB  $80+'R'
+TOK_FOR   EQU  $80
+          FCC  "G"            81 
+          FCB  $80+'O'         
+TOK_GO    EQU  $81             
+          FCC  "RE"           82 
+          FCB  $80+'M'         
+          FCB  ''+$80         83 
+          FCC  "ELS"          84 
+          FCB  $80+'E'         
+          FCC  "I"            85 
+          FCB  $80+'F'         
+          FCC  "DAT"          86 
+          FCB  $80+'A'         
+          FCC  "PRIN"         87 
+          FCB  $80+'T'         
+          FCC  "O"            88 
+          FCB  $80+'N'         
+          FCC  "INPU"         89 
+          FCB  $80+'T'         
+          FCC  "EN"           8A 
+          FCB  $80+'D'         
+          FCC  "NEX"          8B 
+          FCB  $80+'T'
+TOK_NEXT  EQU  $8B
+          FCC  "DI"           8C 
+          FCB  $80+'M'         
+          FCC  "REA"          8D 
+          FCB  $80+'D'         
+          FCC  "RU"           8E 
+          FCB  $80+'N'         
+          FCC  "RESTOR"       8F 
+          FCB  $80+'E'         
+          FCC  "RETUR"        90 
+          FCB  $80+'N'         
+          FCC  "STO"          91 
+          FCB  $80+'P'         
+          FCC  "POK"          92 
+          FCB  $80+'E'         
+          FCC  "CON"          93 
+          FCB  $80+'T'         
+          FCC  "LIS"          94 
+          FCB  $80+'T'         
+          FCC  "CLEA"         95 
+          FCB  $80+'R'         
+          FCC  "NE"           96 
+          FCB  $80+'W'         
+          FCC  "EXE"          97 
+          FCB  $80+'C'         
+          FCC  "TRO"          98 
+          FCB  $80+'N'         
+          FCC  "TROF"         99 
+          FCB  $80+'F'         
+          FCC  "DE"           9A 
+          FCB  $80+'L'         
+          FCC  "DE"           9B 
+          FCB  $80+'F'         
+          FCC  "LIN"          9C 
+          FCB  $80+'E'         
+          FCC  "RENU"         9D 
+          FCB  $80+'M'         
+          FCC  "EDI"          9E
+          FCB  $80+'T'
+; basic309: LOAD/SAVE, added right before the executable-commands boundary
+; below -- everything from here on (TAB, TO, SUB, ...) has its token number
+; computed automatically (EQU (*-TABLE)/2+$7F-style, same convention this
+; whole file already uses), so inserting here shifts them all up by 2
+; without needing a single hand-edited token number anywhere else.
+          FCC  "LOA"           9F
+          FCB  $80+'D'
+          FCC  "SAV"           A0
+          FCB  $80+'E'
+; basic309: FILES/KILL/NAME, added the same way as LOAD/SAVE above. To add a
+; statement: put its word here in the dictionary AND its FDB in CMD_TAB, in the
+; same position -- nothing else needs hand-editing: TOK_HIGH_EXEC comes from
+; CMD_TAB's length, the TOK_TAB..TOK_USING constants are fixed offsets from it,
+; and COMVEC's counts are derived from those. (These used to be hand-typed
+; literals; forgetting to bump them broke GOTO/STEP once and '=' once.)
+; simulator/tests/test_basic309_token_audit.cpp verifies the dictionary and
+; CMD_TAB really do line up, so run the test suite after any such insertion.
+          FCC  "FILE"          A1
+          FCB  $80+'S'
+          FCC  "KIL"           A2
+          FCB  $80+'L'
+          FCC  "NAM"           A3
+          FCB  $80+'E'
+; File I/O statements (see OPEN..WRITE below): dictionary word here, FDB in CMD_TAB.
+          FCC  "OPE"           A4
+          FCB  $80+'N'
+          FCC  "CLOS"          A5
+          FCB  $80+'E'
+          FCC  "WRIT"          A6
+          FCB  $80+'E'
+; Random-access file statements (FIELD..RSET below).
+          FCC  "FIEL"          A7
+          FCB  $80+'D'
+          FCC  "GE"            A8
+          FCB  $80+'T'
+          FCC  "PU"            A9
+          FCB  $80+'T'
+          FCC  "LSE"           AA
+          FCB  $80+'T'
+          FCC  "RSE"           AB
+          FCB  $80+'T'
+; Directory statements (MKDIR..CHDIR below).
+          FCC  "MKDI"          AC
+          FCB  $80+'R'
+          FCC  "CHDI"          AD
+          FCB  $80+'R'
+          FCC  "RMDI"          AE
+          FCB  $80+'R'
+          FCC  "SYSTE"         AF
+          FCB  $80+'M'
+; Error trapping: ERROR n raises error n; RESUME continues after a trapped error.
+          FCC  "ERRO"          B0
+          FCB  $80+'R'
+          FCC  "RESUM"         B1
+          FCB  $80+'E'
+; ANSI terminal statements (HOME..RESET, below BASIC_ENTRY; GOTOXY is GO TO XY).
+          FCC  "HOM"           B2
+          FCB  $80+'E'
+          FCC  "CL"            B3
+          FCB  $80+'S'
+          FCC  "LCOLO"         B4
+          FCB  $80+'R'
+          FCC  "HCOLO"         B5
+          FCB  $80+'R'
+          FCC  "RESE"          B6
+          FCB  $80+'T'
+; Video card statements (SCREEN..VPOKE, below BASIC_ENTRY; LINE (x,y)-(x,y) is LINE's).
+          FCC  "SCREE"
+          FCB  $80+'N'
+          FCC  "COLO"
+          FCB  $80+'R'
+          FCC  "GCL"
+          FCB  $80+'S'
+          FCC  "PSE"
+          FCB  $80+'T'
+          FCC  "CIRCL"
+          FCB  $80+'E'
+          FCC  "TRIANGL"
+          FCB  $80+'E'
+          FCC  "GPRIN"
+          FCB  $80+'T'
+          FCC  "TPRIN"
+          FCB  $80+'T'
+          FCC  "PALETT"
+          FCB  $80+'E'
+          FCC  "SPRIT"
+          FCB  $80+'E'
+          FCC  "IMAG"
+          FCB  $80+'E'
+          FCC  "VSYN"
+          FCB  $80+'C'
+          FCC  "VPOK"
+          FCB  $80+'E'
+* END OF EXECUTABLE COMMANDS. THE REMAINDER OF THE TABLE ARE NON-EXECUTABLE TOKENS
+          FCC  "TAB"          A4
+          FCB  $80+'('
+TOK_TAB   EQU  TOK_HIGH_EXEC+1
+          FCC  "T"            A5
+          FCB  $80+'O'
+TOK_TO    EQU  TOK_TAB+1
+          FCC  "SU"           A6
+          FCB  $80+'B'
+TOK_SUB   EQU  TOK_TAB+2
+          FCC  "THE"          A7
+          FCB  $80+'N'
+TOK_THEN  EQU  TOK_TAB+3
+          FCC  "NO"           A8
+          FCB  $80+'T'
+TOK_NOT   EQU  TOK_TAB+4
+          FCC  "STE"          A9
+          FCB  $80+'P'
+TOK_STEP  EQU  TOK_TAB+5
+          FCC  "OF"           AA
+          FCB  $80+'F'
+          FCB  '++$80         AB
+TOK_PLUS  EQU  TOK_TAB+7
+          FCB  '-+$80         AC
+TOK_MINUS EQU  TOK_TAB+8
+          FCB  '*+$80         AD
+          FCB  '/+$80         AE
+          FCB  '^+$80         AF
+          FCC  "AN"           B0
+          FCB  $80+'D'
+          FCC  "O"            B1
+          FCB  $80+'R'
+          FCB  '>+$80         B2
+TOK_GREATER EQU  TOK_TAB+14
+          FCB  '=+$80         B3
+TOK_EQUALS EQU  TOK_TAB+15
+          FCB  '<+$80         B4
+          FCC  "F"            B5
+          FCB  $80+'N'
+TOK_FN    EQU  TOK_TAB+17
+          FCC  "USIN"         B6
+          FCB  $80+'G'
+TOK_USING EQU  TOK_TAB+18
+*                              
+                               
+* FIRST SET ALWAYS HAS ONE PARAMETER                      
+LAB1A     FCC  "SG"           80 
+          FCB  $80+'N'         
+          FCC  "IN"           81 
+          FCB  $80+'T'         
+          FCC  "AB"           82 
+          FCB  $80+'S'         
+          FCC  "US"           83 
+          FCB  $80+'R'         
+          FCC  "RN"           84 
+          FCB  $80+'D'         
+          FCC  "SI"           85 
+          FCB  $80+'N'         
+          FCC  "PEE"          86 
+          FCB  $80+'K'         
+          FCC  "LE"           87 
+          FCB  $80+'N'         
+          FCC  "STR"          88 
+          FCB  $80+'$'         
+          FCC  "VA"           89 
+          FCB  $80+'L'         
+          FCC  "AS"           8A 
+          FCB  $80+'C'         
+          FCC  "CHR"          8B 
+          FCB  $80+'$'         
+          FCC  "AT"           8C 
+          FCB  $80+'N'         
+          FCC  "CO"           8D 
+          FCB  $80+'S'         
+          FCC  "TA"           8E 
+          FCB  $80+'N'         
+          FCC  "EX"           8F 
+          FCB  $80+'P'         
+          FCC  "FI"           90 
+          FCB  $80+'X'         
+          FCC  "LO"           91 
+          FCB  $80+'G'         
+          FCC  "PO"           92 
+          FCB  $80+'S'         
+          FCC  "SQ"           93 
+          FCB  $80+'R'         
+          FCC  "HEX"          94
+          FCB  $80+'$'
+; basic309: file functions, in this one-numeric-argument group (before LEFT$).
+; Word here AND FDB in FUNC_TAB, same position; NUM_SEC_FNS and TOK_LEFT/MID/INKEY
+; are derived from FUNC_TAB, so nothing else needs renumbering.
+          FCC  "EO"           95
+          FCB  $80+'F'
+          FCC  "LO"           96
+          FCB  $80+'F'
+          FCC  "LO"           97
+          FCB  $80+'C'
+          FCC  "CV"           98
+          FCB  $80+'I'
+          FCC  "CV"           99
+          FCB  $80+'S'
+          FCC  "MKI"          9A
+          FCB  $80+'$'
+          FCC  "MKS"          9B
+          FCB  $80+'$'
+          FCC  "VPEE"
+          FCB  $80+'K'
+* LEFT, RIGHT AND MID ARE TREATED SEPARATELY
+          FCC  "LEFT"         95
+          FCB  $80+'$'         
+          FCC  "RIGHT"        96 
+          FCB  $80+'$'         
+          FCC  "MID"          97 
+          FCB  $80+'$'         
+* REMAINING FUNCTIONS                      
+          FCC  "INKEY"        98 
+          FCB  $80+'$'         
+          FCC  "ME"           99
+          FCB  $80+'M'
+          FCC  "ER"           ERR
+          FCB  $80+'R'
+          FCC  "ER"           ERL
+          FCB  $80+'L'
+          FCC  "VARPT"        9A 
+          FCB  $80+'R'         
+          FCC  "INST"         9B 
+          FCB  $80+'R'         
+          FCC  "STRING"       9C 
+          FCB  $80+'$'         
+                               
+*                              
+* DISPATCH TABLE FOR COMMANDS TOKEN #               
+CMD_TAB                        
+LAB67     FDB  FOR             80   
+          FDB  GO              81   
+          FDB  REM             82   
+TOK_REM   EQU  (*-CMD_TAB)/2+$7F  
+          FDB  REM             83 (') 
+TOK_SNGL_Q EQU  (*-CMD_TAB)/2+$7F  
+          FDB  REM             84 (ELSE) 
+TOK_ELSE  EQU  (*-CMD_TAB)/2+$7F  
+          FDB  IF              85   
+TOK_IF    EQU  (*-CMD_TAB)/2+$7F  
+          FDB  DATA            86   
+TOK_DATA  EQU  (*-CMD_TAB)/2+$7F  
+          FDB  PRINT           87   
+TOK_PRINT EQU  (*-CMD_TAB)/2+$7F  
+          FDB  ON              88   
+          FDB  INPUT           89   
+TOK_INPUT EQU  (*-CMD_TAB)/2+$7F  
+          FDB  END             8A   
+          FDB  NEXT            8B   
+          FDB  DIM             8C   
+          FDB  READ            8D   
+          FDB  RUN             8E   
+          FDB  RESTOR         8F 
+          FDB  RETURN          90   
+          FDB  STOP            91   
+          FDB  POKE            92   
+          FDB  CONT           93 
+          FDB  LIST            94   
+          FDB  CLEAR           95   
+          FDB  NEW             96   
+          FDB  EXEC           97 
+          FDB  TRON           98 
+          FDB  TROFF          99 
+          FDB  DEL            9A 
+          FDB  DEF            9B 
+          FDB  LINE           9C 
+          FDB  RENUM          9D 
+          FDB  EDIT           9E
+          FDB  LOAD            9F
+          FDB  SAVE            A0
+          FDB  FILES           A1
+          FDB  KILL            A2
+          FDB  NAME            A3
+          FDB  OPEN            A4
+          FDB  CLOSE           A5
+          FDB  WRITE           A6
+          FDB  FIELD           A7
+          FDB  GET             A8
+          FDB  PUT             A9
+          FDB  LSET            AA
+          FDB  RSET            AB
+          FDB  MKDIR           AC
+          FDB  CHDIR           AD
+          FDB  RMDIR           AE
+          FDB  SYSTEM          AF
+          FDB  ERRORCMD        B0
+TOK_ERROR EQU  (*-CMD_TAB)/2+$7F
+          FDB  RESUME          B1
+          FDB  HOME            B2
+          FDB  CLS             B3
+          FDB  LCOLOR          B4
+          FDB  HCOLOR          B5
+          FDB  RESET           B6
+          FDB  SCREEN
+          FDB  COLOR
+          FDB  GCLS
+          FDB  PSET
+          FDB  CIRCLE
+          FDB  TRIANG
+          FDB  GPRINT
+          FDB  TPRINT
+          FDB  PALETTE
+          FDB  SPRITE
+          FDB  IMAGE
+          FDB  VSYNC
+          FDB  VPOKE
+CMD_END                        ; the end of CMD_TAB (the token audit checks it)
+TOK_HIGH_EXEC EQU  (*-CMD_TAB)/2+$7F
+
+          ZMB  $C000-*        UP TO BASIC_ENTRY (BASIC.COM CARRIES THE GAP TOO)
 ; Fixed entry point: BASIC.COM's header, the test harnesses and the demo tools all start
 ; BASIC by jumping to $C000, so they never depend on where RESVEC happens to land as code is
 ; added above it. (Checked by test_basic309_token_audit.)
@@ -558,6 +1548,8 @@ LA077     CLR  ,--X           MOVE POINTER DOWN TWO-CLEAR BYTE
           TFR  X,S            PUT STACK THERE
           LDX  #LAC7C         basic309: default LINEDONE_VEC target --
           STX  LINEDONE_VEC   see LACE9's tail and LOAD below
+          LDA  #15            basic309: the video card's pen is white
+          STA  VPEN
           LDX  #LA10D         POINT X TO ROM SOURCE DATA 
           LDU  #LPTCFW        POINT U TO RAM DESTINATION 
           LDB  #18            MOVE 18 BYTES 
@@ -763,408 +1755,8 @@ LAA24     SUBA #'0            * SET CARRY IF
           SUBA #-'0           * CHARACTER > ASCII 0 
 LAA28     RTS                  
                                
-* DISPATCH TABLE FOR SECONDARY FUNCTIONS                      
-* TOKENS ARE PRECEEDED BY $FF                      
-* FIRST SET ALWAYS HAS ONE PARAMETER                      
-FUNC_TAB                       
-LAA29     FDB  SGN            SGN 
-          FDB  INT            INT 
-          FDB  ABS            ABS 
-          FDB  USRJMP         USR 
-TOK_USR   EQU  (*-FUNC_TAB)/2+$7F  
-TOK_FF_USR EQU  (*-FUNC_TAB)/2+$FF7F  
-          FDB  RND            RND 
-          FDB  SIN            SIN 
-          FDB  PEEK           PEEK 
-          FDB  LEN            LEN
-TOK_LEN   EQU  (*-FUNC_TAB)/2+$7F 
-          FDB  STR            STR$ 
-          FDB  VAL            VAL 
-          FDB  ASC            ASC 
-          FDB  CHR            CHR$ 
-          FDB  ATN            ATN 
-          FDB  COS            COS 
-          FDB  TAN            TAN 
-          FDB  EXP            EXP 
-          FDB  FIX            FIX 
-          FDB  LOG            LOG 
-          FDB  POS            POS 
-          FDB  SQR            SQR 
-          FDB  HEXDOL         HEX$
-          FDB  EOFFN          EOF
-          FDB  LOFFN          LOF
-          FDB  LOCFN          LOC
-          FDB  CVIFN          CVI
-          FDB  CVSFN          CVS
-          FDB  MKIFN          MKI$
-          FDB  MKSFN          MKS$
-* LEFT, RIGHT AND MID ARE TREATED SEPARATELY
-          FDB  LEFT           LEFT$ 
-TOK_LEFT  EQU  (*-FUNC_TAB)/2+$7F  
-          FDB  RIGHT          RIGHT$ 
-          FDB  MID            MID$ 
-TOK_MID   EQU  (*-FUNC_TAB)/2+$7F  
-* REMAINING FUNCTIONS                      
-          FDB  INKEY          INKEY$ 
-TOK_INKEY EQU  (*-FUNC_TAB)/2+$7F  
-          FDB  MEM            MEM
-          FDB  ERRFN          ERR
-          FDB  ERLFN          ERL
-          FDB  VARPT          VARPTR 
-          FDB  INSTR          INSTR 
-          FDB  STRING         STRING$ 
-NUM_SEC_FNS EQU  (*-FUNC_TAB)/2    
-                               
-* THIS TABLE CONTAINS PRECEDENCES AND DISPATCH ADDRESSES FOR ARITHMETIC                      
-* AND LOGICAL OPERATORS - THE NEGATION OPERATORS DO NOT ACT ON TWO OPERANDS                      
-* S0 THEY ARE NOT LISTED IN THIS TABLE. THEY ARE TREATED SEPARATELY IN THE                      
-* EXPRESSION EVALUATION ROUTINE. THEY ARE:                      
-* UNARY NEGATION (-), PRECEDENCE &7D AND LOGICAL NEGATION (NOT), PRECEDENCE $5A                      
-* THE RELATIONAL OPERATORS < > = ARE ALSO NOT LISTED, PRECEDENCE $64.                      
-* A PRECEDENCE VALUE OF ZERO INDICATES END OF EXPRESSION OR PARENTHESES                      
-*                              
-LAA51     FCB  $79             
-          FDB  LB9C5          + 
-          FCB  $79             
-          FDB  LB9BC          - 
-          FCB  $7B             
-          FDB  LBACC          * 
-          FCB  $7B             
-          FDB  LBB91          / 
-          FCB  $7F             
-          FDB  L8489          EXPONENTIATION 
-          FCB  $50             
-          FDB  LB2D5          AND 
-          FCB  $46             
-          FDB  LB2D4          OR 
-                               
-* THIS IS THE RESERVED WORD TABLE                      
-* FIRST PART OF THE TABLE CONTAINS EXECUTABLE COMMANDS                      
-LAA66     FCC  "FO"           80
-          FCB  $80+'R'
-TOK_FOR   EQU  $80
-          FCC  "G"            81 
-          FCB  $80+'O'         
-TOK_GO    EQU  $81             
-          FCC  "RE"           82 
-          FCB  $80+'M'         
-          FCB  ''+$80         83 
-          FCC  "ELS"          84 
-          FCB  $80+'E'         
-          FCC  "I"            85 
-          FCB  $80+'F'         
-          FCC  "DAT"          86 
-          FCB  $80+'A'         
-          FCC  "PRIN"         87 
-          FCB  $80+'T'         
-          FCC  "O"            88 
-          FCB  $80+'N'         
-          FCC  "INPU"         89 
-          FCB  $80+'T'         
-          FCC  "EN"           8A 
-          FCB  $80+'D'         
-          FCC  "NEX"          8B 
-          FCB  $80+'T'
-TOK_NEXT  EQU  $8B
-          FCC  "DI"           8C 
-          FCB  $80+'M'         
-          FCC  "REA"          8D 
-          FCB  $80+'D'         
-          FCC  "RU"           8E 
-          FCB  $80+'N'         
-          FCC  "RESTOR"       8F 
-          FCB  $80+'E'         
-          FCC  "RETUR"        90 
-          FCB  $80+'N'         
-          FCC  "STO"          91 
-          FCB  $80+'P'         
-          FCC  "POK"          92 
-          FCB  $80+'E'         
-          FCC  "CON"          93 
-          FCB  $80+'T'         
-          FCC  "LIS"          94 
-          FCB  $80+'T'         
-          FCC  "CLEA"         95 
-          FCB  $80+'R'         
-          FCC  "NE"           96 
-          FCB  $80+'W'         
-          FCC  "EXE"          97 
-          FCB  $80+'C'         
-          FCC  "TRO"          98 
-          FCB  $80+'N'         
-          FCC  "TROF"         99 
-          FCB  $80+'F'         
-          FCC  "DE"           9A 
-          FCB  $80+'L'         
-          FCC  "DE"           9B 
-          FCB  $80+'F'         
-          FCC  "LIN"          9C 
-          FCB  $80+'E'         
-          FCC  "RENU"         9D 
-          FCB  $80+'M'         
-          FCC  "EDI"          9E
-          FCB  $80+'T'
-; basic309: LOAD/SAVE, added right before the executable-commands boundary
-; below -- everything from here on (TAB, TO, SUB, ...) has its token number
-; computed automatically (EQU (*-TABLE)/2+$7F-style, same convention this
-; whole file already uses), so inserting here shifts them all up by 2
-; without needing a single hand-edited token number anywhere else.
-          FCC  "LOA"           9F
-          FCB  $80+'D'
-          FCC  "SAV"           A0
-          FCB  $80+'E'
-; basic309: FILES/KILL/NAME, added the same way as LOAD/SAVE above. To add a
-; statement: put its word here in the dictionary AND its FDB in CMD_TAB, in the
-; same position -- nothing else needs hand-editing: TOK_HIGH_EXEC comes from
-; CMD_TAB's length, the TOK_TAB..TOK_USING constants are fixed offsets from it,
-; and COMVEC's counts are derived from those. (These used to be hand-typed
-; literals; forgetting to bump them broke GOTO/STEP once and '=' once.)
-; simulator/tests/test_basic309_token_audit.cpp verifies the dictionary and
-; CMD_TAB really do line up, so run the test suite after any such insertion.
-          FCC  "FILE"          A1
-          FCB  $80+'S'
-          FCC  "KIL"           A2
-          FCB  $80+'L'
-          FCC  "NAM"           A3
-          FCB  $80+'E'
-; File I/O statements (see OPEN..WRITE below): dictionary word here, FDB in CMD_TAB.
-          FCC  "OPE"           A4
-          FCB  $80+'N'
-          FCC  "CLOS"          A5
-          FCB  $80+'E'
-          FCC  "WRIT"          A6
-          FCB  $80+'E'
-; Random-access file statements (FIELD..RSET below).
-          FCC  "FIEL"          A7
-          FCB  $80+'D'
-          FCC  "GE"            A8
-          FCB  $80+'T'
-          FCC  "PU"            A9
-          FCB  $80+'T'
-          FCC  "LSE"           AA
-          FCB  $80+'T'
-          FCC  "RSE"           AB
-          FCB  $80+'T'
-; Directory statements (MKDIR..CHDIR below).
-          FCC  "MKDI"          AC
-          FCB  $80+'R'
-          FCC  "CHDI"          AD
-          FCB  $80+'R'
-          FCC  "RMDI"          AE
-          FCB  $80+'R'
-          FCC  "SYSTE"         AF
-          FCB  $80+'M'
-; Error trapping: ERROR n raises error n; RESUME continues after a trapped error.
-          FCC  "ERRO"          B0
-          FCB  $80+'R'
-          FCC  "RESUM"         B1
-          FCB  $80+'E'
-; ANSI terminal statements (HOME..RESET, below BASIC_ENTRY; GOTOXY is GO TO XY).
-          FCC  "HOM"           B2
-          FCB  $80+'E'
-          FCC  "CL"            B3
-          FCB  $80+'S'
-          FCC  "LCOLO"         B4
-          FCB  $80+'R'
-          FCC  "HCOLO"         B5
-          FCB  $80+'R'
-          FCC  "RESE"          B6
-          FCB  $80+'T'
-* END OF EXECUTABLE COMMANDS. THE REMAINDER OF THE TABLE ARE NON-EXECUTABLE TOKENS
-          FCC  "TAB"          A4
-          FCB  $80+'('
-TOK_TAB   EQU  TOK_HIGH_EXEC+1
-          FCC  "T"            A5
-          FCB  $80+'O'
-TOK_TO    EQU  TOK_TAB+1
-          FCC  "SU"           A6
-          FCB  $80+'B'
-TOK_SUB   EQU  TOK_TAB+2
-          FCC  "THE"          A7
-          FCB  $80+'N'
-TOK_THEN  EQU  TOK_TAB+3
-          FCC  "NO"           A8
-          FCB  $80+'T'
-TOK_NOT   EQU  TOK_TAB+4
-          FCC  "STE"          A9
-          FCB  $80+'P'
-TOK_STEP  EQU  TOK_TAB+5
-          FCC  "OF"           AA
-          FCB  $80+'F'
-          FCB  '++$80         AB
-TOK_PLUS  EQU  TOK_TAB+7
-          FCB  '-+$80         AC
-TOK_MINUS EQU  TOK_TAB+8
-          FCB  '*+$80         AD
-          FCB  '/+$80         AE
-          FCB  '^+$80         AF
-          FCC  "AN"           B0
-          FCB  $80+'D'
-          FCC  "O"            B1
-          FCB  $80+'R'
-          FCB  '>+$80         B2
-TOK_GREATER EQU  TOK_TAB+14
-          FCB  '=+$80         B3
-TOK_EQUALS EQU  TOK_TAB+15
-          FCB  '<+$80         B4
-          FCC  "F"            B5
-          FCB  $80+'N'
-TOK_FN    EQU  TOK_TAB+17
-          FCC  "USIN"         B6
-          FCB  $80+'G'
-TOK_USING EQU  TOK_TAB+18
-*                              
-                               
-* FIRST SET ALWAYS HAS ONE PARAMETER                      
-LAB1A     FCC  "SG"           80 
-          FCB  $80+'N'         
-          FCC  "IN"           81 
-          FCB  $80+'T'         
-          FCC  "AB"           82 
-          FCB  $80+'S'         
-          FCC  "US"           83 
-          FCB  $80+'R'         
-          FCC  "RN"           84 
-          FCB  $80+'D'         
-          FCC  "SI"           85 
-          FCB  $80+'N'         
-          FCC  "PEE"          86 
-          FCB  $80+'K'         
-          FCC  "LE"           87 
-          FCB  $80+'N'         
-          FCC  "STR"          88 
-          FCB  $80+'$'         
-          FCC  "VA"           89 
-          FCB  $80+'L'         
-          FCC  "AS"           8A 
-          FCB  $80+'C'         
-          FCC  "CHR"          8B 
-          FCB  $80+'$'         
-          FCC  "AT"           8C 
-          FCB  $80+'N'         
-          FCC  "CO"           8D 
-          FCB  $80+'S'         
-          FCC  "TA"           8E 
-          FCB  $80+'N'         
-          FCC  "EX"           8F 
-          FCB  $80+'P'         
-          FCC  "FI"           90 
-          FCB  $80+'X'         
-          FCC  "LO"           91 
-          FCB  $80+'G'         
-          FCC  "PO"           92 
-          FCB  $80+'S'         
-          FCC  "SQ"           93 
-          FCB  $80+'R'         
-          FCC  "HEX"          94
-          FCB  $80+'$'
-; basic309: file functions, in this one-numeric-argument group (before LEFT$).
-; Word here AND FDB in FUNC_TAB, same position; NUM_SEC_FNS and TOK_LEFT/MID/INKEY
-; are derived from FUNC_TAB, so nothing else needs renumbering.
-          FCC  "EO"           95
-          FCB  $80+'F'
-          FCC  "LO"           96
-          FCB  $80+'F'
-          FCC  "LO"           97
-          FCB  $80+'C'
-          FCC  "CV"           98
-          FCB  $80+'I'
-          FCC  "CV"           99
-          FCB  $80+'S'
-          FCC  "MKI"          9A
-          FCB  $80+'$'
-          FCC  "MKS"          9B
-          FCB  $80+'$'
-* LEFT, RIGHT AND MID ARE TREATED SEPARATELY
-          FCC  "LEFT"         95
-          FCB  $80+'$'         
-          FCC  "RIGHT"        96 
-          FCB  $80+'$'         
-          FCC  "MID"          97 
-          FCB  $80+'$'         
-* REMAINING FUNCTIONS                      
-          FCC  "INKEY"        98 
-          FCB  $80+'$'         
-          FCC  "ME"           99
-          FCB  $80+'M'
-          FCC  "ER"           ERR
-          FCB  $80+'R'
-          FCC  "ER"           ERL
-          FCB  $80+'L'
-          FCC  "VARPT"        9A 
-          FCB  $80+'R'         
-          FCC  "INST"         9B 
-          FCB  $80+'R'         
-          FCC  "STRING"       9C 
-          FCB  $80+'$'         
-                               
-*                              
-* DISPATCH TABLE FOR COMMANDS TOKEN #               
-CMD_TAB                        
-LAB67     FDB  FOR             80   
-          FDB  GO              81   
-          FDB  REM             82   
-TOK_REM   EQU  (*-CMD_TAB)/2+$7F  
-          FDB  REM             83 (') 
-TOK_SNGL_Q EQU  (*-CMD_TAB)/2+$7F  
-          FDB  REM             84 (ELSE) 
-TOK_ELSE  EQU  (*-CMD_TAB)/2+$7F  
-          FDB  IF              85   
-TOK_IF    EQU  (*-CMD_TAB)/2+$7F  
-          FDB  DATA            86   
-TOK_DATA  EQU  (*-CMD_TAB)/2+$7F  
-          FDB  PRINT           87   
-TOK_PRINT EQU  (*-CMD_TAB)/2+$7F  
-          FDB  ON              88   
-          FDB  INPUT           89   
-TOK_INPUT EQU  (*-CMD_TAB)/2+$7F  
-          FDB  END             8A   
-          FDB  NEXT            8B   
-          FDB  DIM             8C   
-          FDB  READ            8D   
-          FDB  RUN             8E   
-          FDB  RESTOR         8F 
-          FDB  RETURN          90   
-          FDB  STOP            91   
-          FDB  POKE            92   
-          FDB  CONT           93 
-          FDB  LIST            94   
-          FDB  CLEAR           95   
-          FDB  NEW             96   
-          FDB  EXEC           97 
-          FDB  TRON           98 
-          FDB  TROFF          99 
-          FDB  DEL            9A 
-          FDB  DEF            9B 
-          FDB  LINE           9C 
-          FDB  RENUM          9D 
-          FDB  EDIT           9E
-          FDB  LOAD            9F
-          FDB  SAVE            A0
-          FDB  FILES           A1
-          FDB  KILL            A2
-          FDB  NAME            A3
-          FDB  OPEN            A4
-          FDB  CLOSE           A5
-          FDB  WRITE           A6
-          FDB  FIELD           A7
-          FDB  GET             A8
-          FDB  PUT             A9
-          FDB  LSET            AA
-          FDB  RSET            AB
-          FDB  MKDIR           AC
-          FDB  CHDIR           AD
-          FDB  RMDIR           AE
-          FDB  SYSTEM          AF
-          FDB  ERRORCMD        B0
-TOK_ERROR EQU  (*-CMD_TAB)/2+$7F
-          FDB  RESUME          B1
-          FDB  HOME            B2
-          FDB  CLS             B3
-          FDB  LCOLOR          B4
-          FDB  HCOLOR          B5
-          FDB  RESET           B6
-TOK_HIGH_EXEC EQU  (*-CMD_TAB)/2+$7F
+; basic309: the keyword tables (FUNC_TAB, the dictionaries, CMD_TAB) are below
+; BASIC_ENTRY now, where there is room for more; COMVEC points to them.
                                
 * ERROR MESSAGES AND THEIR NUMBERS AS USED INTERNALLY                      
 LABAF     FCC  "NF"           0 NEXT WITHOUT FOR   
@@ -7208,6 +7800,8 @@ L928E     RTS
 * LINE                         
 LINE      CMPA #TOK_INPUT     �INPUT� TOKEN 
           LBEQ L89C0          GO DO �LINE INPUT� COMMAND 
+          CMPA #'(            basic309: LINE (x,y)-(x,y) draws on the video card
+          LBEQ GLINE
           JMP  LB277          �SYNTAX ERROR� IF NOT "LINE INPUT" 
                                
                                

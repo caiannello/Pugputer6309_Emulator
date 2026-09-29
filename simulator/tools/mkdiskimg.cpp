@@ -4,8 +4,9 @@
 // EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM and MOVE.COM (shell/shell.bin,
 // edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, utils/hexdump.bin and
 // utils/move.bin as assembled -- they carry their own program headers) and
-// BASIC.COM (the $BC00-$EFFF window of basic309's S-record, given a program
-// header: load $BC00, entry $C000 -- see EXE_* in bios/defines.d).
+// BASIC.COM (the BASIC_LOAD-$EFFF window of basic309's S-record, given a program
+// header: load BASIC_LOAD, entry $C000 -- see pugputer/basic309_layout.hpp and EXE_* in
+// bios/defines.d).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
 //
@@ -32,6 +33,7 @@
 #include <string>
 #include <vector>
 
+#include "pugputer/basic309_layout.hpp"
 #include "pugputer/demo_sources.hpp"
 #include "pugputer/fat16_image.hpp"
 #include "pugputer/srec_loader.hpp"
@@ -42,10 +44,9 @@ using pugputer::load_srec_file;
 using pugputer::SrecLoadResult;
 
 namespace {
-constexpr uint16_t kBasicBase = 0xBC00;  // BASIC_LOAD in exbasrom309.asm
-constexpr uint32_t kBasicSize = 0x3400;  // $BC00-$EFFF, same window the
-                                         // existing basic309 tools/tests use
-constexpr uint16_t kBasicEntry = 0xC000; // BASIC_ENTRY: JMP RESVEC
+constexpr uint16_t kBasicBase = pugputer::kBasicLoad;
+constexpr uint32_t kBasicSize = pugputer::kBasicImageSize; // up to $EFFF
+constexpr uint16_t kBasicEntry = pugputer::kBasicEntry;    // BASIC_ENTRY: JMP RESVEC
 
 bool is_8_3(const std::filesystem::path& path) {
     std::string stem = path.stem().string();

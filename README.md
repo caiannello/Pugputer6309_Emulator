@@ -83,7 +83,8 @@ Every folder has its own `README.md` with the details.
   `MOVE from [to]`: move a file to another directory, or rename it. See `utils/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`, and
-  `CLS`/`HOME`/`GOTOXY`/`LCOLOR`/`HCOLOR`/`RESET` for the ANSI terminal. See
+  `CLS`/`HOME`/`GOTOXY`/`LCOLOR`/`HCOLOR`/`RESET` for the ANSI terminal, and `SCREEN`, `PSET`,
+  `LINE`, `CIRCLE`, `TRIANGLE`, `SPRITE` and the rest for the video card. See
   `basic309/README.md` for the differences from GW-BASIC.
 - **Video card.** 640x480 in 256 colors (from 65536): three layers of text (80x30), tile maps
   or bitmaps, 128 sprites between them, and drawing commands the card carries out itself, for a

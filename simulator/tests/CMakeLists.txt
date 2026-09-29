@@ -96,6 +96,7 @@ set(EXBASROM309_LST "${CMAKE_CURRENT_SOURCE_DIR}/../../basic309/exbasrom309.lst"
 if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${EXBASROM309_S19}")
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_golden.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_interp_regression.cpp)
+    list(APPEND PUGPUTER_TEST_SOURCES test_basic309_video.cpp)
     list(APPEND PUGPUTER_TEST_SOURCES test_basic309_token_audit.cpp)
     set(PUGPUTER_HAVE_BASIC309 1)
 else()

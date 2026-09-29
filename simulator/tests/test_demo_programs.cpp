@@ -3,6 +3,7 @@
 // contents plus the demo folder, subfolders and all) so the test doesn't depend on the shared
 // disk.img. BASIC starts in /BASIC, where they are, so they load by bare name.
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -11,7 +12,9 @@
 
 #include "basic309_file_helpers.hpp"
 #include "disk_images.hpp"
+#include "pugputer/video_device.hpp"
 #include "test_framework.hpp"
+#include "vc.h"
 
 namespace {
 
@@ -79,4 +82,49 @@ TEST(demo_programs_load_and_run_and_print_what_they_should) {
         std::string rows = out.substr(first, last - first);
         CHECK(std::count(rows.begin(), rows.end(), '\n') == 1); // only the one between them
     }
+}
+
+// VIDEO.BAS draws on the video card: the scene, then balls that move until a key is pressed.
+TEST(demo_program_video_draws_on_the_video_card) {
+    std::string img = demo_disk();
+    Basic309Session s;
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
+    pugputer::VideoDevice v;
+    v.set_draw_all(true);
+    s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+    CHECK(s.run_line("LOAD \"VIDEO\"").empty());
+    s.received.clear();
+    s.type("RUN");
+    s.bus.run(3579545 * 6); // six seconds: drawing, then the balls
+    CHECK(!contains(s.received, "ERROR"));
+    const vc_card& c = v.card();
+    CHECK(c.cfg[VC_DC_CTRL] == 0x0D);
+    auto shown = [&](int i) {
+        const uint8_t* p = c.cfg + 0x200 + 2 * i;
+        return vc_rgb888(static_cast<uint16_t>(p[0] << 8 | p[1]));
+    };
+    CHECK(v.pixel(8, 460) == shown(16));   // the ground
+    CHECK(v.pixel(320, 210) == shown(214)); // the sun (160,105)
+    int words = 0; // "PRESS ANY KEY TO QUIT" on the text screen, row 28 (bobbing up to 4 lines)
+    for (int y = 440; y < 464; ++y)
+        for (int x = 29 * 8; x < 50 * 8; ++x) words += v.pixel(x, y) == shown(7);
+    CHECK(words > 150);
+    // The balls are sprites 0-5, moving.
+    const uint8_t* t = c.vram + VC_RESET_SPR_BASE;
+    int x0 = t[2] << 8 | t[3], y0 = t[4] << 8 | t[5];
+    CHECK(t[6] == 0xC5 && t[8 * 3 + 6] == 0x45); // balls 3-5 behind the words
+    s.bus.run(3579545);
+    CHECK((t[2] << 8 | t[3]) != x0 || (t[4] << 8 | t[5]) != y0);
+    if (const char* dump = std::getenv("VIDCARD_DUMP")) {
+        std::ofstream f(dump, std::ios::binary);
+        for (int i = 0; i < 640 * 480; ++i) {
+            uint32_t p = v.pixels()[i];
+            char rgb[3] = {static_cast<char>(p >> 16), static_cast<char>(p >> 8), static_cast<char>(p)};
+            f.write(rgb, 3);
+        }
+    }
+    // A key: SCREEN 0 and OK.
+    s.send_byte('x');
+    CHECK(s.run_until_ok(200000000));
+    CHECK(c.cfg[VC_DC_CTRL] == 0x01);
 }

@@ -139,7 +139,7 @@ TEST(basic309_token_tables_are_internally_consistent) {
     CHECK(tab_index > 0);
     CHECK(sym["TOK_TAB"] == static_cast<uint32_t>(0x80 + tab_index));
     CHECK(sym["TOK_HIGH_EXEC"] == static_cast<uint32_t>(0x80 + tab_index - 1));
-    CHECK((sym["LABAF"] - sym["CMD_TAB"]) / 2 == static_cast<uint32_t>(tab_index));
+    CHECK((sym["CMD_END"] - sym["CMD_TAB"]) / 2 == static_cast<uint32_t>(tab_index));
 
     // Every TOK_* constant must name the dictionary word at its own index.
     const std::map<std::string, std::string> primary_tokens = {

@@ -6,7 +6,7 @@ calls) and extended with disk file I/O in the style of GW-BASIC. This is the pro
 only BASIC.
 
 - `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`). With `COMFILE` defined,
-  raw output is `BASIC.COM` itself (its program header and `$BC00-$EFFF`): the demo disk carries
+  raw output is `BASIC.COM` itself (its program header and `$B400-$EFFF`): the demo disk carries
   the source as `/ASM/BASIC.ASM`, with `/ASM/BASICCOM.ASM` to rebuild it with ASM on the Pugputer.
 - `build_basic.bat` -- builds `exbasrom309.s19` **and** `exbasrom309.lst` with a symbol
   table (`--symbols`). Always build through it: the token-audit test reads the symbols.
@@ -19,7 +19,7 @@ only BASIC.
 ## How it is loaded and where it lives
 
 `BASIC.COM` is an ordinary program file (see `../shell/README.md`): an 8-byte header
-("PX", load `$BC00`, entry `$C000`, flags 0) followed by `$BC00-$EFFF` (13312 bytes). At boot
+("PX", load `$B400`, entry `$C000`, flags 0) followed by `$B400-$EFFF` (15360 bytes). At boot
 DOS starts the shell (BIOS -> `SD_BOOT_TRY` -> DOS -> `SHELL.COM`); typing `BASIC` at its
 prompt has DOS load BASIC.COM and jump to `BASIC_ENTRY`. `SYSTEM` leaves BASIC: DOS closes
 every open file and starts the shell again. (On a disk with no `SHELL.COM`, DOS starts
@@ -30,18 +30,16 @@ every open file and starts the shell again. (On a disk with no `SHELL.COM`, DOS 
 | `$0600-$3331`  | resident DOS (code, variables, a FAT-sector cache, eight 512-byte file buffers) -- loaded at `DOS_LOAD` (`bios/defines.d`), below `WORKBASE`; only its first ~6KB is on disk, the buffers are just RAM |
 | `$3400`        | `WORKBASE`: BASIC's fixed workspace (direct page = `$34`); its top, `PROGST`, moves as variables are added. Must stay above `DOS_END` (`dos/dos.lst`); `test_bios_layout` checks it. |
 | `PROGST+1`     | start of the BASIC program, then variables, arrays, free memory |
-| `$BBFF`        | fixed top of string space (`TOPRAM_FIXED`, `BASIC_LOAD-1`) |
-| `$BC00`        | `BASIC_LOAD`: where `BASIC.COM` loads. The terminal statements (`HOME`..`RESET`), then free space up to `$C000` (about 820 bytes) |
+| `$B3FF`        | fixed top of string space (`TOPRAM_FIXED`, `BASIC_LOAD-1`) |
+| `$B400`        | `BASIC_LOAD`: where `BASIC.COM` loads. The terminal and video card statements, the keyword tables (`FUNC_TAB`, the dictionaries, `CMD_TAB`), then free space up to `$C000` (about 940 bytes) |
 | `$C000`        | `BASIC_ENTRY`: a `JMP RESVEC`. **The entry point everyone jumps to** (the program header, the test harnesses, the demos). It never moves; `RESVEC` does whenever code is added above it. |
 | `$F000-$FFFF`  | BIOS ROM |
 
-`$C000-$EFFF` is nearly full (about 70 bytes left), so new code goes in the space below
-`$C000`, where the terminal statements are (reached with `JMP`/`JSR`, or a long branch). When
-that runs out, lower `BASIC_LOAD` in `exbasrom309.asm` (each 1KB is 1KB less for programs) and
-the matching constants: `kBasicBase`/`kBasicSize` in `simulator/tools/mkdiskimg.cpp`,
-`basic309_demo.cpp`, `tests/basic309_session.hpp` and `test_basic309_golden.cpp`, the header
-and window in `tests/disk_images.hpp` and `test_asmlink.cpp`, and `BASIC.COM`'s size in the
-tests that list it.
+`$C000-$EFFF` has about 650 bytes left, and the space below `$C000` about 940; new
+statements go below `$C000` with the others (reached with `JMP`/`JSR`, or a long branch). The
+`ZMB $C000-*` at its end makes the assembly fail if that space overflows. Then lower
+`BASIC_LOAD` in `exbasrom309.asm` (each 1KB is 1KB less for programs) and `kBasicLoad` in
+`simulator/include/pugputer/basic309_layout.hpp`, which everything on the host side uses.
 
 ## Disk commands and directories
 
@@ -191,6 +189,36 @@ to where the cursor really is:
 - `POS` counts to 127: past that it goes negative (Color BASIC's own limit).
 - `/BASIC/COLORS.BAS` on the demo disk shows them all.
 
+## Statements for the video card
+
+The video card (`../vidcard/README.md`) is an output device beside the console: what these
+draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on the terminal.
+
+| Statement | |
+|---|---|
+| `SCREEN n` | 0: the card as it starts (its 80x30 text screen, nothing to draw on). 1: a 320x240 bitmap in 256 colors. 2: 640x480 in 16 colors. Modes 1 and 2 put the 80x30 text screen in front of the bitmap and turn the sprites on. Every `SCREEN` resets the card. |
+| `COLOR fg[,bg]` | the pen, which everything below draws in unless given a color; `bg` is `TPRINT`'s background |
+| `GCLS [c]` | clears the bitmap to `c` (0) and empties the text screen (after `IMAGE n`, just the image) |
+| `PSET (x,y)[,c]` | a point |
+| `LINE (x1,y1)-(x2,y2)[,[c][,B\|BF]]` | a line; `B` the box with those corners, `BF` filled. `LINE INPUT` is as before |
+| `CIRCLE (x,y),r[,[c][,F]]` | a circle; `F` filled |
+| `TRIANGLE (x1,y1)-(x2,y2)-(x3,y3)[,c]` | a filled triangle |
+| `GPRINT (x,y),s$[,c]` | text drawn on the bitmap (8x16 characters, the background untouched) |
+| `TPRINT (col,row),s$[,fg[,bg]]` | text on the text screen (80x30): in `COLOR`'s pen and background unless given |
+| `PALETTE n,r,g,b` | color `n` (0-255) from red, green and blue (0-255) |
+| `SPRITE n,x,y[,img[,f]]` | sprite `n` (0-127), 16x16, at `x,y` (the screen's pixels), showing image `img` (0-63; `n` if not given). `f`: add 1 to flip it across, 2 down, 4 to put it behind the text screen. `SPRITE n` alone hides it. |
+| `IMAGE n` | from now on the drawing statements draw into sprite image `n` (16x16, 256 colors, 0 transparent); `IMAGE` alone goes back to the screen |
+| `VSYNC [n]` | waits for the next vertical blank (or the `n`th): once a frame, for smooth movement |
+| `VPOKE a,v`, `VPEEK(a)` | a byte anywhere in the card's address space (0-16777215): the layers' settings, scrolling, tiles, PSRAM -- everything the statements above don't cover |
+
+- Coordinates are signed: whatever falls off the edges is clipped. Colors are palette numbers,
+  0-255 (in `SCREEN 2`, 0-15); color 0 is transparent: the backdrop shows through.
+- In `SCREEN 0` there is no bitmap: the drawing statements do nothing, `TPRINT` writes to the
+  text screen.
+- BASIC keeps the sprite images at `$030000` and uses the card's reset places for the sprite
+  table (`$037C00`) and the text screen (`$038000`).
+- `/BASIC/VIDEO.BAS` on the demo disk uses them all.
+
 ## Differences from GW-BASIC you will run into
 
 - No `%` integer variables (write `CODE` where the guide has `CODE%`), no `MKD$`/`CVD`,
@@ -204,6 +232,9 @@ to where the cursor really is:
   keyword (`GETX`, `LOCK`, `EOFLAG`, `HOMEX`) is tokenised as the keyword plus letters.
 - `RESET` resets the terminal's colors; GW-BASIC's `RESET` (close every file) is `CLOSE`
   here. `CLS` clears an ANSI terminal's screen.
+- `SCREEN`, `COLOR`, `PSET`, `LINE`, `CIRCLE` and `PALETTE` draw on the video card, not the
+  terminal, and take fewer options than GW-BASIC's (no aspect or arcs for `CIRCLE`, `PALETTE`
+  takes red, green and blue).
 
 ## The DOS interface BASIC uses
 

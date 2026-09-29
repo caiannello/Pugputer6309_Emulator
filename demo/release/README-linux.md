@@ -53,6 +53,7 @@ They are in the disk's `/BASIC` directory; `DIR /BASIC` at the shell prompt list
 | `RANDFILE` | random-access files: `FIELD`, `LSET`, `PUT`, `GET` |
 | `ERRTRAP` | `ON ERROR GOTO`, `ERR`, `ERL`, `RESUME NEXT` |
 | `COLORS` | the terminal's colors: `CLS`, `GOTOXY`, `LCOLOR` (256 colors), `HCOLOR` (24-bit), `RESET` |
+| `VIDEO` | the video card: `SCREEN`, `PALETTE`, `LINE`, `CIRCLE`, `TRIANGLE`, `GPRINT`, `TPRINT`, sprites drawn with `IMAGE` and moved each `VSYNC` |
 
 ## Things to try
 

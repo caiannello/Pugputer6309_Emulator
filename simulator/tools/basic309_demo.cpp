@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "pugputer/basic309_layout.hpp"
 #include "pugputer/rom_device.hpp"
 #include "pugputer/srec_loader.hpp"
 #include "pugputer/system_bus.hpp"
@@ -39,9 +40,9 @@ using pugputer::UartR65C51;
 namespace {
 constexpr uint16_t kBiosBase = 0xF000;
 constexpr uint32_t kBiosSize = 0x1000; // $F000-$FFFF
-constexpr uint16_t kBasicBase = 0xBC00;
-constexpr uint32_t kBasicSize = 0x3400; // $BC00-$EFFF (BASIC_LOAD in exbasrom309.asm)
-constexpr uint16_t kBasic309Entry = 0xC000; // fixed entry: JMP RESVEC (see exbasrom309.asm)
+constexpr uint16_t kBasicBase = pugputer::kBasicLoad;
+constexpr uint32_t kBasicSize = pugputer::kBasicImageSize;
+constexpr uint16_t kBasic309Entry = pugputer::kBasicEntry; // fixed entry: JMP RESVEC (see exbasrom309.asm)
 } // namespace
 
 int main(int argc, char** argv) {
