@@ -3,6 +3,7 @@
 // contents plus the demo folder, subfolders and all) so the test doesn't depend on the shared
 // disk.img. BASIC starts in /BASIC, where they are, so they load by bare name.
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -131,8 +132,13 @@ TEST(demo_program_video_draws_on_the_video_card) {
 
 // MANDELGR.BAS: MANDEL.BAS's set in 320x240, colored by how soon each point escapes. The whole
 // picture takes over six billion cycles, so this draws its middle rows only (96-143: the top
-// half's last 24 and their mirror images), where the set is widest.
+// half's last 24 and their mirror images), where the set is widest. Even so it takes half a
+// minute, so it runs only when PUGPUTER_SLOW_TESTS is set.
 TEST(demo_program_mandelgr_draws_the_set) {
+    if (!std::getenv("PUGPUTER_SLOW_TESTS")) {
+        std::printf("  (skipped: set PUGPUTER_SLOW_TESTS=1 to run it)\n");
+        return;
+    }
     std::string img = demo_disk();
     Basic309Session s;
     CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
