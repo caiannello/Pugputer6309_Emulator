@@ -2,8 +2,9 @@
 
 The Pugputer6309's BASIC: Microsoft 6809 Extended Color BASIC, adapted to run as a
 *guest of the BIOS* (no direct UART access -- console I/O goes through the BIOS's `SWI2`
-calls) and extended with disk file I/O in the style of GW-BASIC. This is the project's
-only BASIC.
+calls) and extended with disk file I/O in the style of GW-BASIC, with add'l commands
+to support ANSI terminal color, cursor, and video display text, graphics and sprites.
+This is the project's only BASIC. 
 
 - `exbasrom309.asm` -- the interpreter (assembled with `lwasm --6309`). With `COMFILE` defined,
   raw output is `BASIC.COM` itself (its program header and `$B400-$EFFF`): the demo disk carries
@@ -15,6 +16,9 @@ only BASIC.
   `dos/` or `basic309/`, and after test runs if you want the disk emptied.
 - `disk.img` -- the FAT16 SD-card image the emulator boots from (see
   `../simulator/README.md`, "boot chain").
+
+Output of MANDELGR.BAS. It takes quite a while to draw. :)
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
 
 ## How it is loaded and where it lives
 
