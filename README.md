@@ -233,6 +233,9 @@ tests, a keyword-table audit, file and error-trapping tests driven with real key
 
 Ideas and patches are welcome; open an issue to discuss before a big change.
 
+### Output of DEMO/VIDTEXT.COM
+![Graphics text fun](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/vidtext.png?raw=true)
+
 ## License and credits
 
 MIT License -- see `LICENSE`. BASIC descends from Microsoft's Extended Color BASIC, and the
