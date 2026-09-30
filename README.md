@@ -6,8 +6,6 @@ it on a PC.
 
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/demo.png?raw=true)
 
-![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basicgfx.png?raw=true)
-
 ## Demo Releases
 
 **Just want to try it?** Download the demo for Windows or Linux from the *Releases* page.
@@ -39,16 +37,16 @@ want graphics in Linux, libsdl2 will be needed. ; see the release's `README.md`.
 
 Every folder has its own `README.md` with the details.
 
-## Text editor based on GNU nano
-
+## nano-like text editor in 6309 assembly via UART
 ![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/nano.png?raw=true)
 
-
 ## RP2350 Graphics Card. 
-
 Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps mode, and sprites.
 
 ![VIDGFX.COM Demo](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/vidgfx.png?raw=true)
+
+### Graphics demo in BASIC
+![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basicgfx.png?raw=true)
 
 ## The machine
 
