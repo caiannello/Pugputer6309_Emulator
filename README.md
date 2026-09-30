@@ -41,6 +41,7 @@ Every folder has its own `README.md` with the details.
 
 ![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/nano.png?raw=true)
 
+### Added a graphics card based on RP2350. 640x480x16 or 320x240x256, with text, tilemaps, and sprites.
 ![VIDGFX.COM Demo](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/vidgfx.png?raw=true)
 
 ## The machine
