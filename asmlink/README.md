@@ -4,7 +4,7 @@ This folder holds two programs that run on the Pugputer itself. This project was
 
 The assembler and linker are native 6309 assembly-language programs designed specifically for this computer. The primary goal was self-hosting: once the initial system is built using a modern development machine, the 6309 should be capable of rebuilding its own assembler, linker, operating system, and applications without requiring a PC.
 
-LWTOOLS is used to bootstrap the system from the host. I have used LWTOOLS extensively for my other 6809/6309 projects, so I deliberately chose its assembler syntax and object-file conventions for compatibility.
+LWTOOLS is used to bootstrap the system from the host. I have used LWTOOLS extensively for my other 6809/6309 projects, so I deliberately chose its assembler syntax and object-file conventions for compatibility. It is an excellent tool.
 
 During development, compatibility with LWTOOLS object files was also chosen so that, where practical, objects produced by the 6309-hosted assembler can be processed by LWTOOLS tools on a modern computer, and vice versa.
 
