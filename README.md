@@ -223,18 +223,6 @@ tests, a keyword-table audit, file and error-trapping tests driven with real key
 
 ![Added ANSI color, CLS, HOME to BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/color_basic.png?raw=true)
 
-## Where it is going
-
-- **A graphics display peripheral** for the emulator (the memory map already reserves the
-  address range of a V9958 video card), and an RP2350-based video card, and later the same
-  on the real machine.
-- **Testing on the real Pugputer 6309:** the SD transport (SPI or VIA-driven), an SD card
-  prepared off-line to bootstrap the hardware, and timing checks against the emulator.
-- **More BASIC:** the remaining Color BASIC space is tight (about 160 bytes), so growing it
-  means relocating BASIC lower in RAM, which the program header already allows.
-- **Emulator conveniences:** running at the real machine's clock speed, a debugger view,
-  state save/restore.
-
 Ideas and patches are welcome; open an issue to discuss before a big change.
 
 ## License and credits
