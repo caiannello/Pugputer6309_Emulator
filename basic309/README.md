@@ -67,8 +67,7 @@ program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
   in a program. (`LOAD` and `SAVE` still end the running line, as they always did.)
 - `KILL`/`NAME` refuse a file that is open (`?AO`).
 
-Output of RANDFILE.BAS:
-
+### Output of RANDFILE.BAS
 ![RANDFILE.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/files.png?raw=true)
 
 ## File I/O statements (GW-BASIC guide, sections 5.2 and 5.3)
@@ -194,7 +193,7 @@ to where the cursor really is:
 - `POS` counts to 127: past that it goes negative (Color BASIC's own limit).
 - `/BASIC/COLORS.BAS` on the demo disk shows them all.
 
-Output of COLORS.BAS, via UART in Tera Term:
+### Output of COLORS.BAS, via UART in Tera Term
 ![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/colors.png?raw=true)
 
 ## Statements for the video card
@@ -227,7 +226,7 @@ draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on t
   table (`$037C00`) and the text screen (`$038000`).
 - `/BASIC/VIDEO.BAS` on the demo disk uses them all.
 
-Output of MANDELGR.BAS. It takes quite a while to draw. :)
+### Output of MANDELGR.BAS. It takes quite a while to draw. :)
 ![Graphics in BASIC](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/mandelgr.png?raw=true)
 
 ## Differences from GW-BASIC you will run into
