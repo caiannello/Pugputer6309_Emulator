@@ -10,7 +10,8 @@ it on a PC.
 
 **Just want to try it?** Download the demo for Windows or Linux from the *Releases* page.
 On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the `.tar.gz` and
-run `./start-console.sh` in a terminal. Nothing to install or compile; see the release's `README.md`.
+run `./start-console.sh` in a terminal. Nothing to install or compile in Windows, but if you 
+want graphics in Linux, libsdl2 will be needed. ; see the release's `README.md`.
 
 ## Future plans
 - The video card's firmware, for its RP2350 (the card is emulated now, in a window: see
