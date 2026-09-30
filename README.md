@@ -39,9 +39,15 @@ want graphics in Linux, libsdl2 will be needed. ; see the release's `README.md`.
 
 Every folder has its own `README.md` with the details.
 
+## Text editor based on GNU nano
+
 ![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/nano.png?raw=true)
 
-### Added a graphics card based on RP2350. 640x480x16 or 320x240x256, with text, tilemaps, and sprites.
+
+## RP2350 Graphics Card. 
+
+Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps mode, and sprites.
+
 ![VIDGFX.COM Demo](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/vidgfx.png?raw=true)
 
 ## The machine
