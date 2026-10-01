@@ -17,6 +17,9 @@ This is the project's only BASIC.
 - `disk.img` -- the FAT16 SD-card image the emulator boots from (see
   `../simulator/README.md`, "boot chain").
 
+### Output of GXTRUCKS.BAS
+![GXTRUCKS.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/gxtrucks.png?raw=true)
+
 ## How it is loaded and where it lives
 
 `BASIC.COM` is an ordinary program file (see `../shell/README.md`): an 8-byte header
@@ -69,10 +72,6 @@ program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
 
 ### Output of RANDFILE.BAS
 ![RANDFILE.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/files.png?raw=true)
-
-### Output of GXTRUCKS.BAS
-![GXTRUCKS.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/gxtrucks.png?raw=true)
-
 
 ## File I/O statements (GW-BASIC guide, sections 5.2 and 5.3)
 
