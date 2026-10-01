@@ -70,6 +70,10 @@ program line), `FILES ["path"]`, `KILL "path"`, `NAME "old path" AS "new name"`,
 ### Output of RANDFILE.BAS
 ![RANDFILE.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/files.png?raw=true)
 
+### Output of GXTRUCKS.BAS
+![GXTRUCKS.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/gxtrucks.png?raw=true)
+
+
 ## File I/O statements (GW-BASIC guide, sections 5.2 and 5.3)
 
 Up to **4** files open at once, numbered 1 to 4 (a fifth `OPEN` number gives `?DN`).
