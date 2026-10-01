@@ -23,7 +23,8 @@
 // names -- the binary release does this with demo/programs (BASIC/, ASM/).
 // --sources adds the programs' sources from the repository, in /ASM (see
 // pugputer/demo_sources.hpp), for rebuilding them on the Pugputer, and the demo
-// programs, built (demo/compile.bat or .sh), in /DEMO.
+// programs, built (demo/compile.bat or .sh), in /DEMO, with the files they use
+// (/DEMO/VGMPLAY's songs).
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -188,6 +189,13 @@ int main(int argc, char** argv) {
             f.data = {'P', 'X', hi, lo, hi, lo, 0, 0};
             f.data.insert(f.data.end(), body.begin(), body.end());
             std::printf("Added /%s (%zu bytes with its header)\n", f.name.c_str(), f.data.size());
+            files.push_back(std::move(f));
+        }
+        for (const auto& src : pugputer::kDemoFiles) {
+            Fat16File f;
+            f.name = src.disk;
+            if (!read_file((std::filesystem::path(sources) / src.repo).string(), f.data)) return 1;
+            std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
             files.push_back(std::move(f));
         }
     }

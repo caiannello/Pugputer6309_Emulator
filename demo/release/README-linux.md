@@ -99,7 +99,7 @@ lists the options (`--bios` and `--disk` select other images).
 | `pugputer` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugputer-video` | The video card's window (it needs the SDL2 library, `libsdl2-2.0-0`) |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the demos' sources in `/ASM/VGM` and `/ASM/VIDEO`, and the sources of every program in `/CMD`) and `/DEMO` (the music and video card demos, ready to run) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the demos' sources in `/ASM/VGM` and `/ASM/VIDEO`, and the sources of every program in `/CMD`) and `/DEMO` (the music and video card demos, ready to run, and `/DEMO/VGMPLAY`: a VGM player and three clips for it) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.sh` |
 | `start-console.sh`, `start-serial.sh`, `reset-disk.sh` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
@@ -153,8 +153,20 @@ VGMONKEY
 ```
 
 plays LeChuck's theme from *The Secret of Monkey Island*; `VGXWINGF.ASM` is from *Star Wars:
-X-Wing*. Both are also ready to run in `/DEMO`: `/DEMO/VGMONKEY`, `/DEMO/VGXWINGF`. Ctrl-C
-stops a song. While music plays, the emulator runs at the real machine's speed
+X-Wing*. Both are also ready to run in `/DEMO`: `/DEMO/VGMONKEY`, `/DEMO/VGXWINGF`.
+
+`/DEMO/VGMPLAY` has a player for VGM files: register writes and waits for the chip, the
+format of the music in the VGM archives, and of WAV2VGM, which turns a recording into OPL3
+music. Three short clips are there to play:
+
+```
+CD /DEMO/VGMPLAY
+VGMPLAY JFK
+```
+
+and `VGMPLAY HAL9000`, `VGMPLAY WILHELM`. It plays any `.VGM` file for the OPL3 (or the OPL2),
+read from the disk as it plays (a `.VGZ` must be unzipped first); its source is
+`/ASM/VGM/VGMPLAY.ASM`. Ctrl-C stops a song. While music plays, the emulator runs at the real machine's speed
 (3.58 MHz), so songs keep their tempo; the rest of the time it runs flat out.
 The sound goes out through `aplay` (ALSA), or `pacat` (PulseAudio) or `pw-cat` (PipeWire),
 whichever is installed -- Ubuntu has `aplay` already (package `alsa-utils`). With none of them,

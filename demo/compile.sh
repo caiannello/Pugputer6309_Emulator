@@ -8,6 +8,7 @@ mkdir -p build
 
 "$LWASM" programs/ASM/VGM/VGMONKEY.ASM --6309 --format=raw --output=build/vgmonkey.bin || exit 1
 "$LWASM" programs/ASM/VGM/VGXWINGF.ASM --6309 --format=raw --output=build/vgxwingf.bin || exit 1
+"$LWASM" programs/ASM/VGM/VGMPLAY.ASM --6309 --format=raw --output=build/vgmplay.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/VIDDEMO.ASM --6309 --format=raw --includedir=../vidcard --output=build/viddemo.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/VIDTEXT.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidtext.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/VIDTILES.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidtiles.bin || exit 1

@@ -13,6 +13,9 @@ Pugputer, byte for byte as they were built.
 
   VGM/         two songs for the OPL3 music chip (ready to run in /DEMO):
                  ASM -f com vgmonkey.asm   then VGMONKEY
+               and VGMPLAY, a player for VGM files (ready to run, with three
+               to play, in /DEMO/VGMPLAY):
+                 ASM -f com vgmplay.asm    then VGMPLAY file
 
   VIDEO/       the video card's demos (ready to run in /DEMO), VIDCARD.D again,
                VIDLIB.ASM (helpers they share) and the card described (VIDCARD.TXT):

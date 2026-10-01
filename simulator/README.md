@@ -521,7 +521,10 @@ rename, scan handles, FSTAT/STAT/seek/flush, FAT copies in sync), using
   `demo/programs/ASM/VGM/VGXWINGF.ASM` assembled with ASM (the same bytes as the release
   disk's ready-made `/DEMO/VGXWINGF.COM`) and played by the emulated machine:
   every register write of the song, sound throughout, the tempo the real machine plays it at,
-  back to the shell, and the chip idle afterwards.
+  back to the shell, and the chip idle afterwards. And `VGMPLAY` (`demo/programs/ASM/VGM/VGMPLAY.ASM`)
+  playing `demo/vgm/WILHELM.VGM` from the disk in the time the file gives, by the chip's
+  Timer 1, its messages for a missing file or one that isn't a VGM file, Ctrl-C, and the chip
+  left silent (and so idle).
 - `test_vidcard.cpp` -- the video card (`vidcard/core` and `VideoDevice`): the reset state and
   palette, both data ports across VRAM, settings, palette and PSRAM, what text, tile and bitmap
   layers draw (scrolling, flips, palette offsets, transparency), sprite priorities, order and the

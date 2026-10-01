@@ -55,10 +55,18 @@ struct DemoProgram {
 inline constexpr DemoProgram kDemoPrograms[] = {
     {"demo/build/vgmonkey.bin", "DEMO/VGMONKEY.COM", 0x4000},
     {"demo/build/vgxwingf.bin", "DEMO/VGXWINGF.COM", 0x4000},
+    {"demo/build/vgmplay.bin", "DEMO/VGMPLAY/VGMPLAY.COM", 0x4000},
     {"demo/build/viddemo.bin", "DEMO/VIDDEMO.COM", 0x4000},
     {"demo/build/vidtext.bin", "DEMO/VIDTEXT.COM", 0x4000},
     {"demo/build/vidtiles.bin", "DEMO/VIDTILES.COM", 0x4000},
     {"demo/build/vidgfx.bin", "DEMO/VIDGFX.COM", 0x4000},
+};
+
+// Files the demo programs use, copied to /DEMO as they are: the songs VGMPLAY plays.
+inline constexpr DemoSource kDemoFiles[] = {
+    {"demo/vgm/HAL9000.VGM", "DEMO/VGMPLAY/HAL9000.VGM"},
+    {"demo/vgm/JFK.VGM", "DEMO/VGMPLAY/JFK.VGM"},
+    {"demo/vgm/WILHELM.VGM", "DEMO/VGMPLAY/WILHELM.VGM"},
 };
 
 } // namespace pugputer

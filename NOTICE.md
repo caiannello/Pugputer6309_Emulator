@@ -77,6 +77,13 @@ Funeral" from *Star Wars: X-Wing* (LucasArts, 1993). The music remains the prope
 composers and publishers; it is included, as a short demonstration of the hardware, in the same
 spirit as the VGM archives it came from.
 
+`demo/vgm` holds three short recordings that Craig Iannello's WAV2VGM turned into OPL3 register
+writes, for `VGMPLAY` to play: John F. Kennedy speaking (`JFK.VGM`); HAL 9000, the computer of
+*2001: A Space Odyssey* (MGM, 1968), voiced by Douglas Rain (`HAL9000.VGM`); and the "Wilhelm
+scream", the stock sound effect first heard in *Distant Drums* (Warner Bros., 1951)
+(`WILHELM.VGM`). The recordings remain the property of their owners; these few seconds of each,
+remade by an FM synthesizer, are included as a demonstration of the hardware.
+
 ## Hardware and standards
 
 - The **Hitachi HD6309** CPU (and Motorola MC6809 behind it), the **Rockwell R65C51** UART, the

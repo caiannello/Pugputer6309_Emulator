@@ -217,3 +217,90 @@ TEST(opl3_a_demo_song_assembles_and_plays_in_time) {
     CHECK(!opl3.active());
     CHECK(c.idles >= 1);
 }
+
+TEST(opl3_vgmplay_plays_a_vgm_file_in_the_chips_time) {
+    // /ASM/VGM/VGMPLAY.ASM, as the demo disk has it, assembled with ASM: the same as the
+    // release disk's ready-made /DEMO/VGMPLAY/VGMPLAY.COM (lwasm's raw image, from
+    // demo/compile, with the header mkdiskimg gives it). Then a song from beside it there.
+    std::string src = host_text(std::string(DEMO_DIR) + "/ASM/VGM/VGMPLAY.ASM");
+    std::string asm_com = host_text(ASM_BIN_PATH);
+    std::string raw = host_text(std::string(REPO_DIR) + "/demo/build/vgmplay.bin");
+    std::string song = host_text(std::string(REPO_DIR) + "/demo/vgm/WILHELM.VGM");
+    CHECK(!src.empty() && !asm_com.empty() && !raw.empty() && !song.empty());
+    pugputer::Fat16File f1, f2, f3;
+    f1.name = "VGMPLAY.ASM";
+    f1.data.assign(src.begin(), src.end());
+    f2.name = "ASM.COM";
+    f2.data.assign(asm_com.begin(), asm_com.end());
+    f3.name = "WILHELM.VGM";
+    f3.data.assign(song.begin(), song.end());
+    std::string img = build_image("opl3_vgmplay.img", 32768, 4, {f1, f2, f3});
+    Basic309Session s;
+    CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
+    Opl3Device opl3;
+    Capture c;
+    opl3.set_sink(&c);
+    s.bus.map_device("opl3", 0xFFE0, 4, &opl3);
+    auto run_cmd = [&](const std::string& cmd, uint64_t budget) -> uint64_t {
+        s.received.clear();
+        for (char ch : cmd) s.send_byte(static_cast<uint8_t>(ch));
+        s.send_byte('\r');
+        uint64_t spent = 0;
+        while (spent < budget) {
+            spent += s.bus.run(20000);
+            const std::string& r = s.received;
+            if (r.size() > cmd.size() + 4 && r.compare(r.size() - 3, 3, "/> ") == 0) return spent;
+        }
+        return 0;
+    };
+    CHECK(run_cmd("ASM -f com vgmplay.asm", 10000000000ull) != 0);
+    CHECK(s.received.find("rror") == std::string::npos);
+    Fat16Volume v;
+    Fat16Volume::Entry e;
+    CHECK(v.load(img.c_str()) && v.find("/VGMPLAY.COM", e));
+    std::vector<uint8_t> made = v.read(e);
+    CHECK(std::string(made.begin(), made.end()) == std::string("PX\x40\x00\x40\x00\x00\x00", 8) + raw);
+
+    // What goes wrong is said, and nothing is played.
+    CHECK(run_cmd("VGMPLAY", 10000000) != 0 && s.received.find("Usage: VGMPLAY file[.VGM]") != std::string::npos);
+    CHECK(run_cmd("VGMPLAY NOSONG", 10000000) != 0 && s.received.find("NOSONG.VGM: File not found") != std::string::npos);
+    // (This one also times loading VGMPLAY and the shell coming back, without a song.)
+    uint64_t start = run_cmd("VGMPLAY VGMPLAY.COM", 10000000);
+    CHECK(start != 0 && s.received.find("VGMPLAY.COM: Not a VGM file") != std::string::npos);
+    CHECK(c.frames == 0);
+
+    // The song is 115101 samples at 44100 Hz (2.61 s): its 4342 writes, timed by the
+    // chip's Timer 1, whatever reading the file (".VGM" added to the name) takes.
+    uint64_t cycles = run_cmd("VGMPLAY wilhelm", 100000000ull);
+    CHECK(cycles != 0);
+    CHECK(s.received.find("Playing WILHELM.VGM (Ctrl-C stops it)") != std::string::npos);
+    double seconds = (cycles - start) / kHz;
+    std::printf("  played for %.3f s of CPU time; %llu register writes\n", seconds,
+                static_cast<unsigned long long>(opl3.register_writes()));
+    // (Give or take its message going out at 19200 baud, and the silencing.)
+    CHECK(seconds > 115101 / 44100.0 && seconds < 115101 / 44100.0 + 0.02);
+    // The song's writes, the silencing before and after it (each 1 + 2 * (9 + 9 + 22 + 1) + 4),
+    // Timer 1 started (3), and its flag cleared at every tick (4 ms).
+    uint64_t ticks = opl3.register_writes() - 4342 - 2 * 87 - 3;
+    CHECK(ticks >= 652 && ticks <= 656);
+    CHECK(c.loud > 48000); // a scream, for most of it
+    CHECK(c.peak > 4000);
+    // Afterwards: the timers stopped and the chip back in OPL2 mode, and silent: no sound
+    // at all, so that it goes idle (and the emulator runs flat out again).
+    CHECK(opl3.reg(0x04) == 0x60 && opl3.reg(0x105) == 0 && opl3.reg(0xB0) == 0 && opl3.reg(0x1B8) == 0);
+    s.bus.run(static_cast<uint64_t>(1.5 * kHz));
+    CHECK(!opl3.active());
+    CHECK(c.idles >= 1);
+
+    // Ctrl-C stops it, silent again.
+    s.received.clear();
+    for (char ch : std::string("VGMPLAY /WILHELM.VGM\r")) s.send_byte(static_cast<uint8_t>(ch));
+    s.bus.run(static_cast<uint64_t>(1.0 * kHz));
+    CHECK(opl3.active());
+    s.send_byte(3);
+    uint64_t spent = 0;
+    while (spent < 10000000 && s.received.find("^C") == std::string::npos) spent += s.bus.run(20000);
+    CHECK(s.received.find("^C") != std::string::npos);
+    s.bus.run(static_cast<uint64_t>(1.5 * kHz));
+    CHECK(!opl3.active());
+}
