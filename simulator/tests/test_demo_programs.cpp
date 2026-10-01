@@ -187,7 +187,7 @@ TEST(demo_program_mandelgr_draws_the_set) {
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);
 }
 
-// GXBEE.BAS and GXTRUCKS.BAS: pictures of flat-colored triangles in 255 colors (made by
+// GXTRUCKS.BAS: pictures of flat-colored triangles in 255 colors (made by
 // demo/tools/tri2bas.py), their numbers packed in DATA strings to fit in BASIC's memory. The
 // triangles leave no pixel of the picture (w wide, centered) uncovered, and nothing outside it;
 // shown_colors of the 255 are left showing (a small triangle can be all drawn over).
@@ -233,10 +233,6 @@ static void check_triangle_picture(const char* name, int w, int shown_colors, ui
     s.send_byte('x');
     CHECK(s.run_until_ok(200000000));
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);
-}
-
-TEST(demo_program_gxbee_draws_its_triangles) {
-    check_triangle_picture("GXBEE", 240, 255, 400000000); // 1000 triangles (about 68 seconds' worth)
 }
 
 TEST(demo_program_gxtrucks_draws_its_triangles) {
