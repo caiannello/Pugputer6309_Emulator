@@ -186,3 +186,49 @@ TEST(demo_program_mandelgr_draws_the_set) {
     CHECK(s.run_until_ok(200000000));
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);
 }
+
+// VIDBEE.BAS: a picture of 1000 flat-colored triangles in 255 colors (made by
+// demo/tools/tri2bas.py), its numbers packed in DATA strings to fit in BASIC's memory. The
+// triangles leave no pixel of the picture uncovered, and nothing outside it.
+TEST(demo_program_vidbee_draws_its_triangles) {
+    std::string img = demo_disk();
+    Basic309Session s;
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
+    pugputer::VideoDevice v;
+    v.set_draw_all(true);
+    s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+    CHECK(s.run_line("LOAD \"VIDBEE\"").empty());
+    s.received.clear();
+    s.type("RUN");
+    CHECK(s.wait_for("PRESS ANY KEY", 400000000)); // (about 68 seconds' worth)
+    CHECK(!contains(s.received, "ERROR"));
+    const vc_card& c = v.card();
+    int inside = 0, outside = 0;
+    bool used[256] = {};
+    for (int y = 0; y < 240; ++y)
+        for (int x = 0; x < 320; ++x) {
+            uint8_t p = c.vram[y * 320 + x]; // (SCREEN 1's bitmap, 8 bits a pixel at 0)
+            if (x >= 40 && x < 280) {
+                inside += p != 0;
+                used[p] = true;
+            } else {
+                outside += p != 0;
+            }
+        }
+    CHECK(inside == 240 * 240 && outside == 0);
+    int colors = 0;
+    for (int i = 1; i < 256; ++i) colors += used[i];
+    CHECK(colors == 255);
+    if (const char* dump = std::getenv("VIDCARD_DUMP")) {
+        s.bus.run(3579545 / 30); // a frame or two, so the picture has it all
+        std::ofstream f(dump, std::ios::binary);
+        for (int i = 0; i < 640 * 480; ++i) {
+            uint32_t p = v.pixels()[i];
+            char rgb[3] = {static_cast<char>(p >> 16), static_cast<char>(p >> 8), static_cast<char>(p)};
+            f.write(rgb, 3);
+        }
+    }
+    s.send_byte('x');
+    CHECK(s.run_until_ok(200000000));
+    CHECK(c.cfg[VC_DC_CTRL] == 0x01);
+}
