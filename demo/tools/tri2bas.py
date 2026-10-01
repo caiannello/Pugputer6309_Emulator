@@ -5,8 +5,9 @@
 
 picture.json: {"width": w, "height": h, "vertices": [[x, y], ...],
                "triangles": [{"v": [i, j, k], "color": [r, g, b]}, ...]}
-(as /BASIC/VIDBEE.BAS was made, from smbee_tri1000.json). The picture is at most 256 pixels
-wide and 240 tall; the program shows it centered in SCREEN 1 (320x240, 256 colors).
+(as /BASIC/GXBEE.BAS was made, from smbee_tri1000.json, and /BASIC/GXTRUCKS.BAS, from
+smtrucks_tri512.json). The picture is at most 256 pixels wide and 240 tall; the program shows
+it centered in SCREEN 1 (320x240, 256 colors).
 
 - The colors are quantized to at most 255 (palette entries 1-255; 0 is transparent): k-means,
   each color weighted by its triangles' area.

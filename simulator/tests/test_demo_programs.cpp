@@ -187,38 +187,40 @@ TEST(demo_program_mandelgr_draws_the_set) {
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);
 }
 
-// VIDBEE.BAS: a picture of 1000 flat-colored triangles in 255 colors (made by
-// demo/tools/tri2bas.py), its numbers packed in DATA strings to fit in BASIC's memory. The
-// triangles leave no pixel of the picture uncovered, and nothing outside it.
-TEST(demo_program_vidbee_draws_its_triangles) {
+// GXBEE.BAS and GXTRUCKS.BAS: pictures of flat-colored triangles in 255 colors (made by
+// demo/tools/tri2bas.py), their numbers packed in DATA strings to fit in BASIC's memory. The
+// triangles leave no pixel of the picture (w wide, centered) uncovered, and nothing outside it;
+// shown_colors of the 255 are left showing (a small triangle can be all drawn over).
+static void check_triangle_picture(const char* name, int w, int shown_colors, uint64_t budget) {
     std::string img = demo_disk();
     Basic309Session s;
     CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     pugputer::VideoDevice v;
     v.set_draw_all(true);
     s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
-    CHECK(s.run_line("LOAD \"VIDBEE\"").empty());
+    CHECK(s.run_line(std::string("LOAD \"") + name + "\"").empty());
     s.received.clear();
     s.type("RUN");
-    CHECK(s.wait_for("PRESS ANY KEY", 400000000)); // (about 68 seconds' worth)
+    CHECK(s.wait_for("PRESS ANY KEY", budget));
     CHECK(!contains(s.received, "ERROR"));
     const vc_card& c = v.card();
+    const int x0 = (320 - w) / 2;
     int inside = 0, outside = 0;
     bool used[256] = {};
     for (int y = 0; y < 240; ++y)
         for (int x = 0; x < 320; ++x) {
             uint8_t p = c.vram[y * 320 + x]; // (SCREEN 1's bitmap, 8 bits a pixel at 0)
-            if (x >= 40 && x < 280) {
+            if (x >= x0 && x < x0 + w) {
                 inside += p != 0;
                 used[p] = true;
             } else {
                 outside += p != 0;
             }
         }
-    CHECK(inside == 240 * 240 && outside == 0);
+    CHECK(inside == w * 240 && outside == 0);
     int colors = 0;
     for (int i = 1; i < 256; ++i) colors += used[i];
-    CHECK(colors == 255);
+    CHECK(colors == shown_colors);
     if (const char* dump = std::getenv("VIDCARD_DUMP")) {
         s.bus.run(3579545 / 30); // a frame or two, so the picture has it all
         std::ofstream f(dump, std::ios::binary);
@@ -231,4 +233,12 @@ TEST(demo_program_vidbee_draws_its_triangles) {
     s.send_byte('x');
     CHECK(s.run_until_ok(200000000));
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);
+}
+
+TEST(demo_program_gxbee_draws_its_triangles) {
+    check_triangle_picture("GXBEE", 240, 255, 400000000); // 1000 triangles (about 68 seconds' worth)
+}
+
+TEST(demo_program_gxtrucks_draws_its_triangles) {
+    check_triangle_picture("GXTRUCKS", 188, 253, 400000000); // 512 triangles
 }

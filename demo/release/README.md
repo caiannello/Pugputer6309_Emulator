@@ -48,7 +48,8 @@ They are in the disk's `/BASIC` directory; `DIR /BASIC` at the shell prompt list
 | `COLORS` | the terminal's colors: `CLS`, `GOTOXY`, `LCOLOR` (256 colors), `HCOLOR` (24-bit), `RESET` |
 | `VIDEO` | the video card: `SCREEN`, `PALETTE`, `LINE`, `CIRCLE`, `TRIANGLE`, `GPRINT`, `TPRINT`, sprites drawn with `IMAGE` and moved each `VSYNC` |
 | `MANDELGR` | `MANDEL` on the video card: the set in 320x240, `PSET` in 24 colors of its own from `PALETTE` (about half an hour; `--turbo` is quicker) |
-| `VIDBEE` | a picture of 1000 triangles: `TRIANGLE` in 255 colors from `PALETTE`, its numbers packed in `DATA` strings (about a minute) |
+| `GXBEE` | a picture of 1000 triangles: `TRIANGLE` in 255 colors from `PALETTE`, its numbers packed in `DATA` strings (about a minute) |
+| `GXTRUCKS` | `GXBEE` with another picture, of 512 triangles (about half a minute) |
 
 ## Things to try
 
