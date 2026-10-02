@@ -18,6 +18,7 @@ This is the project's only BASIC.
   `../simulator/README.md`, "boot chain").
 
 ### Output of GXTRUCKS.BAS
+For fun, and testing triangle-fill function.
 ![GXTRUCKS.BAS](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/basic309/gxtrucks.png?raw=true)
 
 ## How it is loaded and where it lives
