@@ -45,6 +45,8 @@ For example, on a disk that holds the shell's source and `defines.d`:
 /> ASM -o SHELL.COM -l -s shell.asm
 ```
 
+<img width="659" height="510" alt="image" src="https://github.com/user-attachments/assets/90595da3-cfc3-4dd0-9771-bb4d66878374" />
+
 ### Output formats
 
 - **raw**: the bytes from the first one emitted to the last. Space reserved in between (`RMB`)
