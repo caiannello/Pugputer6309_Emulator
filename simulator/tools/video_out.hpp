@@ -49,6 +49,9 @@ public:
     // Hide the PC's mouse pointer over the window: the program shows its own.
     void set_pointer_hidden(bool hidden);
 
+    // The window is open (it has been opened, and not closed since).
+    bool showing() const;
+
     struct Impl;
 
 private:

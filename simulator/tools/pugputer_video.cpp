@@ -91,6 +91,12 @@ void send_mouse(int x, int y, uint8_t buttons) {
     send(rec, sizeof(rec));
 }
 
+// SDL's button mask as the card's: bit 0 left, 1 right, 2 middle.
+uint8_t card_buttons(uint32_t mask) {
+    return static_cast<uint8_t>(((mask & SDL_BUTTON_LMASK) ? 1 : 0) | ((mask & SDL_BUTTON_RMASK) ? 2 : 0) |
+                                ((mask & SDL_BUTTON_MMASK) ? 4 : 0));
+}
+
 // The keys that type no character, as a terminal sends them.
 const char* key_sequence(SDL_Keycode k) {
     switch (k) {
@@ -138,6 +144,7 @@ int main(int argc, char** argv) {
 
     bool open = true, hidden = false;
     uint8_t buttons = 0;
+    int mx = 0, my = 0; // where the mouse was last, in the picture's pixels
     while (open && !g_input_done) {
         if (hidden != g_hide_pointer) {
             hidden = g_hide_pointer;
@@ -148,21 +155,40 @@ int main(int argc, char** argv) {
         while (got) {
             if (e.type == SDL_QUIT || (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE)) {
                 open = false;
+            } else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                // Gone to another window: no button is held here any more (a release there
+                // would never reach us, and the program would go on drawing).
+                if (buttons) send_mouse(mx, my, buttons = 0);
+            } else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_ENTER) {
+                // Back over the window: the buttons as they really are now.
+                int wx, wy;
+                uint8_t now = card_buttons(SDL_GetMouseState(&wx, &wy));
+                float lx, ly;
+                SDL_RenderWindowToLogical(ren, wx, wy, &lx, &ly);
+                mx = static_cast<int>(lx);
+                my = static_cast<int>(ly);
+                if (now != buttons) send_mouse(mx, my, buttons = now);
             } else if (e.type == SDL_TEXTINPUT) {
                 for (const char* s = e.text.text; *s; ++s)
                     if (static_cast<unsigned char>(*s) < 0x80) send(*s);
             } else if (e.type == SDL_KEYUP) {
                 send_key(e.key.keysym.scancode, false);
             } else if (e.type == SDL_MOUSEMOTION) {
-                // (In the picture's pixels: SDL_RenderSetLogicalSize has the renderer scale them.)
-                send_mouse(e.motion.x, e.motion.y, buttons);
+                // (In the picture's pixels: SDL_RenderSetLogicalSize has the renderer scale them.
+                // The buttons as SDL has them, so one release we missed can't leave one held.)
+                mx = e.motion.x;
+                my = e.motion.y;
+                buttons = card_buttons(e.motion.state);
+                send_mouse(mx, my, buttons);
             } else if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) {
                 uint8_t bit = 0;
                 if (e.button.button == SDL_BUTTON_LEFT) bit = 1;
                 else if (e.button.button == SDL_BUTTON_RIGHT) bit = 2;
                 else if (e.button.button == SDL_BUTTON_MIDDLE) bit = 4;
                 buttons = static_cast<uint8_t>(e.type == SDL_MOUSEBUTTONDOWN ? buttons | bit : buttons & ~bit);
-                send_mouse(e.button.x, e.button.y, buttons);
+                mx = e.button.x;
+                my = e.button.y;
+                send_mouse(mx, my, buttons);
             } else if (e.type == SDL_MOUSEWHEEL) {
                 int clicks = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
                 if (clicks) {

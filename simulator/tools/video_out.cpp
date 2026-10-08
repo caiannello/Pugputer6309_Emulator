@@ -44,6 +44,7 @@ struct VideoOut::Impl {
     std::atomic<HWND> hwnd{nullptr};
     int scale = 1;
     uint8_t buttons = 0; // (the window's thread only)
+    int mouse_x = 0, mouse_y = 0;
 
     void push(const Input& in) {
         std::lock_guard<std::mutex> g(lock);
@@ -209,10 +210,25 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 in.x = (static_cast<short>(LOWORD(lp)) - p.left) * kW / w;
                 in.y = (static_cast<short>(HIWORD(lp)) - p.top) * kH / h;
                 in.buttons = b;
+                self->mouse_x = in.x;
+                self->mouse_y = in.y;
                 self->push(in);
             }
         }
         return 0;
+    case WM_KILLFOCUS:
+        // Gone to another window: no button is held here any more (its release would go
+        // there, and the program would go on drawing).
+        if (self && self->buttons) {
+            self->buttons = 0;
+            ReleaseCapture();
+            VideoOut::Input in;
+            in.kind = VideoOut::Input::Mouse;
+            in.x = self->mouse_x;
+            in.y = self->mouse_y;
+            self->push(in);
+        }
+        break;
     case WM_MOUSEWHEEL:
         if (self) {
             VideoOut::Input in;
@@ -456,6 +472,8 @@ bool VideoOut::poll(Input& in) {
 }
 
 #endif
+
+bool VideoOut::showing() const { return opened_ && !closed(); }
 
 bool VideoOut::wants_frame() {
     if (closed()) return false;

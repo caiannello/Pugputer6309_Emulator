@@ -389,3 +389,4 @@ TEST(tilekit_picks_clears_moves_between_tiles_and_scrolls_the_set) {
     CHECK(k.shows(29, "TILE 0010/0070"));
     k.dump("4-many");
 }
+

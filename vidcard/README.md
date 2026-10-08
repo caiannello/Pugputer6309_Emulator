@@ -181,7 +181,12 @@ writing `$80` to `INCTRL` empties it.
 **Whose keys.** In the emulator, keys typed into the video window go to the UART, as the
 terminal's do, until the program sets `INCTRL` bit 1: then they go to the card's queue (and the
 UART sees none of them). A program that takes them should clear the bit before it ends (or
-reset the card, which does). On the card, a USB keyboard's keys always go to the queue, and the
+reset the card, which does). If the window is closed (or there is none, `--no-video`) while a
+program takes the keys, the terminal's keys become the card's instead -- each character as the
+key a US keyboard would press for it, Shift and Ctrl with it, and the arrows and the like from
+their escape sequences -- so the program can still be told to stop. The window also lets go of
+the mouse's buttons when it loses the focus, so a drag that ends in another window doesn't stay
+held. On the card, a USB keyboard's keys always go to the queue, and the
 UART's are the terminal's.
 
 A reset (`CTRL` `$80`) clears `INCTRL` and the queue; it leaves the mouse where it is.

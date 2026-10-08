@@ -38,7 +38,8 @@
 // Keys typed into the window go to the UART, just as the console's do -- unless the program
 // has asked for them (the card's VC_IN_CTRL bit 1), when they go to the card's key queue
 // instead. The window's mouse is the card's mouse, and when the program shows its own pointer
-// (VC_IN_CTRL bit 0) the PC's is hidden over the window.
+// (VC_IN_CTRL bit 0) the PC's is hidden over the window. If the window is closed (or there is
+// none) while a program takes the card's keys, the console's keys become the card's.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -216,8 +217,8 @@ const char* key_sequence(WORD vk) {
     }
 }
 
-// Whatever has been typed (and the console's replies to the machine's queries) -> the UART.
-void poll_console(UartR65C51& uart) {
+// Whatever has been typed (and the console's replies to the machine's queries), for the UART.
+void poll_console(std::string& out) {
     DWORD pending = 0;
     while (GetNumberOfConsoleInputEvents(g_in, &pending) && pending > 0) {
         INPUT_RECORD rec[32];
@@ -229,12 +230,12 @@ void poll_console(UartR65C51& uart) {
             char ch = k.uChar.AsciiChar;
             for (WORD n = 0; n < (k.wRepeatCount ? k.wRepeatCount : 1); ++n) {
                 if (g_vt_input) {
-                    if (ch) uart.rx_enqueue(static_cast<uint8_t>(ch));
+                    if (ch) out += ch;
                 } else if (ch) {
-                    if (k.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) uart.rx_enqueue(0x1B);
-                    uart.rx_enqueue(static_cast<uint8_t>(ch));
+                    if (k.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) out += '\x1b';
+                    out += ch;
                 } else if (const char* seq = key_sequence(k.wVirtualKeyCode)) {
-                    while (*seq) uart.rx_enqueue(static_cast<uint8_t>(*seq++));
+                    out += seq;
                 }
             }
         }
@@ -285,7 +286,7 @@ void setup_console() {
 }
 
 // Whatever has been typed (and the terminal's replies to the machine's queries) -> the UART.
-void poll_console(UartR65C51& uart) {
+void poll_console(std::string& out) {
     if (g_stdin_eof) return;
     pollfd p{STDIN_FILENO, POLLIN, 0};
     while (::poll(&p, 1, 0) > 0 && (p.revents & (POLLIN | POLLHUP))) {
@@ -300,11 +301,54 @@ void poll_console(UartR65C51& uart) {
             // usual terminal setting) BS -- the one BASIC's line editor knows.
             uint8_t b = buf[i];
             if (g_stdin_tty && b == 0x7F) b = 0x08;
-            uart.rx_enqueue(b);
+            out += static_cast<char>(b);
         }
     }
 }
 #endif
+// Bytes typed at the terminal as key presses on the video card's keyboard, for a program
+// that takes the card's keys when there is no video window to type into: what a US keyboard
+// would have pressed for each (Shift, Ctrl with it), and the escape sequences of the keys
+// that type nothing (arrows, Home, End, PgUp, PgDn, Delete). Esc alone is Esc.
+void type_into_card(VideoDevice& card, const std::string& bytes) {
+    static const char kKeys[] = "abcdefghijklmnopqrstuvwxyz1234567890\r\x1b\b\t -=[]\\#;'`,./";
+    static const char kShifted[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()\r\x1b\b\t _+{}|~:\"~<>?";
+    auto press = [&](uint8_t usage, uint8_t mod) {
+        if (mod) card.key(mod, true);
+        card.key(usage, true);
+        card.key(usage, false);
+        if (mod) card.key(mod, false);
+    };
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        unsigned char b = static_cast<unsigned char>(bytes[i]);
+        if (b == 0x1B && i + 2 < bytes.size() && bytes[i + 1] == '[') {
+            const char* seqs[] = {"A", "B", "C", "D", "H", "F", "5~", "6~", "3~", "2~"};
+            const uint8_t usages[] = {0x52, 0x51, 0x4F, 0x50, 0x4A, 0x4D, 0x4B, 0x4E, 0x4C, 0x49};
+            bool done = false;
+            for (int k = 0; k < 10 && !done; ++k) {
+                std::string seq = seqs[k];
+                if (bytes.compare(i + 2, seq.size(), seq) == 0) {
+                    press(usages[k], 0);
+                    i += 1 + seq.size();
+                    done = true;
+                }
+            }
+            if (done) continue;
+        }
+        if (b == 0x7F) b = 0x08;
+        uint8_t mod = 0;
+        if (b >= 1 && b <= 26 && b != '\r' && b != '\b' && b != '\t') { // Ctrl+letter
+            b = static_cast<unsigned char>('a' + b - 1);
+            mod = 0xE0;
+        }
+        const char* at = b ? std::strchr(kKeys, b) : nullptr;
+        if (at) {
+            press(static_cast<uint8_t>(0x04 + (at - kKeys)), mod);
+        } else if (b && (at = std::strchr(kShifted, b)) != nullptr) {
+            press(static_cast<uint8_t>(0x04 + (at - kShifted)), 0xE1);
+        }
+    }
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -427,6 +471,7 @@ int main(int argc, char** argv) {
                  // boot chain (BIOS -> SD_BOOT_TRY -> dos.asm -> BASIC.COM)
                  // runs for real from here, no PC hijack.
 
+    bool told_keys = false;
     for (;;) {
         bus.run(20000);
         VideoOut::Input in;
@@ -449,7 +494,21 @@ int main(int argc, char** argv) {
             bridge.poll(uart);
 #endif
         } else {
-            poll_console(uart);
+            std::string typed;
+            poll_console(typed);
+            // A program that takes the card's keys, with no window to type them into (closed,
+            // or none): the terminal's keys are the card's keyboard instead.
+            bool to_card = (vcard.input_ctrl() & 0x02) != 0 && !screen.showing();
+            if (to_card && !told_keys) {
+                told_keys = true;
+                std::printf("\r\n(The program takes the video card's keys and there is no video window: what "
+                            "you type here goes to the card's keyboard. Esc is Esc.)\r\n");
+                std::fflush(stdout);
+            }
+            if (!to_card) told_keys = false;
+            if (to_card) type_into_card(vcard, typed);
+            else
+                for (char ch : typed) uart.rx_enqueue(static_cast<uint8_t>(ch));
         }
     }
 }
