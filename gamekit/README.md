@@ -8,9 +8,11 @@ make, a game loads straight into the card.
 
 | File | |
 |---|---|
-| `tilekit.asm` | `TILEKIT.COM`, the tile set and map editor (below); it includes the next five |
+| `tilekit.asm` | `TILEKIT.COM`, the tile set and map editor (below); it includes the next six |
 | `tk_map.asm` | its map |
 | `tk_src.asm` | its export as assembly source |
+| `tk_ini.asm` | reading `TILEKIT.INI` |
+| `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, text on the screen, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
@@ -40,7 +42,23 @@ set's (or map's). Without one, it asks what to make:
   share one set.
 
 Those are the card's own tile layers, so a set and a map are what a game's tile layer uses as
-they are.
+they are. A new set's palette comes from `TILEKIT.INI` (below).
+
+### 16 colors: the palette's rows
+
+In a 16-color set a tile's pixels aren't colors but places in a row, 0-15: the palette is 16
+rows of 16, and **each cell of the map picks the row** its tile's colors come from (bits 12-15
+of the cell). So one tile can be put down in several rows -- a red brick and a blue one. Pixel
+0 shows through, whatever row.
+
+Clicking a color picks two things: its place in its row (what the pen draws in a tile) and its
+row (what the tile is shown in while it is edited, and what cells are put down with). The mark
+left of the palette is the row.
+
+Each tile also remembers the row it was last used in -- drawn on, put on the map, or picked up
+from it -- and the tile set shows it in that row, so the other tiles look as they were meant to
+while you try this one in another. Selecting a tile picks its row again (the same place in it),
+and the rows are saved with the set.
 
 ### The screen
 
@@ -110,11 +128,31 @@ A large fill takes a while: a 64x64 map, about half a second.
 A file name is typed at the bottom: Enter takes it, Esc gives up. Opening, making new or
 leaving with changes not saved asks first (Y or N).
 
+### TILEKIT.INI: the palettes a set starts with
+
+A new tile set starts with the palette in `TILEKIT.INI` for its kind -- `[PALETTE8]` for 256
+colors, `[PALETTE4]` for 16 -- looked for in the current directory, then in `/CMD`. It is text,
+to change with EDIT (or on the PC, in `gamekit/`, before the disk is made):
+
+```
+; a comment, to the end of the line
+[PALETTE8]
+000000 800000 008000 808000 ...    up to 256 colors, RRGGBB in hex, from color 0
+[PALETTE4]
+000000 1D2B53 7E2553 008751 ...    (a # before one is allowed; spaces, commas, lines between)
+```
+
+Colors not given are the card's own (xterm's), and with no `TILEKIT.INI` at all a set starts
+with those. The one that comes with TILEKIT has xterm's 256 for 256-color sets, and for
+16-color sets rows of 16 made for tiles: PICO-8's 16, grays, twelve hues from dark to light,
+earth and skin tones, and the C64's 16. A set's palette, changed or not, is saved with it (and
+exported with it).
+
 ### The editor's colors
 
 The editor draws itself in colors from the set's palette, which it may not change: the darkest
-(its background), the brightest (its text), one about 3/8 of the way between (the grid,
-buttons) and the most yellow (what is picked). When a color is changed they are chosen again,
+(its background), the brightest (its text), one about 3/8 of the way between, grays first (the
+grid, buttons), and the most yellow (what is picked). When a color is changed they are chosen again,
 and the screen redrawn in them.
 
 ### The files
@@ -124,10 +162,12 @@ A tile set (`.TLS`):
 | Offset | |
 |---|---|
 | 0 | `PTS1` |
-| 4 | the tile size (8 or 16), bits a pixel (4 or 8), flags (bit 0: 640x480), 0 |
+| 4 | the tile size (8 or 16), bits a pixel (4 or 8), flags (bit 0: 640x480; bit 1: each tile's row follows the tiles), 0 |
 | 8 | how many tiles (2 bytes, high first), then 6 bytes of 0 |
 | 16 | the palette: 256 colors, RGB565, 2 bytes each, high byte first -- as the card holds it |
 | 528 | the tiles, one after another, as the card holds them: rows of pixels, packed from the high bits (8x8 at 4 bits: 32 bytes a tile) |
+
+| after the tiles | (flags bit 1, 16-color sets) a byte a tile: the row TILEKIT shows it in -- only TILEKIT's; a game can stop reading after the tiles |
 
 At most 1024 tiles (8x8), 512 (16x16, 16 colors) or 256 (16x16, 256 colors): 64KB.
 

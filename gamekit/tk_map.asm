@@ -363,6 +363,11 @@ MAPPEN      CLRD
             ORA  ,S+
 MAPPEN1     LDB  TILE+1
             STD  MPEN
+            LDA  TOOL           ; put down in this row: the tile's own row now
+            CMPA #TL_PICK
+            BEQ  MAPPEN9
+            JSR  CURROW
+            JMP  SETTROW
 MAPPEN9     RTS
 ;------------------------------------------------------------------------------
 ; The tools on the map.
@@ -406,25 +411,30 @@ MPRESS9     RTS
 ; and row.
 MPICK       LDD  LASTX
             JSR  GETCELL
-            PSHS D
+            STD  PICKED
             ANDA #$0C
             STA  FLIPS
-            LDA  BPP            ; (the row: the color's, in the same place in it)
-            CMPA #8
-            BEQ  MPICK1
-            LDA  ,S
-            ANDA #$F0
-            LDB  COLOR
-            ANDB #$0F
-            PSHS B
-            ORA  ,S+
-            TFR  A,B
-            JSR  SELCOLOR
-MPICK1      PULS D
+            LDD  PICKED         ; its tile
             ANDA #$03
             CMPD NTILES
-            BHS  MPICK2
+            BHS  MPICK1
             JSR  SELTILE
+MPICK1      LDA  BPP            ; its row (the color: the same place in it)
+            CMPA #8
+            BEQ  MPICK2
+            LDA  PICKED
+            ANDA #$F0
+            STA  OLDROW
+            LDB  COLOR
+            ANDB #$0F
+            ORB  OLDROW
+            JSR  SELCOLOR
+            LDA  PICKED
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            JSR  SETTROW
 MPICK2      LDA  #1
             STA  STATDIRTY
             RTS

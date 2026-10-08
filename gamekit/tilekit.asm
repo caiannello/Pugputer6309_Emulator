@@ -120,6 +120,7 @@ UNDOSIZE    equ  258        ; each: the tile's number and its 256 pixels (a map'
             FDB  0              ; flags
 ;------------------------------------------------------------------------------
 START       LDS  #TK_STACK
+            JSR  INILOAD        ; the default palettes, if TILEKIT.INI has them
             LDA  #B_ARGS        ; a file named? (the tail lives in DOS's RAM)
             SWI2
             LDY  #FILENAME
@@ -912,11 +913,17 @@ DUPTILE     LDD  NTILES
 ADDTILE     JSR  FLUSHTILE
             LDA  UI_MID         ; (the frame back to an outline on this one)
             JSR  TSFRAME
+            LDX  TILE
+            STX  OLDTILE
             LDD  NTILES         ; TILEBUF becomes the new last tile
             STD  TILE
             ADDD #1
             STD  NTILES
             JSR  STORETILE
+            JSR  CURROW         ; (in this row)
+            JSR  SETTROW
+            LDD  OLDTILE        ; (the one before: in its own row)
+            JSR  THUMB
             LDA  #1
             STA  MODIFIED
             JSR  DRAWTSLABEL
@@ -932,9 +939,28 @@ SELTILE     CMPD TILE
             JSR  FLUSHTILE
             LDA  UI_MID         ; (its frame in the set back to an outline)
             JSR  TSFRAME
+            LDX  TILE
+            STX  OLDTILE
             PULS D
             STD  TILE
             JSR  LOADTILE
+            LDD  OLDTILE        ; the one before: in its own row
+            JSR  THUMB
+            LDA  BPP            ; (16 colors: the row this one was last in, the
+            CMPA #8             ; same place in it)
+            BEQ  SHOWTILE
+            LDX  #TROW
+            LDD  TILE
+            LDA  D,X
+            LSLA
+            LSLA
+            LSLA
+            LSLA
+            STA  OLDROW
+            LDB  COLOR
+            ANDB #$0F
+            ORB  OLDROW
+            JSR  SELCOLOR
 SHOWTILE    LDD  TILE           ; in sight in the set?
             CMPD TSTOP
             BLO  SHOWTILE1
@@ -1042,7 +1068,8 @@ SELCOLOR    CMPB COLOR
             CMPA OLDROW
             BEQ  SELCOLOR9
             JSR  DRAWZOOM
-            JMP  DRAWTSET
+            LDD  TILE           ; (the other tiles: in their own rows)
+            JMP  THUMB
 SELCOLOR9   RTS
 ; SLDRAG: red, green or blue (DRAG) set from where the mouse is along its bar.
 SLDRAG      LDB  COLOR
@@ -1125,6 +1152,8 @@ FLUSHTILE   TST  TDIRTY
             BEQ  FLUSHTILE9
             CLR  TDIRTY
             JSR  STORETILE
+            JSR  CURROW         ; (drawn in this row: its row now)
+            JSR  SETTROW
             LDD  TILE
             JSR  THUMB
             LDA  MODIFIED
@@ -1133,11 +1162,27 @@ FLUSHTILE   TST  TDIRTY
             STA  MODIFIED
             STA  STATDIRTY
 FLUSHTILE9  RTS
+; CURROW: A = the row of the color picked (0-15). SETTROW: tile TILE's own row
+; (its picture in the set is in it) is A.
+CURROW      LDA  COLOR
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            RTS
+SETTROW     PSHS A
+            LDD  TILE
+            LDX  #TROW
+            LEAX D,X
+            PULS A
+            STA  ,X
+            RTS
 ;------------------------------------------------------------------------------
             INCLUDE "tk_map.asm"
             INCLUDE "tk_draw.asm"
             INCLUDE "tk_file.asm"
             INCLUDE "tk_src.asm"
+            INCLUDE "tk_ini.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------
@@ -1159,6 +1204,7 @@ TSTOP       FDB  0          ; the first tile in sight in the set
 MAXTOP      FDB  0          ; the most TSTOP can be
 COLOR       FCB  15         ; the color drawn with
 OLDROW      FCB  0
+OLDTILE     FDB  0
 TOOL        FCB  TL_PEN
 MODE        FCB  M_EDIT
 MODIFIED    FCB  0          ; changed since saved
@@ -1226,6 +1272,7 @@ FX          FCB  0          ; the map's fill (FX, FY: a word)
 FY          FCB  0
 FOLDC       FDB  0
 FUP         FCB  0
+PICKED      FDB  0          ; the cell picked up
 FDOWN       FCB  0
             INCLUDE "gk_ui.asm" ; (it ends with space reserved, as this does)
 FILENAME    RMB  PR_MAX+1   ; the tile set's file
@@ -1233,6 +1280,9 @@ MAPNAME     RMB  PR_MAX+1   ; the map's
 MPATHBUF    RMB  PR_MAX+1
 EXPNAME     RMB  PR_MAX+1   ; an export's name, to start with
 MFSTACK     RMB  MFMAX*2
+TROW        RMB  1024       ; each tile's own row (16-color sets): its picture in it
+PAL8BUF     RMB  512        ; TILEKIT.INI's palettes: for 256-color sets
+PAL4BUF     RMB  512        ;   and for 16-color ones
 TILEBUF     RMB  256        ; the tile being edited, a byte a pixel
 THUMBBUF    RMB  256
 FSTACK      RMB  256

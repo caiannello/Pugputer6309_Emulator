@@ -4,7 +4,7 @@
 // EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM and TILEKIT.COM (shell/shell.bin,
 // edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, utils/hexdump.bin,
 // utils/move.bin and gamekit/build/tilekit.bin as assembled -- they carry their own
-// program headers) and
+// program headers), TILEKIT.INI (TILEKIT's default palettes, gamekit/TILEKIT.INI) and
 // BASIC.COM (the BASIC_LOAD-$EFFF window of basic309's S-record, given a program
 // header: load BASIC_LOAD, entry $C000 -- see pugputer/basic309_layout.hpp and EXE_* in
 // bios/defines.d).
@@ -87,7 +87,8 @@ int main(int argc, char** argv) {
                                      {"--link", LINK_BIN_DEFAULT, "LINK.COM"},
                                      {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"},
                                      {"--move", MOVE_BIN_DEFAULT, "MOVE.COM"},
-                                     {"--tilekit", TILEKIT_BIN_DEFAULT, "TILEKIT.COM"}};
+                                     {"--tilekit", TILEKIT_BIN_DEFAULT, "TILEKIT.COM"},
+                                     {"--tilekit-ini", TILEKIT_INI_DEFAULT, "TILEKIT.INI"}};
     for (int i = 1; i < argc; ++i) {
         bool program = false;
         for (auto& p : programs)

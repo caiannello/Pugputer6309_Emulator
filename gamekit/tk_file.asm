@@ -20,13 +20,19 @@ NEWPROJ     LDA  #$80
             LDD  #1             ; cells all tile 0), its colors
             STD  NTILES
             BSR  FRESH
+            JSR  SETPROJ
+            JSR  APPLYPAL       ; (and TILEKIT.INI's colors for the kind of set)
             CLR  MAPNAME
             CLR  MAPMOD
             CLR  FOCUS
-            JSR  SETPROJ
             JMP  SETUPDISP
 ; FRESH: what a set just made or opened starts with.
-FRESH       CLRD
+FRESH       LDX  #TROW          ; every tile's own row: 0
+            LDW  #1024
+FRESH1      CLR  ,X+
+            DECW
+            BNE  FRESH1
+            CLRD
             STD  TILE
             STD  TSTOP
             STD  SCRX
@@ -638,7 +644,12 @@ SAVEFILE    STX  FPATH
             STA  4,X
             LDA  BPP
             STA  5,X
-            LDA  HIRES
+            LDA  BPP            ; (flags: bit 0 640x480, bit 1 the tiles' own
+            CMPA #8             ; rows follow the tiles -- 16 colors)
+            BEQ  SAVEFILE1
+            LDA  #2
+SAVEFILE1   ANDA #2
+            ORA  HIRES
             STA  6,X
             CLR  7,X
             LDD  NTILES
@@ -671,7 +682,14 @@ SAVE1       LDD  FLEFT
             BSR  FWRITE
             BCS  SAVEERR
             BRA  SAVE1
-SAVE9       LDB  FHANDLE
+SAVE9       LDA  BPP            ; the tiles' own rows
+            CMPA #8
+            BEQ  SAVE10
+            LDX  #TROW
+            LDY  NTILES
+            JSR  FWRITE
+            BCS  SAVEERR
+SAVE10      LDB  FHANDLE
             LDA  #B_FCLOSE_NAME
             SWI2
             BCS  FILEERR
@@ -830,7 +848,20 @@ LOAD1       LDD  FLEFT
             LDY  #VC_DATA0
             TFM  X+,Y
             BRA  LOAD1
-LOAD9       BSR  CLOSEF
+LOAD9       LDA  HDRBUF+6       ; the tiles' own rows, if they are there
+            BITA #2
+            BEQ  LOAD10
+            LDX  #TROW
+            LDY  NTILES
+            JSR  FREAD
+            LDA  TROW           ; (tile 0, to be edited first: in its row)
+            LSLA
+            LSLA
+            LSLA
+            LSLA
+            ORA  #$0F
+            STA  COLOR
+LOAD10      BSR  CLOSEF
             JSR  NAMEIT
             CLR  MAPNAME        ; (the card reset: the map is blank)
             CLR  MAPMOD

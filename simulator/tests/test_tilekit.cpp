@@ -55,6 +55,7 @@ struct Kit {
             disk_file("TK_FILE.ASM", host_file(repo + "/gamekit/tk_file.asm")),
             disk_file("TK_MAP.ASM", host_file(repo + "/gamekit/tk_map.asm")),
             disk_file("TK_SRC.ASM", host_file(repo + "/gamekit/tk_src.asm")),
+            disk_file("TK_INI.ASM", host_file(repo + "/gamekit/tk_ini.asm")),
             disk_file("GK_UI.ASM", host_file(repo + "/gamekit/gk_ui.asm")),
             disk_file("DEFINES.D", host_file(repo + "/bios/defines.d")),
             disk_file("VIDCARD.D", host_file(repo + "/vidcard/vidcard.d")),
@@ -349,7 +350,7 @@ TEST(tilekit_opens_the_file_it_is_given_or_makes_it) {
     k.key(0x16, false, true); // ^S: it has a name, so no question
     k.frames(30);
     CHECK(k.shows(28, "SAVED") && k.shows(0, "NEWONE.TLS "));
-    CHECK(k.disk("/NEWONE.TLS").size() == 16 + 512 + 32);
+    CHECK(k.disk("/NEWONE.TLS").size() == 16 + 512 + 32 + 1); // (+ the tile's row)
     k.key(0x29);
     CHECK(k.prompt(200000000));
     k.type("TILEKIT NEWONE.TLS");
@@ -599,7 +600,7 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
         CHECK(std::string(reinterpret_cast<const char*>(&m[8])) == "LV.TLS");
         CHECK(m[48 + (1 * 64 + 1) * 2] == 0 && m[49 + (1 * 64 + 1) * 2] == 1);
     }
-    CHECK(k.disk("/LV.TLS").size() == 16 + 512 + 2 * 32);
+    CHECK(k.disk("/LV.TLS").size() == 16 + 512 + 2 * 32 + 2);
     // A second map for the same set: ^N, K, a wider map.
     k.key(0x11, false, true);
     k.key(0x0E); // K
@@ -717,4 +718,104 @@ TEST(tilekit_exports_assembly_source_that_a_game_includes) {
     CHECK(k.pix4(1, 1, 0) == 15 && k.pix4(1, 0, 0) == 0);
     CHECK(k.cell(2, 3, 32) == 0x0401);
     CHECK(k.c().cfg[0x200 + 2 * 9] == 0xF8 && k.c().cfg[0x201 + 2 * 9] == 0x00); // (xterm's red)
+}
+
+namespace {
+uint16_t pal(Kit& k, int i) { return static_cast<uint16_t>(k.c().cfg[0x200 + 2 * i] << 8 | k.c().cfg[0x201 + 2 * i]); }
+} // namespace
+
+TEST(tilekit_takes_its_default_palettes_from_tilekit_ini) {
+    // The one that comes with it, in /CMD: PICO-8's 16 in row 0 of a 16-color set.
+    {
+        Kit k({disk_file("CMD/TILEKIT.INI", host_file(std::string(REPO_DIR) + "/gamekit/TILEKIT.INI"))});
+        if (!k.ok) return;
+        k.type("TILEKIT");
+        k.frames(90);
+        k.key(0x28);
+        k.frames(30);
+        CHECK(pal(k, 1) == ((0x1D >> 3) << 11 | (0x2B >> 2) << 5 | (0x53 >> 3))); // 1D2B53
+        k.click(kPanelX + 8 + 4 * 10 + 4, 192 + 4 * 8 + 3); // (a color in row 4, for the picture)
+        k.click(Kit::zx(1), Kit::zy(1));
+        k.click(Kit::zx(6), Kit::zy(5));
+        k.dump("7-ini-palette");
+        CHECK(pal(k, 31) == 0xFFFF && pal(k, 17) == ((0x11 >> 3) << 11 | (0x11 >> 2) << 5 | (0x11 >> 3)));
+        // A 256-color set: its own section (xterm's).
+        k.key(0x11, false, true);
+        k.key(0x1C); // (Y: not saved)
+        k.key(0x07); // D: 256 colors
+        k.key(0x28);
+        k.frames(30);
+        CHECK(pal(k, 1) == 0x8000 && pal(k, 196) == 0xF800);
+    }
+    // One of our own, here: what it gives, in its order; the rest the card's.
+    const char* ini = "; mine\r\n[palette4]\r\n#FF0000, 00ff00 ; two\r\nGARBAGE 1234567 0000FF\r\n"
+                      "[OTHER]\r\n123456\r\n[PALETTE8]\n00FFFF";
+    Kit k({disk_file("TILEKIT.INI", ini)});
+    if (!k.ok) return;
+    k.type("TILEKIT");
+    k.frames(90);
+    k.key(0x28);
+    k.frames(30);
+    CHECK(pal(k, 0) == 0xF800 && pal(k, 1) == 0x07E0 && pal(k, 2) == 0x001F); // (GARBAGE, 1234567: not colors)
+    CHECK(pal(k, 3) == 0x8400); // (xterm's 3: 808000)
+    k.key(0x11, false, true);
+    k.key(0x07);
+    k.key(0x28);
+    k.frames(30);
+    CHECK(pal(k, 0) == 0x07FF && pal(k, 1) == 0x8000);
+}
+
+TEST(tilekit_shows_each_tile_in_its_own_row_and_keeps_them) {
+    Kit k;
+    if (!k.ok) return;
+    k.type("TILEKIT");
+    k.frames(60);
+    k.key(0x28);
+    k.frames(30);
+    // Tile 0: a dot in color 2 of row 2 (34).
+    k.click(kPanelX + 8 + 2 * 10 + 4, 192 + 2 * 8 + 3);
+    CHECK(k.shows(29, "COLOR 034"));
+    k.click(Kit::zx(0), Kit::zy(0));
+    auto thumb = [&](int t, int x, int y) { return k.panel(3 + (t % 10) * 17 + 2 * x, 352 + (t / 10) * 17 + 2 * y); };
+    CHECK(k.pix4(0, 0, 0) == 2 && thumb(0, 0, 0) == 34);
+    // Tile 1, drawn in row 5: tile 0 stays in row 2 in the set.
+    k.key(0x11); // N
+    k.click(kPanelX + 8 + 2 * 10 + 4, 192 + 5 * 8 + 3); // color 82
+    k.click(Kit::zx(1), Kit::zy(1));
+    CHECK(thumb(1, 1, 1) == 82 && thumb(0, 0, 0) == 34);
+    // Another row picked: the tile being edited is shown in it; the others not.
+    k.key(0x4E); // PgDn: row 6
+    CHECK(thumb(1, 1, 1) == 98 && thumb(0, 0, 0) == 34);
+    // Selecting tile 0: its row (2) is picked again, the same place in it.
+    k.click(kPanelX + 3 + 8, 352 + 8);
+    CHECK(k.shows(29, "TILE 0000/0002") && k.shows(29, "COLOR 034"));
+    CHECK(thumb(1, 1, 1) == 82); // (tile 1: drawn in row 5, only looked at in 6)
+    // Put on the map in row 7: that is tile 0's row now.
+    k.key(0x4E);
+    k.key(0x4E);
+    k.key(0x4E);
+    k.key(0x4E);
+    k.key(0x4E); // row 7
+    k.click(Kit::mx(1), Kit::my(1));
+    CHECK(k.cell(1, 1) == 0x7000);
+    k.key(0x37); // . : tile 1 (row 5 again)
+    CHECK(k.shows(29, "COLOR 082") && thumb(0, 0, 0) == 114);
+    // Saved with the set, and back when it is opened.
+    k.key(0x16, false, true);
+    k.text("ROWS");
+    k.key(0x28);
+    k.frames(20);
+    std::vector<uint8_t> f = k.disk("/ROWS.TLS");
+    CHECK(f.size() == 16 + 512 + 2 * 32 + 2 && f.size() > 7 && (f[6] & 2));
+    if (f.size() == 16 + 512 + 2 * 32 + 2) CHECK(f[16 + 512 + 64] == 7 && f[16 + 512 + 65] == 5);
+    k.key(0x11, false, true); // ^N (asks: the map isn't saved)
+    k.key(0x1C);
+    k.key(0x28);
+    k.frames(20);
+    k.key(0x12, false, true);
+    for (int i = 0; i < 8; ++i) k.key(0x2A);
+    k.text("ROWS");
+    k.key(0x28);
+    k.frames(60);
+    CHECK(k.shows(28, "OPENED") && thumb(1, 1, 1) == 82 && thumb(0, 0, 0) == 114); // (row 7: tile 0, being edited, in its own row)
 }

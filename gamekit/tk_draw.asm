@@ -38,16 +38,13 @@ REDRAWALL1  CMPA #M_EDIT
             LBEQ DRAWHELP
             JMP  PRSHOWC
 ; DISPCOL: the color pixel value A shows in: 0 (see-through) as UI_BG; in a
-; 16-color set, the value in COLOR's row. (Only A and B change.)
+; 16-color set, the value in the row DISPROW. (Only A and B change.)
 DISPCOL     TSTA
             BEQ  DISPCOL0
             LDB  BPP
             CMPB #8
             BEQ  DISPCOL9
-            LDB  COLOR
-            ANDB #$F0
-            PSHS B
-            ORA  ,S+
+            ORA  DISPROW
 DISPCOL9    RTS
 DISPCOL0    LDA  UI_BG
             RTS
@@ -121,6 +118,9 @@ DRAWZOOM1   PSHS D
             RTS
 ; DRAWZPIX: pixel D (0-255) of TILEBUF.
 DRAWZPIX    TFR  D,X
+            LDA  COLOR          ; (the tile being edited: in COLOR's row)
+            ANDA #$F0
+            STA  DISPROW
             LDA  TILEBUF,X
             JSR  DISPCOL
             STA  DZCOL
@@ -316,13 +316,29 @@ TSBOX       PSHS A
             LDA  ,S
             JSR  ORECTR
 TSFRAME9    PULS A,PC
-; THUMB: tile D's picture in the set (if it is in sight), from the card.
+; THUMB: tile D's picture in the set (if it is in sight), from the card: in
+; COLOR's row if it is the tile being edited, else in its own (TROW).
 THUMB       PSHS D
             BSR  TSPOS
             PULS D
-            BCS  THUMB9
-            STX  THX
+            LBCS THUMB9
+            STX  THX            ; (where it goes)
             STY  THY
+            PSHS D              ; its row
+            LDA  COLOR
+            ANDA #$F0
+            LDX  ,S
+            CMPX TILE
+            BEQ  THUMB0
+            LDX  #TROW
+            LDD  ,S
+            LDA  D,X
+            LSLA
+            LSLA
+            LSLA
+            LSLA
+THUMB0      STA  DISPROW
+            PULS D
             JSR  TILEADDR
             JSR  PORT1
             LDY  #THUMBBUF
@@ -593,3 +609,4 @@ SLP         FDB  0
 THX         FDB  0
 THY         FDB  0
 NAMEMOD     FCB  0
+DISPROW     FCB  0          ; the row (x16) DISPCOL shows a 16-color tile in

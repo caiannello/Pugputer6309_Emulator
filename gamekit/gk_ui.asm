@@ -273,7 +273,7 @@ TXROW       PSHS D
 ; The palette (PALBUF: the card's 256 colors, RGB565, high byte first), and the
 ; colors the editor draws itself in, chosen from it so that they show whatever
 ; it holds: UI_BG the darkest, UI_FG the brightest, UI_MID the nearest 3/8
-; of the way between, UI_HI the most yellow. (Never color 0, which shows through.)
+; of the way between (grays preferred), UI_HI the most yellow. (Never color 0, which shows through.)
 ;------------------------------------------------------------------------------
 ; RDPAL: PALBUF from the card.
 RDPAL       LDA  #VC_PAL/$10000
@@ -371,6 +371,26 @@ LUMA        JSR  RGBOF
             MUL
             ADDD GK_T
             RTS
+; CHROMA: B = how colorful GK_R, GK_G, GK_B are: the most of 2R, G, 2B less
+; the least (0-63; 0 a gray).
+CHROMA      LDA  GK_R
+            LSLA
+            LDB  GK_B
+            LSLB
+            STA  GK_COL         ; (max in A, min in B, of 2R and 2B)
+            CMPB GK_COL
+            BLS  CHROMA1
+            EXG  A,B
+CHROMA1     CMPA GK_G
+            BHS  CHROMA2
+            LDA  GK_G
+CHROMA2     CMPB GK_G
+            BLS  CHROMA3
+            LDB  GK_G
+CHROMA3     STB  GK_COL
+            SUBA GK_COL
+            TFR  A,B
+            RTS
 ; YELLOW: how yellow color B is (2R + G - 2B), signed, in D.
 YELLOW      JSR  RGBOF
             LDB  GK_R
@@ -427,7 +447,12 @@ UIC4        PSHS B
             SUBD GK_MID
             BPL  UIC5
             NEGD
-UIC5        CMPD GK_MIN
+UIC5        STD  GK_T           ; (grays first: how colorful, x16, counts against it)
+            JSR  CHROMA
+            LDA  #16
+            MUL
+            ADDD GK_T
+            CMPD GK_MIN
             BGE  UIC6
             STD  GK_MIN
             LDA  ,S
