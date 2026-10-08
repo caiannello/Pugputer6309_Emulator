@@ -147,14 +147,31 @@ POLLIN      LDD  VC_MOUSEX      ; (this takes the snapshot of X and Y)
             STA  WHEEL
             RTS
 ; GETKEY: the next key event, if there is one: Z clear, A its USB usage code,
-; B the character it typed (bit 7 set: a release); KEYMODS the modifiers.
-; Z set if there was none.
+; B the character it typed (bit 7 set: a release); KEYMODS the modifiers held
+; as of that event (followed from the queue's own events, not VC_KEYMODS, which
+; is how they are now -- a quick Shift+key is let go before it is read). Z set
+; if there was none.
 GETKEY      LDA  VC_KEY
             BEQ  GETKEY9
-            LDB  VC_KEYMODS
-            STB  KEYMODS
             LDB  VC_KEYCHAR
-            TSTA
+            CMPA #K_LCTRL       ; a modifier: its bit in KEYMODS
+            BLO  GETKEY8
+            PSHS D
+            SUBA #K_LCTRL
+            LDB  #1
+GETKEY1     DECA
+            BMI  GETKEY2
+            LSLB
+            BRA  GETKEY1
+GETKEY2     TST  1,S
+            BMI  GETKEY3
+            ORB  KEYMODS        ; down
+            BRA  GETKEY4
+GETKEY3     COMB                ; up
+            ANDB KEYMODS
+GETKEY4     STB  KEYMODS
+            PULS D
+GETKEY8     TSTA
 GETKEY9     RTS
 ;------------------------------------------------------------------------------
 ; Text, on the 80x30 text layer at VC_TEXTMAP (128 cells a row): each character

@@ -2,18 +2,20 @@
 ; PROJECT: Pugputer 6309 game kit
 ;    FILE: tilekit.asm
 ;
-; TILEKIT.COM: a tile set editor for the video card, worked with the mouse and
-; the keyboard of the card (in the emulator, the video window's):
+; TILEKIT.COM: a tile set and tile map editor for the video card, worked with
+; the mouse and the keyboard of the card (in the emulator, the video window's):
 ;
-;   TILEKIT [file]
+;   TILEKIT [file]      a tile set (.TLS, the default) or a map (.MAP) to open
 ;
 ; The screen, 640x480:
 ;
-;   left     the tile being edited, over and over, as the card's tile layer
-;            shows it in a game (at 320x240 or 640x480, as the set is made for)
-;   right    the tools: pen, line, fill, pick (a color from the tile), eraser,
-;            clear and undo; the tile, magnified, to draw in; the palette, and
-;            red, green and blue for the color picked in it; the tile set
+;   left     the map, as the card's tile layer shows it in a game (at 320x240
+;            or 640x480, as the set is made for), the cell under the mouse
+;            framed; a tile being drawn shows wherever it is in the map
+;   right    the tools: pen, line, fill, pick, eraser, clear and undo -- on
+;            the map's cells or the tile's pixels, whichever the mouse is on;
+;            the tile, magnified, to draw in; the palette, and red, green and
+;            blue for the color picked in it; the tile set
 ;   bottom   the keys, and what is being edited
 ;
 ; A tile set is 8x8 or 16x16 tiles of 16 colors (4 bits a pixel, in any one of
@@ -27,9 +29,19 @@
 ;  16  the palette: 256 colors, RGB565, 2 bytes each, high byte first
 ; 528  the tiles, one after another: rows of pixels, packed from the high bits
 ;
-; The keys: P L F K E the tools, ^Z (or U) undo, C clear the tile, N a new tile,
-; D a copy of this one, the arrows another tile, + and - (PgUp, PgDn) another
-; color (row), ^S save, ^O open, ^N a new set, Esc quit.
+; A map is 32 to 256 cells across and down (16384 at most), each the card's
+; map entry: the tile (bits 0-9), flipped across (10), down (11), the palette
+; row (12-15). Its file (.MAP) names its tile set, so maps can share one:
+;
+;   0  "PTM1"
+;   4  its width, then height, in cells (2 bytes each, high first)
+;   8  the tile set's file name (40 bytes, 0 after it)
+;  48  the cells, a row at a time, as the card holds them (2 bytes, high first)
+;
+; The keys: P L F K E the tools, ^Z (or U) undo, C clear, N a new tile, D a
+; copy of this one, , and . another tile, H and V flip what is put on the map,
+; + and - (PgUp, PgDn) another color (row), the arrows (Home) scroll the map,
+; ^S save, ^A save as, ^O open, ^N new, Esc quit.
 ;------------------------------------------------------------------------------
             INCLUDE "defines.d"
             INCLUDE "vidcard.d"
@@ -39,8 +51,13 @@ TK_STACK    equ  $EF00
 
 ; Video memory.
 PANEL       equ  $000000    ; the right-hand panel: a bitmap, 176x480, 8 bits a pixel
-PREVMAP     equ  $016000    ; layer 0's map: 32x32 cells of the tile being edited
+MAPV        equ  $016000    ; layer 0's map: up to 32KB
 TILES       equ  $020000    ; the tile set: up to 64KB
+CURIMG      equ  $036000    ; sprite 1's image: the frame round a cell, up to 32x32
+PSUNDO      equ  $800000    ; (the PSRAM) the map's undo steps, 32KB each
+
+VIEWW       equ  464        ; the map's part of the screen
+VIEWH       equ  448
 
 ; The panel, in its own pixels (it starts 464 pixels across the screen).
 PANELX      equ  464
@@ -55,9 +72,11 @@ SLRX        equ  8          ;   red 0-31
 SLGX        equ  48         ;   green 0-63
 SLBX        equ  120        ;   blue 0-31
 SWX         equ  158        ; the color itself
-TSX         equ  3          ; the tile set: 10 across, 6 down, 17 apart
+TSX         equ  3          ; the tile set: 10 across, 5 down, 17 apart
 TSY         equ  352
+TSVIS       equ  50         ;   (so many in sight)
 TSROW       equ  21         ; the text row above it (NEW, DUP)
+MAPROW      equ  28         ; the panel's text row under it: the map's name
 HELPROW     equ  28         ; the text row of the keys, or a message
 STATROW     equ  29         ; the text row of what is being edited
 
@@ -81,6 +100,8 @@ R_SLIDB     equ  6
 R_NEW       equ  7
 R_DUP       equ  8
 R_TSET      equ  9
+R_MAP       equ  10
+R_PAN       equ  11         ; (the map being moved with the middle button)
 
 ; What the keys do.
 M_EDIT      equ  0
@@ -89,7 +110,8 @@ M_PROMPT    equ  2          ; a file name being typed
 M_CONFIRM   equ  3          ; Y or N
 
 UNDOS       equ  16         ; steps of undo kept
-UNDOSIZE    equ  258        ; each: the tile's number and its 256 pixels
+UNDOSIZE    equ  258        ; each: the tile's number and its 256 pixels (a map's
+                            ; steps are in the PSRAM)
 ;------------------------------------------------------------------------------
             ORG  TK_BASE-EXE_HDRSIZE
             FDB  EXE_MAGIC      ; the program header
@@ -118,14 +140,25 @@ ARGS3       CLR  ,Y
             TST  FILENAME
             BEQ  ASKNEW
             LDX  #FILENAME
+            LDY  #T_EXT
             JSR  DEFEXT
             LDX  #FILENAME
-            JSR  LOADFILE
+            JSR  OPENANY
             BCC  MAIN
-            CMPA #ERR_NOTFOUND  ; not there: a new set by that name
+            CMPA #ERR_NOTFOUND  ; not there: a new set (or map) by that name
             BNE  MAIN
             LDA  #1
             STA  KEEPNAME
+            LDX  #FILENAME      ; (a .MAP: the map's name; the set has none yet)
+            JSR  ISMAP
+            BNE  START2
+            LDX  #FILENAME
+            LDY  #MAPNAME
+            JSR  STRCPY
+            CLR  FILENAME
+            LDA  #2
+            STA  KEEPNAME
+START2
             JSR  NEWDIALOG
             LDX  #T_NEWFILE
             JSR  MESSAGE
@@ -176,14 +209,9 @@ UPCHAR9     RTS
 EDITKEY     LDA  KCODE
             CMPA #K_ESC
             LBEQ QUITCMD
-            CMPA #K_LEFT
-            LBEQ PREVTILE
-            CMPA #K_RIGHT
-            LBEQ NEXTTILE
-            CMPA #K_UP
-            LBEQ UPTILE
-            CMPA #K_DOWN
-            LBEQ DOWNTILE
+            JSR  MAPKEYS        ; (the arrows, Home: the map scrolls)
+            BCC  EDITKEY9
+            LDA  KCODE
             CMPA #K_PGUP
             LBEQ PREVROW
             CMPA #K_PGDN
@@ -212,7 +240,7 @@ KEYTAB      FCB  'P
             FCB  'E
             FDB  TOOLERASE
             FCB  'C
-            FDB  CLEARTILE
+            FDB  CLEARCMD
             FCB  'U
             FDB  UNDO
             FCB  $1A            ; ^Z
@@ -221,6 +249,18 @@ KEYTAB      FCB  'P
             FDB  NEWTILE
             FCB  'D
             FDB  DUPTILE
+            FCB  ',
+            FDB  PREVTILE
+            FCB  '<
+            FDB  PREVTILE
+            FCB  '.
+            FDB  NEXTTILE
+            FCB  '>
+            FDB  NEXTTILE
+            FCB  'H
+            FDB  FLIPH
+            FCB  'V
+            FDB  FLIPV
             FCB  '+
             FDB  NEXTCOLOR
             FCB  '=
@@ -229,6 +269,8 @@ KEYTAB      FCB  'P
             FDB  PREVCOLOR
             FCB  $13            ; ^S
             FDB  SAVECMD
+            FCB  $01            ; ^A
+            FDB  SAVEASCMD
             FCB  $0F            ; ^O
             FDB  OPENCMD
             FCB  $0E            ; ^N
@@ -265,16 +307,19 @@ NEXTTILE    LDD  TILE
             CMPD NTILES
             BHS  NOTILE
             JMP  SELTILE
-UPTILE      LDD  TILE
-            SUBD #10
-            BLO  NOTILE
-            JMP  SELTILE
-DOWNTILE    LDD  TILE
-            ADDD #10
-            CMPD NTILES
-            BHS  NOTILE
-            JMP  SELTILE
 NOTILE      RTS
+FLIPH       LDA  #$04           ; (bit 10 of a cell)
+            BRA  FLIP
+FLIPV       LDA  #$08           ; (bit 11)
+FLIP        EORA FLIPS
+            STA  FLIPS
+            LDA  #1
+            STA  STATDIRTY
+            RTS
+; CLEARCMD: clear the tile, or the map: whichever was drawn on last.
+CLEARCMD    TST  FOCUS
+            LBEQ CLEARTILE
+            JMP  MAPCLEAR
 ;------------------------------------------------------------------------------
 ; The mouse.
 ;------------------------------------------------------------------------------
@@ -306,12 +351,13 @@ DOMOUSE3    LDA  BUTTONS        ; all up: the end of a drag
             CLR  DRAG
             LDX  #UPTAB
             BSR  REGION
-DOMOUSE4    LDA  WHEEL          ; the wheel scrolls the tile set
+DOMOUSE4    LDA  WHEEL          ; the wheel scrolls the tile set, or the map
             BEQ  DOMOUSE9
             JSR  HITTEST
             CMPA #R_TSET
-            BLO  DOMOUSE9
-            JMP  SCROLLSET
+            LBEQ SCROLLSET
+            CMPA #R_MAP
+            LBEQ MAPWHEEL
 DOMOUSE9    RTS
 ; REGION: call the routine for region A in table X (a word each), B passed on.
 REGION      LSLA
@@ -319,13 +365,19 @@ REGION      LSLA
             BEQ  REGION9
             JMP  ,X
 REGION9     RTS
-PRESSTAB    FDB  0,TOOLCLICK,ZPRESS,PALCLICK,0,0,0,NEWTILE,DUPTILE,TSETCLICK
-DRAGTAB     FDB  0,0,ZDRAG,0,SLDRAG,SLDRAG,SLDRAG,0,0,0
-UPTAB       FDB  0,0,0,0,PALDONE,PALDONE,PALDONE,0,0,0
+PRESSTAB    FDB  0,TOOLCLICK,ZPRESS,PALCLICK,0,0,0,NEWTILE,DUPTILE,TSETCLICK,MPRESS,0
+DRAGTAB     FDB  0,0,ZDRAG,0,SLDRAG,SLDRAG,SLDRAG,0,0,0,MDRAG,MPAN
+UPTAB       FDB  0,0,0,0,PALDONE,PALDONE,PALDONE,0,0,0,0,0
 ; HITTEST: what the mouse is over: A the region (R_...), B which part of it.
 HITTEST     LDD  MOUSEX
-            SUBD #PANELX
-            LBLO HTNONE
+            CMPD #PANELX
+            BHS  HTPANEL
+            LDD  MOUSEY         ; the map
+            CMPD #VIEWH
+            LBHS HTNONE
+            LDA  #R_MAP
+            RTS
+HTPANEL     SUBD #PANELX
             STD  HX
             LDD  MOUSEY
             STD  HY
@@ -422,7 +474,7 @@ HT51        CMPB #74
             RTS
 HT6         CMPD #TSY           ; the tile set
             BLO  HTNONE
-            CMPD #TSY+6*17
+            CMPD #TSY+TSVIS/10*17
             BHS  HTNONE
             LDD  HX
             SUBD #TSX
@@ -445,7 +497,7 @@ HTNONE      CLRA
 ; What a click does.
 ;------------------------------------------------------------------------------
 TOOLCLICK   CMPB #TL_CLEAR
-            LBEQ CLEARTILE
+            LBEQ CLEARCMD
             CMPB #TL_UNDO
             LBEQ UNDO
             JMP  SETTOOL
@@ -462,7 +514,7 @@ SCROLLSET   LDD  NTILES         ; the most it can scroll: the last row at the bo
             DIVD #10            ; B = rows
             LDA  #10
             MUL
-            SUBD #60
+            SUBD #TSVIS
             BPL  SCROLL1
             CLRD
 SCROLL1     STD  MAXTOP
@@ -532,6 +584,7 @@ PENVAL9     RTS
 ; ZPRESS: a button down over the magnified tile.
 ZPRESS      BSR  ZPIXEL
             BCS  ZPRESS9
+            CLR  FOCUS          ; (clear is for the tile now)
             STD  LASTX          ; (LASTX, LASTY)
             STD  ANCX           ; (ANCX, ANCY: where a line starts)
             LDA  #1
@@ -588,6 +641,8 @@ ZDRAG       LDA  TOOL
             STD  LX1
             LDA  #1
             STA  DRAWNOW
+            LDX  #SETPIX
+            STX  PLOTV
             JSR  LINE
             BRA  ZDRAG2
 ZDRAG1      LDA  #1
@@ -604,7 +659,7 @@ ZDRAGOFF    CLR  INZOOM
 ZPICK2      JSR  ZPIXEL         ; (picking follows the mouse)
             BCS  ZDRAG9
             STD  LASTX
-            BRA  ZPICK
+            LBRA ZPICK
 ZLINE       JSR  PEEKUNDO       ; the tile as it was, then the line to here
             LDD  ANCX
             STD  LX0
@@ -612,6 +667,8 @@ ZLINE       JSR  PEEKUNDO       ; the tile as it was, then the line to here
             STD  LX1
             STD  LASTX
             CLR  DRAWNOW
+            LDX  #SETPIX
+            STX  PLOTV
             JSR  LINE
             JSR  DRAWZOOM
             LDA  #1
@@ -642,50 +699,57 @@ SETPIX      BSR  PIXIDX
             TFR  X,D
             JMP  DRAWZPIX
 SETPIX9     RTS
-; LINE: from LX0, LY0 to LX1, LY1 in PENC (each end drawn).
-LINE        LDA  LX1            ; dx = |x1 - x0|, sx
-            SUBA LX0
-            LDB  #1
+; LINE: from LX0, LY0 to LX1, LY1 (each end too), each point (A = x, B = y)
+; given to the routine at PLOTV: SETPIX for the tile, PUTCELL for the map.
+LINE        CLRA                ; dx = |x1 - x0|, sx
+            LDB  LX1
+            SUBB LX0
+            SBCA #0
+            LDX  #1
+            TSTA
             BPL  LINE1
-            NEGA
-            LDB  #-1
-LINE1       STA  LDX
-            STB  LSX
-            LDA  LY1            ; dy = -|y1 - y0|, sy
-            SUBA LY0
-            LDB  #1
+            NEGD
+            LDX  #-1
+LINE1       STD  LNDX
+            STX  LNSX
+            CLRA                ; dy = -|y1 - y0|, sy
+            LDB  LY1
+            SUBB LY0
+            SBCA #0
+            LDX  #1
+            TSTA
             BPL  LINE2
-            NEGA
-            LDB  #-1
-LINE2       NEGA
-            STA  LDY
-            STB  LSY
-            ADDA LDX
-            STA  LERR           ; err = dx + dy
+            NEGD
+            LDX  #-1
+LINE2       STX  LNSY
+            NEGD
+            STD  LNDY
+            ADDD LNDX
+            STD  LNERR          ; err = dx + dy
 LINE3       LDD  LX0
-            BSR  SETPIX
+            JSR  [PLOTV]
             LDD  LX0
             CMPD LX1
             BEQ  LINE9
-            LDA  LERR
-            LSLA                ; e2 = 2 * err
-            STA  LE2
-            CMPA LDY
+            LDD  LNERR
+            LSLD                ; e2 = 2 * err
+            STD  LNE2
+            CMPD LNDY
             BLT  LINE4
-            LDA  LERR           ; e2 >= dy: step across
-            ADDA LDY
-            STA  LERR
+            LDD  LNERR          ; e2 >= dy: a step across
+            ADDD LNDY
+            STD  LNERR
             LDA  LX0
-            ADDA LSX
+            ADDA LNSX+1
             STA  LX0
-LINE4       LDA  LE2
-            CMPA LDX
+LINE4       LDD  LNE2
+            CMPD LNDX
             BGT  LINE3
-            LDA  LERR           ; e2 <= dx: step down
-            ADDA LDX
-            STA  LERR
+            LDD  LNERR          ; e2 <= dx: a step down
+            ADDD LNDX
+            STD  LNERR
             LDA  LY0
-            ADDA LSY
+            ADDA LNSY+1
             STA  LY0
             BRA  LINE3
 LINE9       RTS
@@ -753,13 +817,16 @@ UNDOSLOT    LDA  #UNDOSIZE/2
             TFR  D,X
             RTS
 PUSHUNDO    LDB  UHEAD
+            LDX  #UTYPE         ; (a tile's step)
+            CLR  B,X
             BSR  UNDOSLOT
             LDD  TILE
             STD  ,X++
             LDY  #TILEBUF
             LDW  #256
             TFM  Y+,X+
-            LDA  UHEAD
+; NEXTUNDO: the newest step taken: the next slot, one more to undo.
+NEXTUNDO    LDA  UHEAD
             INCA
             ANDA #UNDOS-1
             STA  UHEAD
@@ -787,7 +854,15 @@ UNDO1       DEC  UCOUNT
             DECB
             ANDB #UNDOS-1
             STB  UHEAD
-            BSR  UNDOSLOT
+            LDX  #UTYPE
+            TST  B,X
+            BEQ  UNDO3
+            JSR  MAPBACKU       ; a map's step: the map as it was
+            LDA  #1
+            STA  MAPMOD
+            STA  STATDIRTY
+            RTS
+UNDO3       BSR  UNDOSLOT
             LDD  ,X++
             PSHS X
             CMPD TILE           ; another tile: go to it first
@@ -862,7 +937,7 @@ SHOWTILE    LDD  TILE           ; in sight in the set?
             CMPD TSTOP
             BLO  SHOWTILE1
             SUBD TSTOP
-            CMPD #60
+            CMPD #TSVIS
             BLO  SHOWTILE2
 SHOWTILE1   LDD  TILE           ; no: its row, at the top or the bottom
             DIVD #10
@@ -870,14 +945,13 @@ SHOWTILE1   LDD  TILE           ; no: its row, at the top or the bottom
             MUL
             CMPD TSTOP
             BLO  SHOWTILE3
-            SUBD #50
+            SUBD #TSVIS-10
 SHOWTILE3   STD  TSTOP
             JSR  DRAWTSET
             BRA  SHOWTILE4
 SHOWTILE2   LDA  UI_HI
             JSR  TSFRAME
 SHOWTILE4   JSR  DRAWZOOM
-            JSR  FILLPREV
             LDA  #1
             STA  STATDIRTY
 SELTILE9    RTS
@@ -966,8 +1040,7 @@ SELCOLOR    CMPB COLOR
             CMPA OLDROW
             BEQ  SELCOLOR9
             JSR  DRAWZOOM
-            JSR  DRAWTSET
-            JMP  FILLPREV
+            JMP  DRAWTSET
 SELCOLOR9   RTS
 ; SLDRAG: red, green or blue (DRAG) set from where the mouse is along its bar.
 SLDRAG      LDB  COLOR
@@ -1031,6 +1104,7 @@ SETTOOL     LDA  TOOL
 ; Each frame, after the keys and the mouse.
 ;------------------------------------------------------------------------------
 PERFRAME    BSR  FLUSHTILE
+            JSR  HOVER
             LDA  MSGTIME        ; a message: back to the keys after a while
             BEQ  PERFRAME2
             DECA
@@ -1058,6 +1132,7 @@ FLUSHTILE   TST  TDIRTY
             STA  STATDIRTY
 FLUSHTILE9  RTS
 ;------------------------------------------------------------------------------
+            INCLUDE "tk_map.asm"
             INCLUDE "tk_draw.asm"
             INCLUDE "tk_file.asm"
 ;------------------------------------------------------------------------------
@@ -1108,18 +1183,52 @@ LX0         FCB  0          ; LINE's ends (LX0, LY0 and LX1, LY1: words)
 LY0         FCB  0
 LX1         FCB  0
 LY1         FCB  0
-LDX         FCB  0
-LDY         FCB  0
-LSX         FCB  0
-LSY         FCB  0
-LERR        FCB  0
-LE2         FCB  0
+PLOTV       FDB  SETPIX     ; what LINE does with each point
+LNDX        FDB  0
+LNDY        FDB  0
+LNSX        FDB  0
+LNSY        FDB  0
+LNERR       FDB  0
+LNE2        FDB  0
 FOLD        FCB  0
 FIDX        FCB  0
 UHEAD       FCB  0          ; the next undo slot
 UCOUNT      FCB  0          ; steps that can be undone
+UTYPE       FCB  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; each slot: 0 a tile's, 1 the map's
+USLOT       FCB  0,0,0      ; a map step's place in the PSRAM
+MAPWC       FCB  1          ; the map: its width, 32 << this (64)
+MAPHC       FCB  1          ;   and height (64)
+MAPW        FDB  64         ;   in cells
+MAPH        FDB  64
+MAPWSH      FCB  6          ;   log2 of the width
+MAPBYTES    FDB  8192
+SCLSH       FCB  1          ;   1 at 320x240: a layer pixel is 2 screen ones
+SCRX        FDB  0          ;   scrolled to here (the layer's pixels)
+SCRY        FDB  0
+MAPMOD      FCB  0          ;   changed since saved
+MPEN        FDB  0          ;   the cell the tool puts down
+FLIPS       FCB  0          ;   $04 across, $08 down: the cells' flips (bits 10, 11)
+FOCUS       FCB  0          ; clear is for: 0 the tile, 1 the map
+HOVX        FCB  $FF        ; the cell under the mouse ($FF: none)
+HOVY        FCB  $FF
+CURSZ       FCB  16         ; the frame round it, its size on the screen
+CURATTR     FCB  0          ;   (its sprite size bits)
+MASKC       FCB  0
+MASKR       FCB  0
+PANMX       FDB  0          ; a move with the middle button: where it started
+PANMY       FDB  0
+PANSX       FDB  0
+PANSY       FDB  0
+FX          FCB  0          ; the map's fill (FX, FY: a word)
+FY          FCB  0
+FOLDC       FDB  0
+FUP         FCB  0
+FDOWN       FCB  0
             INCLUDE "gk_ui.asm" ; (it ends with space reserved, as this does)
-FILENAME    RMB  PR_MAX+1
+FILENAME    RMB  PR_MAX+1   ; the tile set's file
+MAPNAME     RMB  PR_MAX+1   ; the map's
+MPATHBUF    RMB  PR_MAX+1
+MFSTACK     RMB  MFMAX*2
 TILEBUF     RMB  256        ; the tile being edited, a byte a pixel
 THUMBBUF    RMB  256
 FSTACK      RMB  256

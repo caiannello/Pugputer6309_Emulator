@@ -30,7 +30,7 @@ want graphics in Linux, libsdl2 will be needed. ; see the release's `README.md`.
 | `edit/` | `EDIT.COM`, a full-screen text/code editor for an ANSI terminal, modelled on GNU nano, except stripped-down and implemented in 6309 assembly language. The executable file size is currently around 10KB. |
 | `asmlink/` | `ASM.COM` and `LINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
 | `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII) and `MOVE.COM` (move or rename a file). |
-| `gamekit/` | Tools for making games' graphics on the Pugputer itself, worked with the video card's mouse and keyboard: `TILEKIT.COM`, a tile set editor (tiles of 8x8 or 16x16, 16 or 256 colors, its palette, saved as files a game loads straight into the card). Tile maps, export as assembly source, and a music editor are to follow. |
+| `gamekit/` | Tools for making games' graphics on the Pugputer itself, worked with the video card's mouse and keyboard: `TILEKIT.COM`, a tile set and tile map editor (tiles of 8x8 or 16x16 in 16 or 256 colors, the palette, maps up to 256 cells across with flips and palette rows, several maps to a set), saving files a game loads straight into the card. Export as assembly source, and a music editor, are to follow. |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, `ON ERROR`/`RESUME`, ANSI color, `CLS`/`HOME`, `GOTOXY`, and video card graphics modes/primitives. |
 | `vidcard/` | The video card: 640x480 DVI from an RP2350, with text, tile and bitmap layers, 128 sprites and drawing commands. What it is to a program, and its behavior as portable C that the emulator runs (and the card's firmware is to). |
 | `simulator/` | The HD6309 CPU core, the system bus and device models (UART, SD card, RAM banking, the YMF262 music chip, the video card), the emulator programs, and the test suite. |
@@ -94,11 +94,11 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
   editor, DOS, BASIC, the BIOS and themselves byte for byte. See `asmlink/README.md`.
 - **Utilities.** `HEXDUMP file`: a file as offsets, hex and ASCII, 16 bytes a line.
   `MOVE from [to]`: move a file to another directory, or rename it. See `utils/README.md`.
-- **Game kit.** `TILEKIT [file]`: a tile set editor on the video card's screen, used with its
-  mouse and keyboard (in the emulator, the video window's): pen, line, fill, color picker,
-  eraser and undo, on a magnified tile beside the whole set, with the palette's colors set by
-  red, green and blue, and the tile shown over and over as the card's tile layer shows it. See
-  `gamekit/README.md`.
+- **Game kit.** `TILEKIT [file]`: a tile set and map editor on the video card's screen, used
+  with its mouse and keyboard (in the emulator, the video window's): the map on the left as the
+  card's tile layer shows it, and beside it the tile magnified, the palette (colors set by red,
+  green and blue) and the set; pen, line, fill, pick, eraser, clear and undo work on the map's
+  cells or the tile's pixels alike. See `gamekit/README.md`.
 - **BASIC.** Extended Color BASIC plus `OPEN`/`PRINT#`/`INPUT#`/`FIELD`/`GET`/`PUT`,
   `MKDIR`/`CHDIR`/`FILES`/`KILL`/`NAME`, `ON ERROR GOTO`/`RESUME`/`ERR`/`ERL`, `SYSTEM`, and
   `CLS`/`HOME`/`GOTOXY`/`LCOLOR`/`HCOLOR`/`RESET` for the ANSI terminal, and `SCREEN`, `PSET`,

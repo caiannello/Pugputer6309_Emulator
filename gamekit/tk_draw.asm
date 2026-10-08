@@ -3,8 +3,9 @@
 ;    FILE: tk_draw.asm
 ;
 ; TILEKIT's screen: the panel's parts (a bitmap drawn by the card's commands,
-; with tiles put together in GK_SCRATCH and BLIT there), the tile over and over
-; on the left (a tile layer), and the text rows. INCLUDEd by tilekit.asm.
+; with tiles put together in GK_SCRATCH and BLIT there), and the text rows. (The
+; map on the left is the card's own tile layer: tk_map.asm.) INCLUDEd by
+; tilekit.asm.
 ;------------------------------------------------------------------------------
 ; REDRAWALL: everything, in the editor's colors as they are now.
 REDRAWALL   LDA  #VC_CFG/$10000 ; the backdrop
@@ -27,7 +28,7 @@ REDRAWALL   LDA  #VC_CFG/$10000 ; the backdrop
             JSR  DRAWTSLABEL
             JSR  DRAWTITLE
             JSR  DRAWSTATUS
-            JSR  FILLPREV
+            JSR  MAPSETUP       ; (the cover and the cell's frame in the colors)
             LDA  MODE           ; and the bottom row as it is
             CMPA #M_DIALOG
             BNE  REDRAWALL1
@@ -262,7 +263,7 @@ DRAWTSET    LDA  UI_BG
             LDX  #0
             LDY  #TSY-2
             LDW  #PANELW
-            LDU  #6*17+2
+            LDU  #TSVIS/10*17+2
             JSR  FRECTR
             LDD  TSTOP
 DRAWTSET1   CMPD NTILES
@@ -276,7 +277,7 @@ DRAWTSET1   CMPD NTILES
             ADDD #1
             PSHS D
             SUBD TSTOP
-            CMPD #60
+            CMPD #TSVIS
             PULS D
             BLO  DRAWTSET1
 DRAWTSET2   LDA  UI_HI
@@ -284,7 +285,7 @@ DRAWTSET2   LDA  UI_HI
 ; TSPOS: tile D in sight? Carry clear and X, Y its place if so; carry set if not.
 TSPOS       SUBD TSTOP
             BLO  TSPOS9
-            CMPD #60
+            CMPD #TSVIS
             BHS  TSPOS8
             DIVD #10            ; B = row, A = column
             PSHS A
@@ -365,32 +366,6 @@ THUMB2      LDX  THX
             JMP  BLIT16
 THUMB9      RTS
 ;------------------------------------------------------------------------------
-; The left: layer 0's map, every cell the tile being edited (in COLOR's row).
-;------------------------------------------------------------------------------
-FILLPREV    LDD  TILE
-            PSHS A
-            LDA  BPP
-            CMPA #8
-            PULS A
-            BEQ  FILLPREV1
-            PSHS B
-            LDB  COLOR          ; the row, in the entry's top 4 bits
-            ANDB #$F0
-            PSHS B
-            ORA  ,S+
-            PULS B
-FILLPREV1   STD  PREVENT
-            LDA  #PREVMAP/$10000
-            LDX  #PREVMAP&$FFFF
-            JSR  PORT0
-            LDD  PREVENT
-            LDW  #32*32
-FILLPREV2   STA  VC_DATA0
-            STB  VC_DATA0
-            DECW
-            BNE  FILLPREV2
-            RTS
-;------------------------------------------------------------------------------
 ; Text.
 ;------------------------------------------------------------------------------
 ; PANELTEXT: text in UI_FG over the panel (see-through behind it); BARTEXT:
@@ -404,28 +379,42 @@ BARTEXT     LDA  UI_FG
             LDA  UI_BG
             STA  TXBG
             RTS
-; DRAWTITLE: the panel's top row: the name, and * if changed since saved.
+; DRAWTITLE: the panel's top row, the tile set's file, and its bottom row, the
+; map's: each with * if changed since saved.
 DRAWTITLE   BSR  PANELTEXT
             LDA  #58
-            LDB  #0
+            CLRB
             JSR  TXAT
-            LDX  #T_TITLE
+            LDX  #T_TSNAME
             JSR  TXSTR
             LDX  #FILENAME
+            LDA  MODIFIED
+            BSR  DRAWNAME
+            LDA  #58
+            LDB  #MAPROW
+            JSR  TXAT
+            LDX  #T_MAPNAME
+            JSR  TXSTR
+            LDX  #MAPNAME
+            LDA  MAPMOD
+; DRAWNAME: the name at X ("(NEW)" if none), then * if A isn't 0, in 15 places.
+DRAWNAME    STA  NAMEMOD
             TST  ,X
-            BNE  DRAWTITLE1
+            BNE  DRAWNAME1
             LDX  #T_NONAME
-DRAWTITLE1  LDB  #12            ; the name (at most 12 characters) ...
-DRAWTITLE2  LDA  ,X+
-            BEQ  DRAWTITLE3
+DRAWNAME1   LDB  #12            ; at most 12 characters ...
+DRAWNAME2   LDA  ,X+
+            BEQ  DRAWNAME3
             JSR  TXCH
             DECB
-            BNE  DRAWTITLE2
-DRAWTITLE3  LDA  #$20           ; ... * if it has changed, and the rest blank
-            TST  MODIFIED
-            BEQ  DRAWTITLE4
+            BNE  DRAWNAME2
+DRAWNAME3   LDA  #$20           ; ... * if it has changed, and the rest blank
+            TST  NAMEMOD
+            BEQ  DRAWNAME4
             LDA  #'*
-DRAWTITLE4  JSR  TXCH
+DRAWNAME4   JSR  TXCH
+            INCB
+            INCB
             JMP  TXSPC
 ; DRAWTSLABEL: above the set: how many tiles, and the NEW and DUP buttons.
 DRAWTSLABEL BSR  PANELTEXT
@@ -452,7 +441,8 @@ DRAWTSLABEL BSR  PANELTEXT
             CLR  TXBG
             LDB  #2
             JMP  TXSPC
-; DRAWSTATUS: the bottom row: the tile, the set, the tool, the color.
+; DRAWSTATUS: the bottom row: the tile, how it is put down, the color, the map
+; and the cell under the mouse, the kind of set.
 DRAWSTATUS  JSR  BARTEXT
             CLRA
             LDB  #STATROW
@@ -465,29 +455,20 @@ DRAWSTATUS  JSR  BARTEXT
             JSR  TXCH
             LDD  NTILES
             JSR  TXDEC4
-            LDX  #T_8X8
-            LDA  TSIZE
-            CMPA #8
-            BEQ  DRAWSTAT1
-            LDX  #T_16X16
-DRAWSTAT1   JSR  TXSTR
-            LDX  #T_16COL
-            LDA  BPP
-            CMPA #8
-            BNE  DRAWSTAT2
-            LDX  #T_256COL
-DRAWSTAT2   JSR  TXSTR
-            LDX  #T_LORES
-            TST  HIRES
-            BEQ  DRAWSTAT3
-            LDX  #T_HIRES
-DRAWSTAT3   JSR  TXSTR
-            LDB  TOOL
-            LDA  #8
-            MUL
-            ADDD #T_TOOLS
-            TFR  D,X
+            LDX  #T_FLIP
             JSR  TXSTR
+            LDA  #'-
+            LDB  FLIPS
+            BITB #$04
+            BEQ  DRAWSTAT1
+            LDA  #'H
+DRAWSTAT1   JSR  TXCH
+            LDA  #'-
+            LDB  FLIPS
+            BITB #$08
+            BEQ  DRAWSTAT2
+            LDA  #'V
+DRAWSTAT2   JSR  TXCH
             LDX  #T_COLOR
             JSR  TXSTR
             CLRA
@@ -507,7 +488,43 @@ DRAWSTAT3   JSR  TXSTR
             JSR  TXSTR
             LDB  GK_B
             JSR  TXDEC2
-            LDB  #7             ; (to the end of the row)
+            LDX  #T_MAP
+            JSR  TXSTR
+            LDD  MAPW
+            JSR  TXDEC3
+            LDA  #'x
+            JSR  TXCH
+            LDD  MAPH
+            JSR  TXDEC3
+            LDX  #T_AT
+            JSR  TXSTR
+            LDA  HOVX
+            CMPA #$FF
+            BNE  DRAWSTAT3
+            LDX  #T_NOWHERE
+            JSR  TXSTR
+            BRA  DRAWSTAT4
+DRAWSTAT3   CLRA
+            LDB  HOVX
+            JSR  TXDEC3
+            LDA  #',
+            JSR  TXCH
+            CLRA
+            LDB  HOVY
+            JSR  TXDEC3
+DRAWSTAT4   LDX  #T_8X8
+            LDA  TSIZE
+            CMPA #8
+            BEQ  DRAWSTAT5
+            LDX  #T_16X16
+DRAWSTAT5   JSR  TXSTR
+            LDX  #T_16C
+            LDA  BPP
+            CMPA #8
+            BNE  DRAWSTAT6
+            LDX  #T_256C
+DRAWSTAT6   JSR  TXSTR
+            LDB  #2             ; (to the end of the row)
             JMP  TXSPC
 ; DRAWHELP: the row above it: the keys. MESSAGE: X instead, for a while.
 DRAWHELP    CLR  MSGTIME
@@ -544,34 +561,35 @@ ICONS       FDB  $000C,$001E,$003F,$007E,$00FC,$01F8,$03F0,$07E0 ; pen
 ;------------------------------------------------------------------------------
 ; Words.
 ;------------------------------------------------------------------------------
-T_TITLE     FCN  " TILEKIT "
+T_TSNAME    FCN  " TILES "
+T_MAPNAME   FCN  " MAP   "
 T_NONAME    FCN  "(NEW)"
 T_TILES     FCN  " TILES"
 T_NEWBTN    FCN  " NEW"
 T_DUPBTN    FCN  " DUP"
 T_TILE      FCN  " TILE "
-T_8X8       FCN  "  8x8  "
-T_16X16     FCN  "  16x16"
-T_16COL     FCN  "  16 COLORS "
-T_256COL    FCN  "  256 COLORS"
+T_FLIP      FCN  " FLIP "
+T_MAP       FCN  " MAP "
+T_AT        FCN  " AT "
+T_NOWHERE   FCN  "---,---"
+T_8X8       FCN  " 8x8"
+T_16X16     FCN  " 16x16"
+T_16C       FCN  " 16 "
+T_256C      FCN  " 256"
 T_LORES     FCN  "  320x240"
 T_HIRES     FCN  "  640x480"
-T_TOOLS     FCN  "  PEN  "      ; (8 bytes each)
-            FCN  "  LINE "
-            FCN  "  FILL "
-            FCN  "  PICK "
-            FCN  "  ERASE"
 T_COLOR     FCN  " COLOR "
 T_R         FCN  " R"
 T_G         FCN  " G"
 T_B         FCN  " B"
-T_HELP      FCN  "TOOLS P L F K E  UNDO U  TILE N D ^S SAVE ^O OPEN ESC QUIT"
+T_HELP      FCN  "P L F K E U  ,. TILE  H V FLIP  ARROWS SCROLL  ^S SAVE"
 T_NOUNDO    FCN  "NOTHING TO UNDO"
 T_FULL      FCN  "THE TILE SET IS FULL"
+T_FILLFULL  FCN  "THE FILL STOPPED: TOO INTRICATE A SHAPE (U UNDOES IT)"
 ;------------------------------------------------------------------------------
 DZCOL       FCB  0
 DZX         FCB  0
 SLP         FDB  0
 THX         FDB  0
 THY         FDB  0
-PREVENT     FDB  0
+NAMEMOD     FCB  0
