@@ -25,6 +25,11 @@ Pugputer, byte for byte as they were built.
                  ASM -f com vidgfx.asm     then VIDGFX    (bitmaps, commands, interrupts)
                  ASM -f com vidmouse.asm   then VIDMOUSE  (the mouse and keyboard)
 
+  GAMEKIT/     TILEKIT, the tile set editor (README.TXT there), and the files it
+               includes:
+                 CD GAMEKIT
+                 ASM -o TILEKIT.COM tilekit.asm
+
   ASMLINK/     the assembler and the linker:
                  CD ASMLINK
                  ASM -o ASM.COM asm.asm

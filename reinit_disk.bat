@@ -1,6 +1,6 @@
 @echo off
 rem Rebuilds BIOS, dos.asm, the shell, the editor, ASM, LINK, the utilities and basic309, then regenerates
-rem basic309\disk.img from scratch (just /CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM and BASIC.COM,
+rem basic309\disk.img from scratch (just /CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM,
 rem no other files) -- run this
 rem any time you want a clean slate between test sessions, or after editing bios/,
 rem dos/, shell/, edit/, asmlink/, utils/ or basic309/.
@@ -49,11 +49,17 @@ call "%ROOT%utils\compile.bat"
 if errorlevel 1 (popd & exit /b 1)
 popd
 
+echo Rebuilding the game kit...
+pushd "%ROOT%gamekit" || exit /b 1
+call "%ROOT%gamekit\compile.bat"
+if errorlevel 1 (popd & exit /b 1)
+popd
+
 echo Rebuilding basic309...
 call "%ROOT%basic309\build_basic.bat"
 if errorlevel 1 exit /b 1
 
-echo Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM and BASIC.COM only, clean slate)...
+echo Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM only, clean slate)...
 "%MKDISKIMG%" || exit /b 1
 
 echo Done.

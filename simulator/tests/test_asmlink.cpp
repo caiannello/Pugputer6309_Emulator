@@ -313,6 +313,10 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     // A new program runs from where it was made, ahead of the search path.
     m.run("CD ..");
     CHECK(m.run("HEXDUMP basiccom.asm").find("000000  2A 20 42 41 53 49 43 43") != std::string::npos);
+    m.run("CD GAMEKIT");
+    CHECK(m.run("ASM -o TILEKIT.COM tilekit.asm").find("ERROR") == std::string::npos);
+    CHECK(same("/ASM/GAMEKIT/TILEKIT.COM", host_text(repo("gamekit/build/tilekit.bin")),
+               m.file("/ASM/GAMEKIT/TILEKIT.COM")));
 }
 
 TEST(asm_assembles_itself_and_the_copy_works) {

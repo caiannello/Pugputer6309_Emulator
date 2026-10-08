@@ -19,7 +19,7 @@ set BUILD=%ROOT%simulator\build-release
 call "%ROOT%lwtools_env.bat" || exit /b 1
 
 echo === Assembling the BIOS, DOS, shell, editor, assembler, utilities, demos and BASIC ===
-for %%D in (bios dos shell edit asmlink utils demo) do (
+for %%D in (bios dos shell edit asmlink utils demo gamekit) do (
     pushd "%ROOT%%%D" || exit /b 1
     call .\compile.bat || (popd & exit /b 1)
     popd

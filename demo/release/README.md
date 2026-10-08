@@ -80,7 +80,7 @@ The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists 
 |---|---|
 | `pugputer.exe` | The emulator: HD6309 CPU, UART, SD card and banked RAM |
 | `pugbios.s19` | The BIOS ROM image (Motorola S-record) |
-| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the demos' sources in `/ASM/VGM` and `/ASM/VIDEO`, and the sources of every program in `/CMD`) and `/DEMO` (the music and video card demos, ready to run, and `/DEMO/VGMPLAY`: a VGM player and three clips for it) |
+| `disk.img` | The virtual SD card (FAT16): `/CMD` (`SHELL.COM`, `EDIT.COM`, `ASM.COM`, `LINK.COM`, `HEXDUMP.COM`, `MOVE.COM`, `TILEKIT.COM`, `BASIC.COM`), `/BASIC` (the BASIC demos) and `/ASM` (`GREET.ASM`, the demos' sources in `/ASM/VGM` and `/ASM/VIDEO`, and the sources of every program in `/CMD`) and `/DEMO` (the music and video card demos, ready to run, and `/DEMO/VGMPLAY`: a VGM player and three clips for it) |
 | `disk-original.img` | A pristine copy of the disk, used by `reset-disk.bat` |
 | `start-console.bat`, `start-com-port.bat`, `reset-disk.bat` | Launchers |
 | `LICENSE.txt`, `NOTICE.md` | MIT License, and credits (Microsoft, William Astle's lwtools, ...) |
