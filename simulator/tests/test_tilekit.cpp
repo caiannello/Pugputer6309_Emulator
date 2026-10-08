@@ -54,6 +54,7 @@ struct Kit {
             disk_file("TK_DRAW.ASM", host_file(repo + "/gamekit/tk_draw.asm")),
             disk_file("TK_FILE.ASM", host_file(repo + "/gamekit/tk_file.asm")),
             disk_file("TK_MAP.ASM", host_file(repo + "/gamekit/tk_map.asm")),
+            disk_file("TK_SRC.ASM", host_file(repo + "/gamekit/tk_src.asm")),
             disk_file("GK_UI.ASM", host_file(repo + "/gamekit/gk_ui.asm")),
             disk_file("DEFINES.D", host_file(repo + "/bios/defines.d")),
             disk_file("VIDCARD.D", host_file(repo + "/vidcard/vidcard.d")),
@@ -180,9 +181,10 @@ TEST(tilekit_assembles_on_the_machine_as_lwasm_does) {
     if (!k.ok) return;
     k.type("ASM -f raw -o TK.BIN TILEKIT.ASM");
     CHECK(k.prompt(20000000000ull));
-    CHECK(k.s.received.find("rror") == std::string::npos);
+    CHECK(k.s.received.find("rror") == std::string::npos && k.s.received.find("Cannot") == std::string::npos);
     std::vector<uint8_t> made = k.disk("/TK.BIN");
     CHECK(!made.empty() && std::string(made.begin(), made.end()) == k.bin);
+
 }
 
 TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
@@ -639,3 +641,80 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     CHECK(k.shows(28, "NOSUCH.MAP") && k.shows(0, "TILES (NEW)"));
 }
 
+
+TEST(tilekit_exports_assembly_source_that_a_game_includes) {
+    // A game: the two modules, put into the card by their own routines.
+    const char* game = "            INCLUDE \"VIDCARD.D\"\r\n"
+                       "            ORG  $4000\r\n"
+                       "START       LDA  #$02\r\n"
+                       "            LDX  #$0000\r\n"
+                       "            JSR  TILES_TOCARD\r\n"
+                       "            LDA  #$01\r\n"
+                       "            LDX  #$6000\r\n"
+                       "            JSR  LV_TOCARD\r\n"
+                       "            LDA  #$2B\r\n" // B_EXIT
+                       "            SWI2\r\n"
+                       "            FCB  TILES_LMODE,LV_LMAP,TILES_NTILES,LV_W\r\n"
+                       "            INCLUDE \"TILES.ASM\"\r\n"
+                       "            INCLUDE \"LV.ASM\"\r\n"
+                       "            END  START\r\n";
+    Kit k({disk_file("GAME.ASM", game)});
+    if (!k.ok) return;
+    k.type("TILEKIT");
+    k.frames(60);
+    k.key(0x1A); // W: 128, 256, 32
+    k.key(0x1A);
+    k.key(0x1A);
+    k.key(0x0B); // H: 128, 256, 32
+    k.key(0x0B);
+    k.key(0x0B);
+    CHECK(k.shows(14, "32 CELLS") && k.shows(15, "32 CELLS"));
+    k.key(0x28);
+    k.frames(30);
+    k.key(0x11); // N: tile 1, a dot at 1,0
+    k.click(Kit::zx(1), Kit::zy(0));
+    k.key(0x0B); // H
+    k.click(Kit::mx(2), Kit::my(3));
+    CHECK(k.cell(2, 3, 32) == 0x0401);
+    // ^E: the set's module (TILES.ASM, as the set has no name), then the map's.
+    k.key(0x08, false, true);
+    CHECK(k.shows(28, "EXPORT THE TILE SET AS: TILES.ASM_"));
+    k.key(0x28);
+    k.frames(30);
+    CHECK(k.shows(28, "EXPORT THE MAP AS: MAP.ASM_"));
+    for (int i = 0; i < 7; ++i) k.key(0x2A);
+    k.text("LV");
+    k.key(0x28);
+    k.frames(30);
+    CHECK(k.shows(28, "EXPORTED"));
+    std::vector<uint8_t> t = k.disk("/TILES.ASM"), m = k.disk("/LV.ASM");
+    std::string ts(t.begin(), t.end()), ms(m.begin(), m.end());
+    CHECK(ts.find("TILES_LMODE EQU  17\r\n") != std::string::npos); // a tile layer, 4 bits a pixel
+    CHECK(ts.find("TILES_NTILES EQU  2\r\n") != std::string::npos);
+    CHECK(ts.find("TILES_PAL\r\n            FDB  $0000,$8000,$0400,$8400") != std::string::npos);
+    CHECK(ts.find("; tile 1\r\n            FCB  $0F,$00,$00,$00") != std::string::npos);
+    CHECK(ms.find("LV_LMAP     EQU  0\r\n") != std::string::npos && ms.find("LV_W        EQU  32") != std::string::npos);
+    CHECK(ms.find("; row 3\r\n            FDB  $0000,$0000,$0401,$0000") != std::string::npos);
+    // ^E again, Esc at the first: straight on to the map's.
+    k.key(0x08, false, true);
+    k.key(0x29);
+    CHECK(k.shows(28, "EXPORT THE MAP AS: "));
+    k.key(0x29);
+    CHECK(k.shows(28, "P L F K E U"));
+    k.key(0x29); // quit (Y: not saved)
+    k.key(0x1C);
+    CHECK(k.prompt(200000000));
+    CHECK(k.vram(kTiles + 32) == 0); // (the card is reset)
+    // ASM on the machine makes the game from the modules; it puts them into the card.
+    k.type("ASM -f com GAME.ASM");
+    CHECK(k.prompt(20000000000ull));
+    CHECK(k.s.received.find("rror") == std::string::npos);
+    std::vector<uint8_t> com = k.disk("/GAME.COM");
+    CHECK(com.size() > 8 + 512 + 64 + 2048);
+    if (com.size() > 30) CHECK(com[8 + 20] == 17 && com[8 + 21] == 0 && com[8 + 22] == 2 && com[8 + 23] == 32); // (after 20 bytes of code)
+    k.type("GAME");
+    CHECK(k.prompt(200000000));
+    CHECK(k.pix4(1, 1, 0) == 15 && k.pix4(1, 0, 0) == 0);
+    CHECK(k.cell(2, 3, 32) == 0x0401);
+    CHECK(k.c().cfg[0x200 + 2 * 9] == 0xF8 && k.c().cfg[0x201 + 2 * 9] == 0x00); // (xterm's red)
+}

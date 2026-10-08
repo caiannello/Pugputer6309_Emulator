@@ -8,8 +8,9 @@ make, a game loads straight into the card.
 
 | File | |
 |---|---|
-| `tilekit.asm` | `TILEKIT.COM`, the tile set and map editor (below); it includes the next four |
+| `tilekit.asm` | `TILEKIT.COM`, the tile set and map editor (below); it includes the next five |
 | `tk_map.asm` | its map |
+| `tk_src.asm` | its export as assembly source |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, text on the screen, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
@@ -101,6 +102,7 @@ A large fill takes a while: a 64x64 map, about half a second.
 | arrows | scroll the map a cell (with Shift, 8); Home: back to its top left |
 | Ctrl+S | save: the tile set, then the map, each if it has changed (a name asked for if it has none: the map's file names its set's, so the set needs one) |
 | Ctrl+A | save as: both, asking both names |
+| Ctrl+E | export as assembly source: the tile set's module, then the map's (below) |
 | Ctrl+O | open a map (`.MAP`, with its set) or a tile set (and a new map) |
 | Ctrl+N | a new set and map, or a new map for this set |
 | Esc | back to the shell |
@@ -141,6 +143,54 @@ A map (`.MAP`):
 So a game reads the palette into `$040200`, the tiles to where its tile layer's `L_TILEBASE`
 points and the cells to its `L_MAPBASE`, as they are, and sets `L_MAP` to the size.
 
+### Exporting as assembly source
+
+Ctrl+E writes the tile set and the map as assembly source, each a module of its own for a game
+to `INCLUDE` (after `VIDCARD.D`): first the set's (its name asked for, the set's file's with
+`.ASM` to start with), then the map's. Esc at the first goes on to the second, so a second map
+of a set already exported can be exported alone -- several maps share one set's module. Each
+module's labels start with its file's name (`LV1.ASM`: `LV1_...`; an `X` first if that starts
+with a digit), so they don't clash:
+
+| The set's module (`TILES.ASM`) | |
+|---|---|
+| `TILES_TSIZE`, `TILES_BPP`, `TILES_NTILES` | the tile size, bits a pixel, how many tiles |
+| `TILES_TBYTES` | the tiles' bytes, all told (`TILES_THALF`: half that) |
+| `TILES_LMODE` | `L_MODE` for a tile layer showing them (tiles, bits a pixel, 640x480 or not, 16x16 or not) |
+| `TILES_TOCARD` | a routine: the palette into the card, and the tiles to A:X in video memory |
+| `TILES_PAL` | the palette: 256 `FDB`s, RGB565 |
+| `TILES_TILES` | the tiles, `FCB`s as the card holds them, each after a `; tile n` comment |
+
+| The map's module (`LV1.ASM`) | |
+|---|---|
+| `LV1_W`, `LV1_H` | its size, in cells |
+| `LV1_LMAP` | `L_MAP` for a tile layer showing it |
+| `LV1_BYTES` | its cells' bytes |
+| `LV1_TOCARD` | a routine: the cells to A:X in video memory |
+| `LV1_CELLS` | the cells, `FDB`s, a row at a time, each after a `; row n` comment |
+
+A game, then:
+
+```
+            INCLUDE "VIDCARD.D"
+            ...
+            LDA  #$02           ; the tiles to $020000
+            LDX  #$0000
+            JSR  TILES_TOCARD
+            LDA  #$01           ; the map to $016000
+            LDX  #$6000
+            JSR  LV1_TOCARD
+            ...                 ; and a layer: L_MODE TILES_LMODE, L_MAP LV1_LMAP,
+                                ; L_MAPBASE $016000, L_TILEBASE $020000
+            INCLUDE "TILES.ASM"
+            INCLUDE "LV1.ASM"
+```
+
+The data is part of the program then, so it has to fit in its memory beside the code (a
+program can be about 44KB): a large set, or many maps, a game reads from the `.TLS` and `.MAP`
+files instead, whose layout is above -- the palette, tiles and cells in them are in the card's
+form too, ready to be copied through a data port.
+
 ### On the card
 
 TILEKIT sets the card up itself: layer 0 is the map (at `$016000`, up to 32KB; the tiles at
@@ -153,5 +203,4 @@ image at `$036000`). The map's undo steps are copies of it the card makes in its
 
 ### Still to come
 
-Saving as assembly source to `INCLUDE` (milestone 3), metatiles (8x16, 32x32), and the music
-editor.
+Metatiles (8x16, 32x32), and the music editor.

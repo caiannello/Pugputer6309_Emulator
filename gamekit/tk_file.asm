@@ -553,11 +553,19 @@ PROMPTKEY   LDA  KCODE
             CMPA #2
             BEQ  PROMPTKEY2
             JMP  PRSHOWC
-PROMPTKEY2  CLR  MODE
-            JMP  DRAWHELP
+PROMPTKEY2  CLR  MODE           ; Esc: nothing done (or on to what comes next)
+            JSR  DRAWHELP
+            LDX  PRSKIP
+            BEQ  PROMPTKEY3
+            CLR  PRSKIP
+            CLR  PRSKIP+1
+            JMP  ,X
+PROMPTKEY3  RTS
 PROMPTKEY1  CLR  MODE
             TST  PR_BUF
             BEQ  PROMPTKEY2
+            CLR  PRSKIP
+            CLR  PRSKIP+1
             JSR  DRAWHELP
             LDX  #PR_BUF
             LDY  PREXT
@@ -1116,6 +1124,7 @@ DEXT        FDB  0
 MPATH       FDB  0          ; the map's file being saved or opened
 MHANDLE     FCB  0
 PRDONE      FDB  0          ; what to do with a name typed
+PRSKIP      FDB  0          ; and on Esc, if anything
 CONFMSG     FDB  0
 CONFOK      FDB  0          ; what to do on Y
 FPATH       FDB  0

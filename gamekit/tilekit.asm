@@ -41,7 +41,7 @@
 ; The keys: P L F K E the tools, ^Z (or U) undo, C clear, N a new tile, D a
 ; copy of this one, , and . another tile, H and V flip what is put on the map,
 ; + and - (PgUp, PgDn) another color (row), the arrows (Home) scroll the map,
-; ^S save, ^A save as, ^O open, ^N new, Esc quit.
+; ^S save, ^A save as, ^E export as assembly source, ^O open, ^N new, Esc quit.
 ;------------------------------------------------------------------------------
             INCLUDE "defines.d"
             INCLUDE "vidcard.d"
@@ -271,6 +271,8 @@ KEYTAB      FCB  'P
             FDB  SAVECMD
             FCB  $01            ; ^A
             FDB  SAVEASCMD
+            FCB  $05            ; ^E
+            FDB  EXPORTCMD
             FCB  $0F            ; ^O
             FDB  OPENCMD
             FCB  $0E            ; ^N
@@ -1135,6 +1137,7 @@ FLUSHTILE9  RTS
             INCLUDE "tk_map.asm"
             INCLUDE "tk_draw.asm"
             INCLUDE "tk_file.asm"
+            INCLUDE "tk_src.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------
@@ -1228,6 +1231,7 @@ FDOWN       FCB  0
 FILENAME    RMB  PR_MAX+1   ; the tile set's file
 MAPNAME     RMB  PR_MAX+1   ; the map's
 MPATHBUF    RMB  PR_MAX+1
+EXPNAME     RMB  PR_MAX+1   ; an export's name, to start with
 MFSTACK     RMB  MFMAX*2
 TILEBUF     RMB  256        ; the tile being edited, a byte a pixel
 THUMBBUF    RMB  256
