@@ -100,6 +100,10 @@ void vc_reset(vc_card *c) {
     c->color = 15;
     c->font = VC_RESET_FONT;
     c->font_h = 16;
+    c->in_ctrl = 0;
+    c->wheel = 0;
+    c->key_char = 0;
+    c->keyq_head = c->keyq_len = 0;
 }
 
 /* ---- drawing ---- */
@@ -307,14 +311,40 @@ uint8_t vc_read(vc_card *c, uint8_t reg) {
         step_port(c, p);
         return v;
     case VC_STATUS:
-        return (uint8_t)((c->line >= VC_HEIGHT ? VC_STATUS_VBLANK : 0) | (c->cmd_len ? VC_STATUS_BUSY : 0));
+        return (uint8_t)((c->line >= VC_HEIGHT ? VC_STATUS_VBLANK : 0) | (c->cmd_len ? VC_STATUS_BUSY : 0) |
+                         (c->keyq_len ? VC_STATUS_KEY : 0));
     case VC_IEN: return c->ien;
     case VC_ISR: return c->isr;
     case VC_LINE_H: return (uint8_t)(c->line >> 8);
     case VC_LINE_L: return (uint8_t)c->line;
     case VC_FRAME: return c->frame;
+    case VC_IN_CTRL: return c->in_ctrl;
+    case VC_MOUSE_X_H:
+        c->snap_x = c->mouse_x;
+        c->snap_y = c->mouse_y;
+        return (uint8_t)(c->snap_x >> 8);
+    case VC_MOUSE_X_L: return (uint8_t)c->snap_x;
+    case VC_MOUSE_Y_H: return (uint8_t)(c->snap_y >> 8);
+    case VC_MOUSE_Y_L: return (uint8_t)c->snap_y;
+    case VC_MOUSE_BTN: return c->buttons;
+    case VC_MOUSE_WHEEL:
+        v = (uint8_t)c->wheel;
+        c->wheel = 0;
+        return v;
+    case VC_KEY:
+        if (!c->keyq_len) {
+            c->key_char = 0;
+            return 0;
+        }
+        v = c->keyq[c->keyq_head][0];
+        c->key_char = c->keyq[c->keyq_head][1];
+        c->keyq_head = (uint8_t)((c->keyq_head + 1) % VC_KEY_QUEUE);
+        --c->keyq_len;
+        return v;
+    case VC_KEY_CHAR: return c->key_char;
+    case VC_KEY_MODS: return c->mods;
     case VC_ID: return 'V';
-    case VC_VERSION: return 0x10;
+    case VC_VERSION: return 0x11;
     default: return 0;
     }
 }
@@ -334,13 +364,82 @@ void vc_write(vc_card *c, uint8_t reg, uint8_t v) {
     case VC_CTRL:
         if (v & 0x80) vc_reset(c);
         break;
-    case VC_IEN: c->ien = v & 0x07; break;
+    case VC_IEN: c->ien = v & 0x0F; break;
     case VC_ISR: c->isr &= (uint8_t)~v; break;
     case VC_LINE_H: c->irq_line = (uint16_t)((c->irq_line & 0x00FF) | (v & 0x03) << 8); break;
     case VC_LINE_L: c->irq_line = (uint16_t)((c->irq_line & 0xFF00) | v); break;
     case VC_CMD: command_byte(c, v); break;
+    case VC_IN_CTRL:
+        c->in_ctrl = v & (VC_IN_POINTER | VC_IN_KEYS);
+        if (v & VC_IN_FLUSH) c->keyq_head = c->keyq_len = 0;
+        break;
     default: break;
     }
+}
+
+/* ---- input ---- */
+
+void vc_mouse_to(vc_card *c, int x, int y, uint8_t buttons) {
+    uint8_t b = (uint8_t)(0x80 | (buttons & 7));
+    if (x < 0) x = 0;
+    if (x > VC_WIDTH - 1) x = VC_WIDTH - 1;
+    if (y < 0) y = 0;
+    if (y > VC_HEIGHT - 1) y = VC_HEIGHT - 1;
+    if (x != c->mouse_x || y != c->mouse_y || b != c->buttons) c->isr |= VC_IRQ_INPUT;
+    c->mouse_x = (uint16_t)x;
+    c->mouse_y = (uint16_t)y;
+    c->buttons = b;
+}
+
+void vc_mouse_by(vc_card *c, int dx, int dy, uint8_t buttons) {
+    vc_mouse_to(c, c->mouse_x + dx, c->mouse_y + dy, buttons);
+}
+
+void vc_mouse_wheel(vc_card *c, int clicks) {
+    int w = c->wheel + clicks;
+    if (!clicks) return;
+    c->wheel = (int8_t)(w > 127 ? 127 : w < -128 ? -128 : w);
+    c->buttons |= 0x80;
+    c->isr |= VC_IRQ_INPUT;
+}
+
+/* The characters keys type on a US keyboard, by usage code from $04 (A) to $38 (/):
+ * unshifted, then shifted. */
+static const char k_keys[] = "abcdefghijklmnopqrstuvwxyz1234567890\r\x1b\b\t -=[]\\#;'`,./";
+static const char k_shifted[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()\r\x1b\b\t _+{}|~:\"~<>?";
+/* and the keypad's, $54 (/) to $63 (.) */
+static const char k_keypad[] = "/*-+\r1234567890.";
+
+static uint8_t key_char(const vc_card *c, uint8_t usage) {
+    int shift = (c->mods & (VC_MOD_LSHIFT | VC_MOD_RSHIFT)) != 0;
+    uint8_t ch = 0;
+    if (usage >= 0x04 && usage <= 0x38) {
+        if (usage <= 0x1D && c->caps_lock) shift = !shift; /* (letters only) */
+        ch = (uint8_t)(shift ? k_shifted : k_keys)[usage - 0x04];
+    } else if (usage >= 0x54 && usage <= 0x63) {
+        ch = (uint8_t)k_keypad[usage - 0x54];
+    } else if (usage == 0x4C) {
+        ch = 0x7F; /* Delete */
+    }
+    if (ch >= 0x40 && ch < 0x7F && (c->mods & (VC_MOD_LCTRL | VC_MOD_RCTRL))) ch &= 0x1F; /* Ctrl+A is 1 ... */
+    return ch;
+}
+
+void vc_key(vc_card *c, uint8_t usage, int down) {
+    if (usage >= 0xE0 && usage <= 0xE7) {
+        uint8_t bit = (uint8_t)(1u << (usage - 0xE0));
+        c->mods = (uint8_t)(down ? c->mods | bit : c->mods & ~bit);
+    } else if (usage == 0x39 && down) {
+        c->caps_lock = !c->caps_lock;
+    }
+    if (!usage || c->keyq_len == VC_KEY_QUEUE) return; /* (full: the event is lost) */
+    {
+        uint8_t *e = c->keyq[(c->keyq_head + c->keyq_len) % VC_KEY_QUEUE];
+        e[0] = usage;
+        e[1] = (uint8_t)(key_char(c, usage) | (down ? 0 : 0x80));
+        ++c->keyq_len;
+    }
+    c->isr |= VC_IRQ_INPUT;
 }
 
 int vc_irq(const vc_card *c) { return (c->ien & c->isr) != 0; }
@@ -350,6 +449,15 @@ void vc_begin_line(vc_card *c, uint16_t line) {
     if (line == VC_HEIGHT) {
         c->isr |= VC_IRQ_VSYNC;
         ++c->frame;
+        if (c->in_ctrl & VC_IN_POINTER) { /* sprite 0 to the mouse, in the sprites' pixels */
+            int hires = c->cfg[VC_SPR_CTRL] & 1;
+            uint32_t a = be24(c->cfg + VC_SPR_BASE);
+            uint16_t x = hires ? c->mouse_x : c->mouse_x / 2, y = hires ? c->mouse_y : c->mouse_y / 2;
+            c->vram[(a + 2) & VRAM_MASK] = (uint8_t)(x >> 8);
+            c->vram[(a + 3) & VRAM_MASK] = (uint8_t)x;
+            c->vram[(a + 4) & VRAM_MASK] = (uint8_t)(y >> 8);
+            c->vram[(a + 5) & VRAM_MASK] = (uint8_t)y;
+        }
     }
     if (line == c->irq_line) c->isr |= VC_IRQ_LINE;
 }

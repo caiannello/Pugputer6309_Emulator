@@ -12,7 +12,9 @@ with its picture on DVI/HDMI: 640x480 at 60 frames a second. To a program it is 
 - **drawing commands** the card carries out itself: lines, rectangles, circles, discs, triangles,
   characters, blits, memory copies and fills;
 - **interrupts** at vertical blank, at a chosen line, and when the commands are done;
-- **256KB of video memory**, and the board's **8MB PSRAM** for everything else.
+- **256KB of video memory**, and the board's **8MB PSRAM** for everything else;
+- a **mouse and keyboard** on its USB port: the mouse's position and buttons, a queue of key
+  presses and releases, and a pointer (sprite 0) that follows the mouse by itself.
 
 The card's behavior is written once, in portable C (`core/`), which the emulator runs now and the
 card's firmware is to run as well. The emulator shows it in a window (see "In the emulator"). The
@@ -26,7 +28,7 @@ the limits it may impose that the emulator doesn't.
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
 | `tools/bdf2c.py` | makes `vc_font.c` from a BDF font |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
-| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), and `VIDLIB.ASM`, the helpers they share |
+| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), `VIDMOUSE` (the mouse and keyboard), and `VIDLIB.ASM`, the helpers they share |
 | `../basic309/` | BASIC's statements for the card (`SCREEN`, `LINE`, `CIRCLE`, `SPRITE`, ...: `../basic309/README.md`) |
 
 ## Registers ($FF80-$FF9F)
@@ -38,14 +40,22 @@ the limits it may impose that the emulator doesn't.
 | `$05` | `DATA0` | reads or writes the byte at `ADDR0`, then steps |
 | `$06-$0B` | `ADDR1`, `INC1`, `DATA1` | data port 1, the same |
 | `$0C` | `CTRL` | write `$80`: reset the card (see "At reset") |
-| `$0D` | `STATUS` | read: bit 7 in vertical blank, bit 6 commands still running, bit 5 command queue full |
-| `$0E` | `IEN` | interrupt enables: bit 0 vertical blank, 1 line, 2 commands done |
+| `$0D` | `STATUS` | read: bit 7 in vertical blank, bit 6 commands still running, bit 5 command queue full, bit 4 a key event waiting |
+| `$0E` | `IEN` | interrupt enables: bit 0 vertical blank, 1 line, 2 commands done, 3 input |
 | `$0F` | `ISR` | interrupt flags, the same bits; writing 1s clears them. `/IRQ` is low while `IEN AND ISR` isn't 0 |
 | `$10-$11` | `LINE` H, L | read: the line being drawn (0-524; 480-524 are vertical blank). Write: the line for the line interrupt |
 | `$12` | `CMD` | drawing commands, a byte at a time (see "Drawing commands") |
 | `$13` | `FRAME` | frames shown, modulo 256 |
+| `$14` | `INCTRL` | input: bit 0 the pointer (sprite 0 follows the mouse), bit 1 keys go to the card; write bit 7: empty the key queue (see "Mouse and keyboard") |
+| `$15-$16` | `MOUSEX` H, L | read: the mouse's X, 0-639. Reading the high byte takes a snapshot of X and Y |
+| `$17-$18` | `MOUSEY` H, L | read: its Y, 0-479, as of that snapshot |
+| `$19` | `MOUSEB` | read: buttons, bit 0 left, 1 right, 2 middle; bit 7 a mouse has been seen |
+| `$1A` | `WHEEL` | read: wheel clicks since the last read, signed (+ away from you) |
+| `$1B` | `KEY` | read: takes the next key event off the queue, and gives its USB usage code (0: none) |
+| `$1C` | `KEYCHAR` | read: that event's character (0: none); bit 7 set if it was a release |
+| `$1D` | `KEYMODS` | read: the modifier keys held now (USB's modifier byte: bit 0 left Ctrl, 1 left Shift, 2 left Alt, 3 left GUI, 4-7 the right ones) |
 | `$1E` | `ID` | reads `'V'` (`$56`) |
-| `$1F` | `VERSION` | reads `$10` (1.0) |
+| `$1F` | `VERSION` | reads `$11` (1.1; 1.0 had no `$14-$1D`) |
 
 The rest read 0. The multi-byte registers are big-endian, so `STD` and `LDD` work on them:
 `LDA #bank : STA VC_ADDR0 : LDX #addr : STX VC_ADDR0M` points port 0 at `bank:addr`.
@@ -133,6 +143,7 @@ or colors part-way down the screen.
   tearing. `FRAME` counts up then.
 - The line interrupt (bit 1) comes as the line in `LINE` begins.
 - Commands done (bit 2): the queue has emptied.
+- Input (bit 3): a key event was queued, or the mouse moved, clicked or turned its wheel.
 
 A program can poll `ISR` (and write the bit back to clear it), or enable the interrupt in `IEN`
 and handle `/IRQ`, which it shares with the UART and the other cards: take it through the BIOS's
@@ -140,6 +151,40 @@ RAM jump table (`RAM_IRQV` in `bios/defines.d`: keep the old address, put your h
 to the old one when the interrupt isn't the card's, and put it back before `B_EXIT`). A handler
 that writes the card while the program also does should keep a data port to itself -- `VIDGFX`
 sets port 1 on the backdrop with a step of 0 and changes it every 8 lines.
+
+## Mouse and keyboard
+
+The card has a USB host port for a mouse and a keyboard (through a hub, for both). What they do
+is in registers `$14-$1D`, the same on the card and in the emulator (where they are the video
+window's mouse and keys).
+
+**The mouse.** `LDD VC_MOUSEX` then `LDD VC_MOUSEY` read where it is, in 640x480 pixels
+whatever the layers' resolutions (halve them for 320x240): reading `MOUSEX`'s high byte takes a
+snapshot of both, so the pair can't tear as the mouse moves. `MOUSEB` has the buttons, and
+`WHEEL` counts the wheel's clicks until it is read.
+
+**The pointer.** With `INCTRL` bit 0 set, the card puts sprite 0 where the mouse is at the start
+of every vertical blank (writing its X and Y in the sprite table, halved if the sprites are in
+320x240 coordinates). The program draws sprite 0 as an arrow (its hot spot at the image's top
+left) and the pointer moves with no work from the CPU. In the emulator the PC's own pointer is
+hidden over the window while this bit is set.
+
+**Keys.** Each key pressed or released (and pressed again as a held key repeats) is an event in
+a queue of 32. Reading `KEY` takes the oldest one off: its USB HID usage code (the key's
+place, whatever the layout: `$04` A ... `$1D` Z, `$1E` 1 ... `$27` 0, `$28` Enter, `$29` Esc,
+`$4F-$52` the arrows, `$E0-$E7` the modifiers; `vidcard.d` names the rest), or 0 if there was
+none. Then `KEYCHAR` has the character it types on a US keyboard (with Shift, Caps Lock and Ctrl:
+Ctrl+A is 1), 0 for keys like the arrows, with bit 7 set for a release. `KEYMODS` has the
+modifiers held now. `STATUS` bit 4 says an event is waiting. A full queue loses new events;
+writing `$80` to `INCTRL` empties it.
+
+**Whose keys.** In the emulator, keys typed into the video window go to the UART, as the
+terminal's do, until the program sets `INCTRL` bit 1: then they go to the card's queue (and the
+UART sees none of them). A program that takes them should clear the bit before it ends (or
+reset the card, which does). On the card, a USB keyboard's keys always go to the queue, and the
+UART's are the terminal's.
+
+A reset (`CTRL` `$80`) clears `INCTRL` and the queue; it leaves the mouse where it is.
 
 ## Drawing commands
 
@@ -230,7 +275,8 @@ statements for it (`../basic309/README.md`, "Statements for the video card").
 The emulator (`pugputer`, from `simulator/tools/basic309_sdboot_demo.cpp`) has the card at
 `$FF80`, running this same C (`simulator/src/pugputer/video_device.cpp`), its beam in step with
 the CPU's clock. A window opens when a program first uses the card; keys typed into it go to the
-UART like the console's.
+UART like the console's (or, when the program asks for them, to the card's key queue), and its
+mouse is the card's mouse ("Mouse and keyboard").
 
 - While the window is open the emulator keeps to the real machine's speed: 60 frames a second,
   so what waits for vertical blank runs as fast as it would on the Pugputer. `--turbo` lets it
@@ -285,6 +331,13 @@ driven onto D0-D7 until /CS rises -- no CPU in the way. The firmware keeps that 
 line buffers; HSTX's TMDS encoder sends it out as DVI (RGB565 in, 640x480, pixel clock 25.2MHz).
 Core 0 serves the registers and runs the commands. Video memory and the settings are in SRAM;
 the PSRAM (through the XIP cache) is only read by `COPY`, `BLIT` and the ports.
+
+**Mouse and keyboard.** The RP2350's USB port as a host (TinyUSB's HID host, through a small
+hub for a keyboard and a mouse, whose 5V then comes from the bus, not from the board's VBUS
+diode), in the boot protocols: a mouse reports how far it moved, which `vc_mouse_by()` adds up, and a keyboard
+reports the keys held, whose changes become `vc_key()` calls (with the repeat of a held key made
+by the firmware). If USB host turns out not to fit beside the picture, a PIO USB port on spare
+GPIOs, or a separate input card at another address with the same registers, would do instead.
 
 **Limits to confirm on the hardware.** A line takes 31.8us: about 4700 cycles at 150MHz, 8000 at
 252MHz. Three hires layers plus 32 wide sprites on one line may not fit in that. If they don't,

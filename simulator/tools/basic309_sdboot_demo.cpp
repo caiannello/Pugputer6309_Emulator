@@ -35,7 +35,10 @@
 // The video card is at $FF80-$FF9F (pugputer/video_device.hpp, vidcard/README.md). Its
 // picture opens in a window (video_out.hpp) when a program first uses the card; from then
 // on the emulator keeps to the real machine's speed, 60 frames a second, unless --turbo.
-// Keys typed into the window go to the UART, just as the console's do.
+// Keys typed into the window go to the UART, just as the console's do -- unless the program
+// has asked for them (the card's VC_IN_CTRL bit 1), when they go to the card's key queue
+// instead. The window's mouse is the card's mouse, and when the program shows its own pointer
+// (VC_IN_CTRL bit 0) the PC's is hidden over the window.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -426,8 +429,21 @@ int main(int argc, char** argv) {
 
     for (;;) {
         bus.run(20000);
-        uint8_t key;
-        while (screen.poll_key(key)) uart.rx_enqueue(key);
+        VideoOut::Input in;
+        while (screen.poll(in)) {
+            bool keys_to_card = (vcard.input_ctrl() & 0x02) != 0;
+            switch (in.kind) {
+            case VideoOut::Input::Char:
+                if (!keys_to_card) uart.rx_enqueue(in.code);
+                break;
+            case VideoOut::Input::Key:
+                if (keys_to_card) vcard.key(in.code, in.down);
+                break;
+            case VideoOut::Input::Mouse: vcard.mouse_to(in.x, in.y, in.buttons); break;
+            case VideoOut::Input::Wheel: vcard.mouse_wheel(in.clicks); break;
+            }
+        }
+        screen.set_pointer_hidden((vcard.input_ctrl() & 0x01) != 0);
         if (use_com) {
 #ifdef PUGPUTER_HAVE_COM_BRIDGE
             bridge.poll(uart);

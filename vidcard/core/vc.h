@@ -41,18 +41,48 @@ enum {
     VC_LINE_L = 0x11,
     VC_CMD = 0x12,    /* drawing commands, a byte at a time */
     VC_FRAME = 0x13,  /* frames shown, modulo 256 */
+    /* Input: the mouse and keyboard on the card's USB port (the emulator's window). */
+    VC_IN_CTRL = 0x14, /* bit 0 sprite 0 follows the mouse, bit 1 keys go to the card;
+                          write bit 7: empty the key queue */
+    VC_MOUSE_X_H = 0x15, /* read: 0-639 (reading this byte takes a snapshot of X and Y) */
+    VC_MOUSE_X_L = 0x16,
+    VC_MOUSE_Y_H = 0x17, /* read: 0-479, as of the snapshot */
+    VC_MOUSE_Y_L = 0x18,
+    VC_MOUSE_BTN = 0x19,   /* bit 0 left, 1 right, 2 middle; bit 7 a mouse has been seen */
+    VC_MOUSE_WHEEL = 0x1A, /* wheel clicks since the last read, signed (+ is away from the user) */
+    VC_KEY = 0x1B,      /* read: the next key event's USB usage code (0: none) */
+    VC_KEY_CHAR = 0x1C, /* that event's character (0: none), bit 7 set if it was a release */
+    VC_KEY_MODS = 0x1D, /* the modifier keys held now (VC_MOD_*) */
     VC_ID = 0x1E,     /* 'V' */
-    VC_VERSION = 0x1F /* $10: 1.0 */
+    VC_VERSION = 0x1F /* $11: 1.1 */
 };
 #define VC_REGS 0x20
 
 #define VC_STATUS_VBLANK 0x80
 #define VC_STATUS_BUSY 0x40
 #define VC_STATUS_FULL 0x20
+#define VC_STATUS_KEY 0x10 /* a key event is waiting */
 
 #define VC_IRQ_VSYNC 0x01   /* the start of vertical blank (line 480) */
 #define VC_IRQ_LINE 0x02    /* the start of the line set with VC_LINE_H/L */
 #define VC_IRQ_CMDDONE 0x04 /* the command queue has emptied */
+#define VC_IRQ_INPUT 0x08   /* a key event was queued, or the mouse moved or clicked */
+
+#define VC_IN_POINTER 0x01 /* VC_IN_CTRL: sprite 0 is put where the mouse is, each frame */
+#define VC_IN_KEYS 0x02    /* VC_IN_CTRL: keys typed go to the card (the emulator: not the UART) */
+#define VC_IN_FLUSH 0x80   /* VC_IN_CTRL, written: empty the key queue */
+
+/* VC_KEY_MODS: the USB boot keyboard's modifier byte. */
+#define VC_MOD_LCTRL 0x01
+#define VC_MOD_LSHIFT 0x02
+#define VC_MOD_LALT 0x04
+#define VC_MOD_LGUI 0x08
+#define VC_MOD_RCTRL 0x10
+#define VC_MOD_RSHIFT 0x20
+#define VC_MOD_RALT 0x40
+#define VC_MOD_RGUI 0x80
+
+#define VC_KEY_QUEUE 32 /* key events the card holds; more are lost */
 
 /* The display settings, at VC_CFG_BASE + these offsets. */
 enum {
@@ -123,6 +153,16 @@ typedef struct vc_card {
     uint8_t t_bpp, color;
     uint32_t font;
     uint8_t font_h;
+    /* input */
+    uint8_t in_ctrl;
+    uint16_t mouse_x, mouse_y;   /* where the mouse is */
+    uint16_t snap_x, snap_y;     /* as of the last read of VC_MOUSE_X_H */
+    uint8_t buttons;             /* VC_MOUSE_BTN */
+    int8_t wheel;
+    uint8_t mods, caps_lock;
+    uint8_t key_char;            /* VC_KEY_CHAR: the last event taken */
+    uint8_t keyq[VC_KEY_QUEUE][2]; /* usage, character | $80 if released */
+    uint8_t keyq_head, keyq_len;
 } vc_card;
 
 extern const uint8_t vc_font8x16[256 * 16];
@@ -139,6 +179,17 @@ int vc_irq(const vc_card *c); /* the /IRQ output: an enabled flag is set */
 /* The card's address space, without the ports' side effects. */
 uint8_t vc_peek(const vc_card *c, uint32_t addr);
 void vc_poke(vc_card *c, uint32_t addr, uint8_t value);
+
+/* The input side: what the card's USB host (the emulator's window) reports. The mouse,
+ * where it is now (clamped to the screen) or how far it moved, and which buttons are down
+ * (VC_MOUSE_BTN's bits 0-2); the wheel, clicks turned; a key pressed or released, as its
+ * USB HID usage code (page 7: 4 is A, $28 Enter, $E0-$E7 the modifiers). The card works out
+ * the character a key types itself (a US layout), so the firmware and the emulator agree.
+ * vc_reset() leaves the mouse's position and the keys held alone: they are the hardware's. */
+void vc_mouse_to(vc_card *c, int x, int y, uint8_t buttons);
+void vc_mouse_by(vc_card *c, int dx, int dy, uint8_t buttons);
+void vc_mouse_wheel(vc_card *c, int clicks);
+void vc_key(vc_card *c, uint8_t usage, int down);
 
 /* The beam has reached `line` (0-524): the interrupt flags and frame count follow it. */
 void vc_begin_line(vc_card *c, uint16_t line);

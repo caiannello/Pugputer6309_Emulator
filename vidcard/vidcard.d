@@ -31,15 +31,74 @@ VC_ISR      equ  VC_BASE+$0F ; interrupt flags (write 1s to clear)
 VC_LINE     equ  VC_BASE+$10 ; 2 bytes: read the line being drawn, write the line interrupt's
 VC_CMD      equ  VC_BASE+$12 ; drawing commands
 VC_FRAME    equ  VC_BASE+$13 ; frames shown, modulo 256
+VC_INCTRL   equ  VC_BASE+$14 ; input: bit 0 sprite 0 follows the mouse, bit 1 keys
+                             ; go to the card (VC_IN_...); write $80: empty the key queue
+VC_MOUSEX   equ  VC_BASE+$15 ; 2 bytes, 0-639: LDD it first -- reading it takes a
+                             ; snapshot of X and Y together
+VC_MOUSEY   equ  VC_BASE+$17 ; 2 bytes, 0-479 (then LDD this)
+VC_MOUSEB   equ  VC_BASE+$19 ; buttons: bit 0 left, 1 right, 2 middle; 7 a mouse seen
+VC_WHEEL    equ  VC_BASE+$1A ; wheel clicks since the last read (signed; + away)
+VC_KEY      equ  VC_BASE+$1B ; read: the next key event's USB usage code (0: none)
+VC_KEYCHAR  equ  VC_BASE+$1C ; its character (0: none); bit 7 set: a release
+VC_KEYMODS  equ  VC_BASE+$1D ; modifier keys held now (VC_MOD_...)
 VC_ID       equ  VC_BASE+$1E ; reads 'V'
-VC_VERSION  equ  VC_BASE+$1F ; reads $10
+VC_VERSION  equ  VC_BASE+$1F ; reads $11 (1.1; 1.0 had no input registers)
 
 VC_S_VBLANK equ  $80
 VC_S_BUSY   equ  $40
 VC_S_FULL   equ  $20
+VC_S_KEY    equ  $10        ; a key event is waiting in VC_KEY
 VC_I_VSYNC  equ  $01        ; vertical blank begins (line 480)
 VC_I_LINE   equ  $02        ; the line in VC_LINE begins
 VC_I_CMD    equ  $04        ; the command queue has emptied
+VC_I_INPUT  equ  $08        ; a key event queued, or the mouse moved or clicked
+
+; VC_INCTRL
+VC_IN_PTR   equ  $01        ; sprite 0's X, Y set to the mouse's at each vertical blank
+VC_IN_KEYS  equ  $02        ; keys typed go to the card's queue (the emulator: not the UART)
+VC_IN_FLUSH equ  $80        ; (written) empty the key queue
+; VC_MOUSEB
+VC_MB_LEFT  equ  $01
+VC_MB_RIGHT equ  $02
+VC_MB_MID   equ  $04
+; VC_KEYMODS: the USB keyboard's modifier byte
+VC_MOD_LCTL equ  $01
+VC_MOD_LSHF equ  $02
+VC_MOD_LALT equ  $04
+VC_MOD_LGUI equ  $08
+VC_MOD_RCTL equ  $10
+VC_MOD_RSHF equ  $20
+VC_MOD_RALT equ  $40
+VC_MOD_RGUI equ  $80
+VC_MOD_CTL  equ  $11        ; either Ctrl, either Shift, either Alt
+VC_MOD_SHF  equ  $22
+VC_MOD_ALT  equ  $44
+; Some USB usage codes (VC_KEY) of keys that type no character, or the same one as
+; another: the letters are $04 (A) to $1D (Z), the digits $1E (1) to $27 (0).
+K_ENTER     equ  $28
+K_ESC       equ  $29
+K_BKSP      equ  $2A
+K_TAB       equ  $2B
+K_SPACE     equ  $2C
+K_CAPS      equ  $39
+K_F1        equ  $3A        ; ... to F12, $45
+K_INSERT    equ  $49
+K_HOME      equ  $4A
+K_PGUP      equ  $4B
+K_DELETE    equ  $4C
+K_END       equ  $4D
+K_PGDN      equ  $4E
+K_RIGHT     equ  $4F
+K_LEFT      equ  $50
+K_DOWN      equ  $51
+K_UP        equ  $52
+K_KPENTER   equ  $58
+K_LCTRL     equ  $E0        ; the modifiers, $E0-$E7, in VC_MOD_... order
+K_LSHIFT    equ  $E1
+K_LALT      equ  $E2
+K_RCTRL     equ  $E4
+K_RSHIFT    equ  $E5
+K_RALT      equ  $E6
 
 ; The card's address space.
 VC_VRAM     equ  $000000    ; $000000-$03FFFF video memory (256KB)

@@ -101,7 +101,7 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
 - **Video card.** 640x480 in 256 colors (from 65536): three layers of text (80x30), tile maps
   or bitmaps, 128 sprites between them, and drawing commands the card carries out itself, for a
   card built on an RP2350, and statements for it in BASIC. `/DEMO` on the release disk has a demo
-  of each part of it (`VIDDEMO`, `VIDTEXT`, `VIDTILES`, `VIDGFX`) and `/BASIC/VIDEO.BAS` one in BASIC. See
+  of each part of it (`VIDDEMO`, `VIDTEXT`, `VIDTILES`, `VIDGFX`, `VIDMOUSE`) and `/BASIC/VIDEO.BAS` one in BASIC. See
   `vidcard/README.md`.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
   card and banked RAM modeled to the register, and the YMF262 (OPL3) music chip playing through

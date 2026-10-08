@@ -63,7 +63,7 @@ int count_set(Card& k, int w, int h) {
 
 TEST(vidcard_resets_to_a_blank_text_screen_with_the_xterm_palette) {
     Card k;
-    CHECK(vc_read(k.c, VC_ID) == 'V' && vc_read(k.c, VC_VERSION) == 0x10);
+    CHECK(vc_read(k.c, VC_ID) == 'V' && vc_read(k.c, VC_VERSION) == 0x11);
     CHECK(k.color(0) == 0x0000 && k.color(9) == 0xF800 && k.color(15) == 0xFFFF);
     CHECK(k.color(16) == 0x0000 && k.color(196) == 0xF800 && k.color(21) == 0x001F);
     CHECK(k.color(244) == 0x8410); // gray 128
@@ -319,6 +319,115 @@ TEST(vidcard_reset_bit_puts_everything_back) {
     vc_write(k.c, VC_CTRL, 0x80);
     CHECK(k->cfg[VC_DC_CTRL] == 1 && k->cfg[VC_DC_BACK] == 0 && k->vram[VC_RESET_TEXT_MAP] == ' ' && k->ien == 0);
     CHECK(vc_read(k.c, VC_ADDR0_L) == 0 && vc_read(k.c, VC_INC0_L) == 1);
+}
+
+TEST(vidcard_mouse_registers_snapshot_the_position_and_count_the_wheel) {
+    Card k;
+    auto xy = [&](int& x, int& y) { // as LDD VC_MOUSE_X then LDD VC_MOUSE_Y read them
+        x = vc_read(k.c, VC_MOUSE_X_H) << 8;
+        x |= vc_read(k.c, VC_MOUSE_X_L);
+        y = vc_read(k.c, VC_MOUSE_Y_H) << 8;
+        y |= vc_read(k.c, VC_MOUSE_Y_L);
+    };
+    int x, y;
+    CHECK(vc_read(k.c, VC_MOUSE_BTN) == 0); // no mouse seen yet
+    vc_mouse_to(k.c, 300, 200, 1);
+    CHECK((k->isr & VC_IRQ_INPUT) && vc_read(k.c, VC_MOUSE_BTN) == 0x81);
+    xy(x, y);
+    CHECK(x == 300 && y == 200);
+    // Reading X's high byte takes the snapshot: a move after it doesn't tear X or Y.
+    CHECK(vc_read(k.c, VC_MOUSE_X_H) == 1);
+    vc_mouse_by(k.c, -100, 50, 2);
+    CHECK(vc_read(k.c, VC_MOUSE_X_L) == (300 & 0xFF) && vc_read(k.c, VC_MOUSE_Y_L) == 200);
+    xy(x, y);
+    CHECK(x == 200 && y == 250 && vc_read(k.c, VC_MOUSE_BTN) == 0x82);
+    // Kept on the screen.
+    vc_mouse_by(k.c, -1000, 1000, 0);
+    xy(x, y);
+    CHECK(x == 0 && y == 479);
+    vc_mouse_to(k.c, 5000, -3, 0);
+    xy(x, y);
+    CHECK(x == 639 && y == 0);
+    // The wheel: clicks since the last read.
+    vc_mouse_wheel(k.c, 2);
+    vc_mouse_wheel(k.c, -5);
+    CHECK(vc_read(k.c, VC_MOUSE_WHEEL) == 0xFD && vc_read(k.c, VC_MOUSE_WHEEL) == 0);
+    // The input interrupt, when enabled.
+    vc_write(k.c, VC_ISR, 0xFF);
+    vc_write(k.c, VC_IEN, VC_IRQ_INPUT);
+    CHECK(!vc_irq(k.c));
+    vc_mouse_to(k.c, 10, 10, 0);
+    CHECK(vc_irq(k.c));
+    // A reset leaves the mouse where it is.
+    vc_write(k.c, VC_CTRL, 0x80);
+    xy(x, y);
+    CHECK(x == 10 && y == 10 && k->ien == 0);
+}
+
+TEST(vidcard_key_queue_gives_usage_codes_and_the_characters_they_type) {
+    Card k;
+    auto take = [&](int& ch) {
+        int u = vc_read(k.c, VC_KEY);
+        ch = vc_read(k.c, VC_KEY_CHAR);
+        return u;
+    };
+    int ch;
+    CHECK(take(ch) == 0 && ch == 0 && !(vc_read(k.c, VC_STATUS) & VC_STATUS_KEY));
+    vc_key(k.c, 0x04, 1); // a
+    vc_key(k.c, 0x04, 0);
+    CHECK((vc_read(k.c, VC_STATUS) & VC_STATUS_KEY) && (k->isr & VC_IRQ_INPUT));
+    CHECK(take(ch) == 0x04 && ch == 'a');
+    CHECK(take(ch) == 0x04 && ch == ('a' | 0x80)); // its release
+    // Shift, and the modifiers register.
+    vc_key(k.c, 0xE1, 1);
+    CHECK(vc_read(k.c, VC_KEY_MODS) == VC_MOD_LSHIFT);
+    vc_key(k.c, 0x1F, 1); // 2
+    vc_key(k.c, 0xE1, 0);
+    vc_key(k.c, 0x38, 1); // /
+    CHECK(take(ch) == 0xE1 && ch == 0);
+    CHECK(take(ch) == 0x1F && ch == '@');
+    CHECK(take(ch) == 0xE1 && ch == 0x80 && vc_read(k.c, VC_KEY_MODS) == 0);
+    CHECK(take(ch) == 0x38 && ch == '/');
+    // Caps Lock turns letters only; Ctrl makes control characters; arrows type nothing.
+    vc_write(k.c, VC_IN_CTRL, VC_IN_FLUSH);
+    CHECK(vc_read(k.c, VC_KEY) == 0);
+    vc_key(k.c, 0x39, 1);
+    vc_key(k.c, 0x05, 1); // b
+    vc_key(k.c, 0x1E, 1); // 1
+    vc_key(k.c, 0x39, 1);
+    vc_key(k.c, 0xE4, 1); // right Ctrl
+    vc_key(k.c, 0x06, 1); // c
+    vc_key(k.c, 0xE4, 0);
+    vc_key(k.c, 0x52, 1); // up
+    vc_key(k.c, 0x28, 1); // Enter
+    vc_key(k.c, 0x4C, 1); // Delete
+    vc_key(k.c, 0x5A, 1); // keypad 2
+    int seen[11], chars[11];
+    for (int i = 0; i < 11; ++i) seen[i] = take(chars[i]);
+    CHECK(seen[1] == 0x05 && chars[1] == 'B' && chars[2] == '1');
+    CHECK(seen[5] == 0x06 && chars[5] == 3);
+    CHECK(seen[7] == 0x52 && chars[7] == 0 && chars[8] == '\r' && chars[9] == 0x7F && chars[10] == '2');
+    // 32 events at most; the rest are lost.
+    for (int i = 0; i < 40; ++i) vc_key(k.c, 0x04, 1);
+    int n = 0;
+    while (vc_read(k.c, VC_KEY)) ++n;
+    CHECK(n == VC_KEY_QUEUE);
+}
+
+TEST(vidcard_pointer_puts_sprite_0_where_the_mouse_is_each_frame) {
+    Card k;
+    uint32_t s0 = VC_RESET_SPR_BASE;
+    vc_mouse_to(k.c, 301, 151, 0);
+    vc_begin_line(k.c, VC_HEIGHT);
+    CHECK(k->vram[s0 + 3] == 0); // not asked for
+    vc_write(k.c, VC_IN_CTRL, VC_IN_POINTER | VC_IN_KEYS);
+    CHECK(vc_read(k.c, VC_IN_CTRL) == (VC_IN_POINTER | VC_IN_KEYS));
+    vc_begin_line(k.c, VC_HEIGHT);
+    // 320x240 sprite coordinates: halved.
+    CHECK(k->vram[s0 + 2] == 0 && k->vram[s0 + 3] == 150 && k->vram[s0 + 4] == 0 && k->vram[s0 + 5] == 75);
+    k->cfg[VC_SPR_CTRL] = 1;
+    vc_begin_line(k.c, VC_HEIGHT);
+    CHECK(k->vram[s0 + 2] == 1 && k->vram[s0 + 3] == 301 - 256 && k->vram[s0 + 5] == 151);
 }
 
 TEST(vidcard_beam_follows_cpu_time_and_raises_its_interrupts) {

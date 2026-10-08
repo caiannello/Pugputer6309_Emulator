@@ -23,6 +23,7 @@ Pugputer, byte for byte as they were built.
                  ASM -f com vidtext.asm    then VIDTEXT   (text layers)
                  ASM -f com vidtiles.asm   then VIDTILES  (tiles and sprites)
                  ASM -f com vidgfx.asm     then VIDGFX    (bitmaps, commands, interrupts)
+                 ASM -f com vidmouse.asm   then VIDMOUSE  (the mouse and keyboard)
 
   ASMLINK/     the assembler and the linker:
                  CD ASMLINK

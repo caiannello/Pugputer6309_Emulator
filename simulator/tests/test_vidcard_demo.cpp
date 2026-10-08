@@ -163,9 +163,9 @@ TEST(vidcard_demo_vidtext_shows_the_text_layers) {
     }
     CHECK(d.cell(VC_RESET_TEXT_MAP, 4, 3)[0] == 0xC9 && d.cell(VC_RESET_TEXT_MAP, 37, 20)[0] == 0xBC);
     CHECK(d.cell(VC_RESET_TEXT_MAP, 37, 10)[0] == 0xBA && d.cell(VC_RESET_TEXT_MAP, 76, 3)[0] == 0xBB);
-    // The ID and version the card gave, "V" and "1.0".
+    // The ID and version the card gave, "V" and "1.1".
     CHECK(d.cell(VC_RESET_TEXT_MAP, 23, 26)[0] == 'V' && d.cell(VC_RESET_TEXT_MAP, 23, 26)[1] == 226);
-    CHECK(d.cell(VC_RESET_TEXT_MAP, 34, 26)[0] == '1' && d.cell(VC_RESET_TEXT_MAP, 36, 26)[0] == '0');
+    CHECK(d.cell(VC_RESET_TEXT_MAP, 34, 26)[0] == '1' && d.cell(VC_RESET_TEXT_MAP, 36, 26)[0] == '1');
     // The marquee moves; its letters show, doubled, at rows 22-23.
     uint16_t hs = be16(d.layer(1) + VC_L_HSCROLL);
     CHECK(hs > 60);
@@ -326,4 +326,61 @@ TEST(vidcard_demo_vidgfx_shows_bitmaps_commands_and_interrupts) {
     d.key();
     CHECK(d.prompt(100000000));
     CHECK((ram[0x26] << 8 | ram[0x27]) == irqv && d.cfg(VC_DC_CTRL)[0] == 0x01); // the IRQ put back
+}
+
+TEST(vidcard_demo_vidmouse_draws_with_the_mouse_and_takes_the_keys) {
+    Demo d("VIDMOUSE");
+    if (!d.built) return;
+    auto status = [&] { // layer 1's top row, as text
+        std::string t;
+        for (int col = 0; col < 80; ++col) t += static_cast<char>(d.cell(VC_RESET_TEXT_MAP, col, 0)[0]);
+        return t;
+    };
+    auto press = [&](uint8_t usage) {
+        d.v.key(usage, true);
+        d.v.key(usage, false);
+        d.run(0.1);
+    };
+    auto canvas = [&](int x, int y) { return d.vram(static_cast<uint32_t>(y * 320 + x)); };
+    d.type("VIDMOUSE");
+    d.run(1.0);
+    CHECK(d.c().in_ctrl == (VC_IN_POINTER | VC_IN_KEYS) && d.cfg(VC_DC_CTRL)[0] == 0x0B);
+    // The pointer, sprite 0, follows the mouse (at half its pixels: the sprites are 320x240).
+    d.v.mouse_to(200, 100, 0);
+    d.run(0.1);
+    const uint8_t* s0 = d.c().vram + VC_RESET_SPR_BASE;
+    CHECK(be16(s0 + 2) == 100 && be16(s0 + 4) == 50);
+    CHECK(status().find(" X 200 Y 100 BTN 80 COLOR 226") != std::string::npos);
+    // A drag with the left button draws a line on the canvas, in yellow.
+    d.v.mouse_to(200, 100, 1);
+    d.run(0.1);
+    d.v.mouse_to(300, 100, 1);
+    d.run(0.1);
+    d.v.mouse_to(300, 100, 0);
+    d.run(0.1);
+    int drawn = 0;
+    for (int x = 100; x <= 150; ++x) drawn += canvas(x, 50) == 226;
+    CHECK(drawn == 51 && canvas(99, 50) == 0 && canvas(151, 50) == 0 && canvas(120, 51) == 0);
+    // The right button rubs out a 7x7 square.
+    d.v.mouse_to(250, 100, 2);
+    d.run(0.1);
+    d.v.mouse_to(250, 100, 0);
+    CHECK(canvas(122, 50) == 0 && canvas(128, 50) == 0 && canvas(121, 50) == 226 && canvas(129, 50) == 226);
+    // = (+ without Shift) and the wheel change the color; the key's code and character show.
+    press(0x2E);
+    CHECK(status().find("COLOR 227") != std::string::npos);
+    CHECK(status().find("KEY 2E CHAR BD =") != std::string::npos); // (its release: bit 7)
+    d.v.mouse_wheel(3);
+    d.run(0.1);
+    CHECK(status().find("COLOR 230") != std::string::npos);
+    d.v.key(0xE1, true); // Shift held: the modifiers show
+    d.run(0.1);
+    CHECK(status().find("KEY E1 CHAR 00   MODS 02") != std::string::npos);
+    d.v.key(0xE1, false);
+    // C clears the canvas; Esc goes back to the shell, and the keys to the UART.
+    press(0x06);
+    CHECK(canvas(140, 50) == 0);
+    press(0x29);
+    CHECK(d.prompt(100000000));
+    CHECK(d.c().in_ctrl == 0 && d.cfg(VC_DC_CTRL)[0] == 0x01);
 }

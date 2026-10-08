@@ -13,3 +13,4 @@ mkdir -p build
 "$LWASM" programs/ASM/VIDEO/VIDTEXT.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidtext.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/VIDTILES.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidtiles.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/VIDGFX.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidgfx.bin || exit 1
+"$LWASM" programs/ASM/VIDEO/VIDMOUSE.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidmouse.bin || exit 1

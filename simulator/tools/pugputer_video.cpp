@@ -3,9 +3,18 @@
 // which can't be, so it lives in this separate program -- the way the emulator's sound goes
 // to aplay. The emulator starts it (video_out.cpp) and talks to it through two pipes:
 //
-//   stdin   frames, one after another: 640x480 pixels, 4 bytes each (0x00RRGGBB, little-endian
-//           -- as the emulator holds them), rows top first
-//   stdout  what is typed into the window, as a terminal sends it
+//   stdin   frames, one after another: a 4-byte header ('F', flags: bit 0 hide the mouse
+//           pointer -- the program draws its own --, 0, 0), then 640x480 pixels, 4 bytes each
+//           (0x00RRGGBB, little-endian -- as the emulator holds them), rows top first
+//   stdout  what is typed into the window, as a terminal sends it (bytes below $80), and,
+//           each starting with $FF, the keys and the mouse for the card's input registers:
+//             $FF 'K' usage down      a key pressed (down 1, again as it repeats) or released
+//                                     (0); usage is its USB HID usage code, which SDL's
+//                                     scancodes are
+//             $FF 'M' x:2 y:2 buttons the mouse moved, or a button went down or up: x, y in
+//                                     the picture's pixels (signed, high byte first), buttons
+//                                     bit 0 left, 1 right, 2 middle
+//             $FF 'W' clicks          the wheel turned (signed; + is away from the user)
 //
 // It ends when the window is closed (the emulator sees the pipe close) or when stdin ends.
 //
@@ -31,20 +40,28 @@ std::mutex g_lock;
 std::vector<uint8_t> g_frame(kFrameBytes);
 bool g_fresh = false;
 std::atomic<bool> g_input_done{false};
+std::atomic<bool> g_hide_pointer{false};
+
+bool read_all(uint8_t* p, size_t len) {
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(STDIN_FILENO, p + got, len - got);
+        if (n <= 0) return false;
+        got += static_cast<size_t>(n);
+    }
+    return true;
+}
 
 // Reads frames from stdin as they come; the newest one is shown.
 void read_frames() {
     std::vector<uint8_t> buf(kFrameBytes);
     for (;;) {
-        size_t got = 0;
-        while (got < kFrameBytes) {
-            ssize_t n = read(STDIN_FILENO, buf.data() + got, kFrameBytes - got);
-            if (n <= 0) {
-                g_input_done = true;
-                return;
-            }
-            got += static_cast<size_t>(n);
+        uint8_t header[4];
+        if (!read_all(header, sizeof(header)) || header[0] != 'F' || !read_all(buf.data(), kFrameBytes)) {
+            g_input_done = true;
+            return;
         }
+        g_hide_pointer = (header[1] & 1) != 0;
         std::lock_guard<std::mutex> g(g_lock);
         g_frame.swap(buf);
         g_fresh = true;
@@ -61,6 +78,18 @@ void send(const char* s, size_t n) {
 }
 void send(const char* s) { send(s, std::strlen(s)); }
 void send(char c) { send(&c, 1); }
+
+void send_key(SDL_Scancode sc, bool down) {
+    if (sc <= 0 || sc > 0xE7) return; // (not a key the USB keyboard page has)
+    const char rec[4] = {'\xFF', 'K', static_cast<char>(sc), static_cast<char>(down ? 1 : 0)};
+    send(rec, sizeof(rec));
+}
+
+void send_mouse(int x, int y, uint8_t buttons) {
+    const char rec[7] = {'\xFF', 'M', static_cast<char>(x >> 8), static_cast<char>(x), static_cast<char>(y >> 8),
+                         static_cast<char>(y), static_cast<char>(buttons)};
+    send(rec, sizeof(rec));
+}
 
 // The keys that type no character, as a terminal sends them.
 const char* key_sequence(SDL_Keycode k) {
@@ -107,8 +136,13 @@ int main(int argc, char** argv) {
     SDL_StartTextInput();
     std::thread(read_frames).detach();
 
-    bool open = true;
+    bool open = true, hidden = false;
+    uint8_t buttons = 0;
     while (open && !g_input_done) {
+        if (hidden != g_hide_pointer) {
+            hidden = g_hide_pointer;
+            SDL_ShowCursor(hidden ? SDL_DISABLE : SDL_ENABLE);
+        }
         SDL_Event e;
         bool got = SDL_WaitEventTimeout(&e, 5) != 0;
         while (got) {
@@ -117,7 +151,26 @@ int main(int argc, char** argv) {
             } else if (e.type == SDL_TEXTINPUT) {
                 for (const char* s = e.text.text; *s; ++s)
                     if (static_cast<unsigned char>(*s) < 0x80) send(*s);
+            } else if (e.type == SDL_KEYUP) {
+                send_key(e.key.keysym.scancode, false);
+            } else if (e.type == SDL_MOUSEMOTION) {
+                // (In the picture's pixels: SDL_RenderSetLogicalSize has the renderer scale them.)
+                send_mouse(e.motion.x, e.motion.y, buttons);
+            } else if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) {
+                uint8_t bit = 0;
+                if (e.button.button == SDL_BUTTON_LEFT) bit = 1;
+                else if (e.button.button == SDL_BUTTON_RIGHT) bit = 2;
+                else if (e.button.button == SDL_BUTTON_MIDDLE) bit = 4;
+                buttons = static_cast<uint8_t>(e.type == SDL_MOUSEBUTTONDOWN ? buttons | bit : buttons & ~bit);
+                send_mouse(e.button.x, e.button.y, buttons);
+            } else if (e.type == SDL_MOUSEWHEEL) {
+                int clicks = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
+                if (clicks) {
+                    const char rec[3] = {'\xFF', 'W', static_cast<char>(clicks)};
+                    send(rec, sizeof(rec));
+                }
             } else if (e.type == SDL_KEYDOWN) {
+                send_key(e.key.keysym.scancode, true);
                 SDL_Keycode k = e.key.keysym.sym;
                 if (k == SDLK_RETURN || k == SDLK_KP_ENTER) send('\r');
                 else if (k == SDLK_BACKSPACE) send('\b');

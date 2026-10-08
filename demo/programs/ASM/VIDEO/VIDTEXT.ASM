@@ -111,7 +111,7 @@ COLCELL     LDA  #$20
             LDB  #250
             LDE  #0
             JSR  PRINT
-            LDA  VC_VERSION     ; ... and version: $10 is 1.0
+            LDA  VC_VERSION     ; ... and version: $11 is 1.1
             LSRA
             LSRA
             LSRA

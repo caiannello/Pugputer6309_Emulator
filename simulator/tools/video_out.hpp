@@ -1,5 +1,6 @@
-// The video card's picture in a window (pugputer/video_device.hpp's VideoSink), and the
-// keys typed into it, for the UART -- so the window can be used like the terminal.
+// The video card's picture in a window (pugputer/video_device.hpp's VideoSink), and what is
+// done in it: the characters typed, for the UART -- so the window can be used like the
+// terminal -- and the keys pressed and released and the mouse, for the card's input registers.
 //
 // The window opens with the first frame, which is when a program first uses the card, and
 // takes every frame after that, holding the emulator to the card's 60 frames a second of real
@@ -32,8 +33,21 @@ public:
     bool wants_frame() override;
     void frame(const uint32_t* pixels) override;
 
-    // The next byte typed into the window, if any.
-    bool poll_key(uint8_t& byte);
+    // What happened in the window, oldest first: a character typed (for the UART), a key
+    // pressed or released (its USB HID usage code, for the card), the mouse moved or a button
+    // went up or down, the wheel turned.
+    struct Input {
+        enum Kind { Char, Key, Mouse, Wheel } kind = Char;
+        uint8_t code = 0;    // Char: the byte; Key: the usage code
+        bool down = false;   // Key
+        int x = 0, y = 0;    // Mouse: in the card's 640x480 pixels (may be off the picture)
+        uint8_t buttons = 0; // Mouse: bit 0 left, 1 right, 2 middle
+        int clicks = 0;      // Wheel: + is away from the user
+    };
+    bool poll(Input& in);
+
+    // Hide the PC's mouse pointer over the window: the program shows its own.
+    void set_pointer_hidden(bool hidden);
 
     struct Impl;
 

@@ -40,6 +40,14 @@ void VideoDevice::reset() {
     tick(0); // line 0 begins
 }
 
+void VideoDevice::mouse_to(int x, int y, uint8_t buttons) { vc_mouse_to(card_.get(), x, y, buttons); }
+
+void VideoDevice::mouse_wheel(int clicks) { vc_mouse_wheel(card_.get(), clicks); }
+
+void VideoDevice::key(uint8_t usage, bool down) { vc_key(card_.get(), usage, down ? 1 : 0); }
+
+uint8_t VideoDevice::input_ctrl() const { return card_->in_ctrl; }
+
 bool VideoDevice::irq_asserted() const { return vc_irq(card_.get()) != 0; }
 
 void VideoDevice::tick(uint32_t cpu_cycles) {

@@ -51,6 +51,14 @@ public:
     void tick(uint32_t cpu_cycles) override;
     bool irq_asserted() const override;
 
+    // The mouse and keyboard (the window's, or a test's): see vc.h, vc_mouse_to and vc_key.
+    void mouse_to(int x, int y, uint8_t buttons);
+    void mouse_wheel(int clicks);
+    void key(uint8_t usage, bool down);
+    // The program's VC_IN_CTRL: bit 0, sprite 0 is its mouse pointer; bit 1, it takes the
+    // keys typed into the window (they go to the card, not the UART).
+    uint8_t input_ctrl() const;
+
     // Written to since the last reset.
     bool active() const { return active_; }
     // The last frame drawn (0x00RRGGBB).

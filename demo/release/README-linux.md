@@ -185,6 +185,7 @@ where it is, in the terminal. Keys typed into the window go to the Pugputer as w
 | `/DEMO/VIDTEXT` | text: the 256 characters and 256 colors, a 320x240 marquee over them; then an 8x8 font made from the card's own, 80x60 cells scrolling under a heading that stays put |
 | `/DEMO/VIDTILES` | tiles and sprites: three layers scrolling at their own speeds (8x8 and 16x16 tiles, 2 and 8 bits a pixel, flipped, in palettes of their own), sprites of every size between and in front of them; then 128 sprites at 640x480, and the 32-a-line limit |
 | `/DEMO/VIDGFX` | bitmaps and drawing: every drawing command at 640x480 in 16 colors, palette cycling; then bitmaps of 8, 2 and 1 bits a pixel, bars of color set by a line interrupt, an animation drawn in the PSRAM |
+| `/DEMO/VIDMOUSE` | the mouse and keyboard: draw on a canvas with the mouse (left button draws, right rubs out, the wheel or + and - change the color, C clears), with the mouse's position and buttons and the last key's code, character and modifiers shown; the pointer is a sprite the card moves itself. Click into the video window first: the keys typed there go to the program. Esc quits |
 | `/BASIC/VIDEO.BAS` | the same from BASIC: `SCREEN`, `LINE`, `CIRCLE`, `SPRITE` and the rest |
 
 A key moves a demo on to its next page, and after its last page back to the shell. Their sources
