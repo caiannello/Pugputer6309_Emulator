@@ -175,7 +175,8 @@ SPRITE0     FDB  GK_PTR/32,0,0
 ; The new set's questions: what kind of tiles, how big a map -- or a new map
 ; for the tile set there is.
 ;------------------------------------------------------------------------------
-NEWDIALOG   JSR  DLGCUR
+NEWDIALOG   CLR  DLGKIND
+            JSR  DLGCUR
             LDA  MAPWC
             STA  NWC
             LDA  MAPHC
@@ -185,7 +186,9 @@ NEWDIALOG   JSR  DLGCUR
             STA  MODE
             JMP  REDRAWALL      ; (the panel is the questions now)
 ; SHOWDLG: the questions, in the panel: a row each, its key first.
-SHOWDLG     JSR  BARTEXT
+SHOWDLG     TST  DLGKIND        ; (the layer's questions: tk_ldlg.asm)
+            LBNE SHOWLDLG
+            JSR  BARTEXT
             LDB  #0
             LDX  #T_DLG0
             JSR  DLGLINE
@@ -274,7 +277,9 @@ DLGCUR      LDA  TSIZE
 ; HIDEDLG: the questions away: the panel as it was.
 HIDEDLG     CLR  MODE
             JMP  REDRAWALL
-DLGKEY      JSR  UPCHAR
+DLGKEY      TST  DLGKIND
+            LBNE LDLGKEY
+            JSR  UPCHAR
             LDA  KCODE
             CMPA #K_ESC
             LBEQ DLGCANCEL
@@ -495,7 +500,9 @@ STRCPY      LDA  ,X+
             BNE  STRCPY
             RTS
 ; DLGMOUSE: a click on a row of the questions is its key.
-DLGMOUSE    LDA  PRESSED
+DLGMOUSE    TST  DLGKIND
+            LBNE LDLGMOUSE
+            LDA  PRESSED
             BITA #VC_MB_LEFT
             BEQ  DLGMOUSE9
             CLR  KCODE

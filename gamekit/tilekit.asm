@@ -290,6 +290,8 @@ KEYTAB      FCB  'P
             FDB  SAVEASCMD
             FCB  $05            ; ^E
             FDB  EXPORTCMD
+            FCB  $0C            ; ^L
+            FDB  LAYERDLG
             FCB  $0F            ; ^O
             FDB  OPENCMD
             FCB  $0E            ; ^N
@@ -410,8 +412,8 @@ HTPANEL     SUBD #PANELX
             SUBB #LAYBARCOL
             LBLO HTNONE
             CLRA
-            DIVD #3
-            CMPB #3
+            DIVD #3             ; (0-2 the layers, 3 the ...)
+            CMPB #4
             LBHS HTNONE
             LDA  #R_LAYER
             RTS
@@ -1235,6 +1237,7 @@ SETTROW     PSHS A
             INCLUDE "tk_src.asm"
             INCLUDE "tk_ini.asm"
             INCLUDE "tk_layer.asm"
+            INCLUDE "tk_ldlg.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------

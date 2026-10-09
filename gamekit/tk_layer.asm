@@ -437,12 +437,21 @@ DRAWLAY3    STA  TXBG
             INCB
             CMPB #3
             BNE  DRAWLAY1
+            JSR  PANELTEXT      ; and ..., the layer's questions
+            LDA  #$20
+            JSR  TXCH
+            LDA  UI_MID
+            STA  TXBG
+            LDX  #T_DOTS
+            JSR  TXSTR
             JSR  PANELTEXT
-            LDB  #5
+            LDB  #2
             JMP  TXSPC
 ; LAYERCLICK: the button at place B in the bar: edit that layer, or (the right
 ; button) show or hide it.
-LAYERCLICK  LDX  #ORDER
+LAYERCLICK  CMPB #3            ; (the ...)
+            LBEQ LAYERDLG
+            LDX  #ORDER
             LDB  B,X
             LDA  PRESSED
             BITA #VC_MB_RIGHT
@@ -504,6 +513,7 @@ LAYERPOS9   TSTB
             RTS
 ;------------------------------------------------------------------------------
 T_LAYERS    FCN  " LAYERS "
+T_DOTS      FCN  "..."
 CURL        FCB  0          ; the layer being edited (0-2)
 CURSET      FCB  0          ; its tile set's slot
 ORDER       FCB  0,1,2      ; the layers, from the back

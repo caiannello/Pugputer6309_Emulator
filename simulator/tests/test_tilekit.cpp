@@ -56,6 +56,7 @@ struct Kit {
             disk_file("TK_SRC.ASM", host_file(repo + "/gamekit/tk_src.asm")),
             disk_file("TK_INI.ASM", host_file(repo + "/gamekit/tk_ini.asm")),
             disk_file("TK_LAYER.ASM", host_file(repo + "/gamekit/tk_layer.asm")),
+            disk_file("TK_LDLG.ASM", host_file(repo + "/gamekit/tk_ldlg.asm")),
             disk_file("GK_UI.ASM", host_file(repo + "/gamekit/gk_ui.asm")),
             disk_file("DEFINES.D", host_file(repo + "/bios/defines.d")),
             disk_file("VIDCARD.D", host_file(repo + "/vidcard/vidcard.d")),
@@ -904,4 +905,73 @@ TEST(tilekit_fits_a_layers_tiles_beside_its_map) {
     k.key(0x28);
     k.frames(20);
     CHECK(k.shows(29, "MAP 032x064") && k.ram16("MAXT") > 64);
+}
+
+TEST(tilekit_changes_a_layer_keeping_what_converts) {
+    Kit k;
+    if (!k.ok) return;
+    k.type("TILEKIT");
+    k.frames(60);
+    k.key(0x28);
+    k.frames(30);
+    auto hw = [&](int n) { return k.c().cfg + VC_LAYER0 + VC_LAYER_SIZE * n; };
+    auto base = [&](const uint8_t* l, int at) { return static_cast<uint32_t>(l[at] << 16 | l[at + 1] << 8 | l[at + 2]); };
+    // Tile 1: a dot at 0,0 in color 15 of row 2 (47); on the map at 1,1 and 60,60.
+    k.key(0x11);
+    k.click(kPanelX + 8 + 15 * 10 + 4, 192 + 2 * 8 + 3);
+    k.click(Kit::zx(0), Kit::zy(0));
+    k.click(Kit::mx(1), Kit::my(1));
+    for (int i = 0; i < 4; ++i) k.key(0x4F, true); // (scrolled 32 cells across ...)
+    for (int i = 0; i < 2; ++i) k.key(0x51, true); // (... and 16 down)
+    k.click(Kit::mx(60 - 32), Kit::my(40 - 16));
+    k.key(0x4A); // Home
+    CHECK(k.cell(1, 1) == 0x2001 && k.cell(60, 40) == 0x2001);
+    // The layer's questions: the ... in the layer bar.
+    k.click(kPanelX + (76 - 58) * 8 + 4, 8);
+    CHECK(k.shows(2, "LAYER 1") && k.shows(4, "TILES  ITS OWN") && k.shows(8, "MAP W  64"));
+    // A wider map: the cells stay where they were.
+    k.key(0x1A); // W: 128
+    k.key(0x28);
+    k.frames(20);
+    CHECK(k.shows(29, "MAP 128x064") && k.cell(1, 1, 128) == 0x2001 && k.cell(60, 40, 128) == 0x2001);
+    CHECK(k.cell(100, 1, 128) == 0 && base(hw(0), VC_L_MAPBASE) == 0x00C000 - 0x4000);
+    // A smaller one (^L): what is past it is cut off.
+    k.key(0x0F, false, true); // ^L
+    k.key(0x1A); // 256
+    k.key(0x1A); // 32
+    k.key(0x28);
+    k.frames(20);
+    CHECK(k.shows(29, "MAP 032x064") && k.cell(1, 1, 32) == 0x2001 && k.cell(28, 28, 32) == 0);
+    // 16 colors -> 256: the tiles kept, each pixel in its row.
+    k.key(0x0F, false, true);
+    k.key(0x07); // D
+    k.key(0x28);
+    k.frames(30);
+    CHECK(k.shows(29, " 8x8 256") && k.vram(k.var24("TBASE") + 64) == 47 && k.vram(k.var24("TBASE") + 65) == 0);
+    CHECK((hw(0)[VC_L_MODE] & 0x18) == 0x18);
+    // 16x16: the tile set starts again -- once you say so.
+    k.key(0x0F, false, true);
+    k.key(0x17); // T
+    k.key(0x28);
+    CHECK(k.shows(28, "STARTS AGAIN"));
+    k.key(0x11); // N: no
+    CHECK(k.shows(29, " 8x8 256"));
+    k.key(0x0F, false, true);
+    k.key(0x17);
+    k.key(0x28);
+    k.key(0x1C); // Y
+    k.frames(20);
+    CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 16x16 256"));
+    // Layer 2: a tile set of its own (S), 640x480 (R).
+    k.key(0x1F); // 2
+    k.key(0x0F, false, true);
+    CHECK(k.shows(2, "LAYER 2") && k.shows(4, "TILES  LAYER 1'S"));
+    k.key(0x16); // S: its own
+    CHECK(k.shows(4, "TILES  ITS OWN") && k.shows(5, "8x8"));
+    k.key(0x15); // R
+    k.key(0x28);
+    k.frames(30);
+    CHECK(k.ram("CURSET") == 1 && base(hw(1), VC_L_TILEBASE) == 0x00C000 && base(hw(0), VC_L_TILEBASE) == 0);
+    CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8 16") && (hw(1)[VC_L_MODE] & 0x04) && !(hw(0)[VC_L_MODE] & 0x04));
+    k.dump("9-layer-dialog");
 }
