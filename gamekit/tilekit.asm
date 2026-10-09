@@ -50,16 +50,23 @@ TK_BASE     equ  $4000
 TK_STACK    equ  $EF00
 
 ; Video memory.
-PANEL       equ  $000000    ; the right-hand panel: a bitmap, 176x480, 8 bits a pixel
-MAPV        equ  $016000    ; layer 0's map: up to 32KB
-TILES       equ  $020000    ; the tile set: up to 64KB
-CURIMG      equ  $036000    ; sprite 1's image: the frame round a cell, up to 32x32
+TILES       equ  $000000    ; the tile set: up to 64KB
+MAPV        equ  $010000    ; layer 0's map: up to 32KB
+PCOL0       equ  $024000    ; the panel (a surface: gk_ui.asm): 4 columns, 64, 64,
+PCOL1       equ  $02B800    ;   32 and 16 wide, 480 high
+PCOL2       equ  $033000
+PCOL3       equ  $036C00
+SCOL        equ  $038A00    ; the status rows: 7 columns of 64x32, one of 16x32
+CURIMG      equ  $03C400    ; sprite 1's image: the frame round a cell, up to 32x32
+                            ; ($03C800-$03C9FF the pointer and scratch: gk_ui.asm;
+                            ; $03CC00 the sprite table; $03F000 the card's font)
 PSUNDO      equ  $800000    ; (the PSRAM) the map's undo steps, 32KB each
 
 VIEWW       equ  464        ; the map's part of the screen
 VIEWH       equ  448
 
-; The panel, in its own pixels (it starts 464 pixels across the screen).
+; The panel, in its own pixels (it starts 464 pixels across the screen): a
+; surface, shown by sprites -- the card's three layers are all the map's.
 PANELX      equ  464
 PANELW      equ  176
 TOOLY       equ  20         ; the tool buttons: 7 of 22x22, 25 apart, from x 1
@@ -1262,8 +1269,6 @@ HOVX        FCB  $FF        ; the cell under the mouse ($FF: none)
 HOVY        FCB  $FF
 CURSZ       FCB  16         ; the frame round it, its size on the screen
 CURATTR     FCB  0          ;   (its sprite size bits)
-MASKC       FCB  0
-MASKR       FCB  0
 PANMX       FDB  0          ; a move with the middle button: where it started
 PANMY       FDB  0
 PANSX       FDB  0

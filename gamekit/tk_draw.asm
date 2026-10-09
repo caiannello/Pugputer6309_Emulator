@@ -2,10 +2,10 @@
 ; PROJECT: Pugputer 6309 game kit
 ;    FILE: tk_draw.asm
 ;
-; TILEKIT's screen: the panel's parts (a bitmap drawn by the card's commands,
-; with tiles put together in GK_SCRATCH and BLIT there), and the text rows. (The
-; map on the left is the card's own tile layer: tk_map.asm.) INCLUDEd by
-; tilekit.asm.
+; TILEKIT's screen: the panel's parts (a surface, gk_ui.asm: drawn by the
+; card's commands, with tiles put together in GK_SCRATCH and BLIT there), and
+; the text rows. (The map on the left is the card's own tile layer: tk_map.asm.)
+; INCLUDEd by tilekit.asm.
 ;------------------------------------------------------------------------------
 ; REDRAWALL: everything, in the editor's colors as they are now.
 REDRAWALL   LDA  #VC_CFG/$10000 ; the backdrop
@@ -20,7 +20,17 @@ REDRAWALL   LDA  #VC_CFG/$10000 ; the backdrop
             LDW  #PANELW
             LDU  #480
             JSR  FRECTR
-            JSR  DRAWTOOLS
+            LDA  #58            ; (its text wiped too)
+            LDB  #22
+            JSR  TXFORGET
+            LDA  MODE           ; (the questions instead, while they are asked)
+            CMPA #M_DIALOG
+            BNE  REDRAWALL0
+            JSR  SHOWDLG
+            JSR  DRAWSTATUS
+            JSR  MAPSETUP
+            LBRA DRAWHELP
+REDRAWALL0  JSR  DRAWTOOLS
             JSR  DRAWZOOM
             JSR  DRAWPAL
             JSR  DRAWSLID
@@ -28,13 +38,9 @@ REDRAWALL   LDA  #VC_CFG/$10000 ; the backdrop
             JSR  DRAWTSLABEL
             JSR  DRAWTITLE
             JSR  DRAWSTATUS
-            JSR  MAPSETUP       ; (the cover and the cell's frame in the colors)
+            JSR  MAPSETUP       ; (the cell's frame in the colors)
             LDA  MODE           ; and the bottom row as it is
-            CMPA #M_DIALOG
-            BNE  REDRAWALL1
-            JSR  SHOWDLG
-            LBRA DRAWHELP
-REDRAWALL1  CMPA #M_EDIT
+            CMPA #M_EDIT
             LBEQ DRAWHELP
             JMP  PRSHOWC
 ; DISPCOL: the color pixel value A shows in: 0 (see-through) as UI_BG; in a

@@ -7,18 +7,45 @@
 ;
 ;   WAITVB WAITCMD          the next vertical blank; the card's commands done
 ;   PORT0 PORT1             a data port to A:X, step 1
-;   FRECTR ORECTR BLIT16    shapes and 16x16 images, by drawing command
+;   FRECTR ORECTR BLIT16    shapes and 16x16 images, on a surface (below)
 ;   MASK16                  a 16x16 one-bit picture into GK_SCRATCH, to BLIT16
+;   MKUISPR                 the sprites that show the surfaces
 ;   POLLIN GETKEY           the mouse and the keys
-;   TXAT TXCH TXSTR ...     text on the 80x30 text layer (the card's reset one)
+;   TXAT TXCH TXSTR ...     text, 80x30 cells of 8x16, on the surfaces
 ;   RDPAL SETPAL UICOLORS   the palette, and the colors the editor itself uses
 ;   MKPTR                   the mouse pointer: sprite 0, which the card moves
 ;   PRSTART PRKEY PRSHOW    a line of typing (a file name)
 ;
+; The editors leave all three of the card's layers to what they edit: they draw
+; themselves on SURFACES, bitmaps in video memory that sprites show, in front of
+; the layers. The program lists them at GK_SURFS (descriptors, 0 after them):
+;
+;   +0  the surface's left edge on the screen, +2 its top, +4 its width, +6 its
+;       height (2 bytes each); +8 how many columns it is in; then each column:
+;       its x in the surface (2), its width (2: 8, 16, 32 or 64), its bitmap's
+;       address in video memory (3, a multiple of 32): the column's width x the
+;       surface's height, 8 bits a pixel -- shown by a column of sprites, 64
+;       high (the last 32, 16 or 8), from sprite 2 on (0 is the pointer, 1 the
+;       program's)
+;
+; Shapes go on the surface CURSURF, in its coordinates; text on whichever has
+; the cell. Color 0 shows through (it is a sprite's), so nothing draws in it.
+;
 ; Routines change any register but S unless they say otherwise.
 ;------------------------------------------------------------------------------
-GK_PTR      equ  $037800    ; the pointer's image: 16x16, 8 bits a pixel
-GK_SCRATCH  equ  $037900    ; 256 bytes for MASK16 and the like, then BLIT16
+GK_PTR      equ  $03C800    ; the pointer's image: 16x16, 8 bits a pixel
+GK_SCRATCH  equ  $03C900    ; 256 bytes for MASK16 and the like, then BLIT16
+GK_SPRTAB   equ  $03CC00    ; the sprite table (the program points SPR_BASE at it)
+SF_X        equ  0          ; a surface descriptor (above)
+SF_Y        equ  2
+SF_W        equ  4
+SF_H        equ  6
+SF_N        equ  8
+SF_COLS     equ  9
+COL_X       equ  0          ;   and each column's
+COL_W       equ  2
+COL_A       equ  4
+COLSIZE     equ  7
 PR_MAX      equ  40         ; the longest line PRKEY takes
 
 ; WAITVB: wait for the next vertical blank.
@@ -52,7 +79,8 @@ CMDD        STA  VC_CMD
             STB  VC_CMD
             RTS
 ;------------------------------------------------------------------------------
-; Shapes, drawn by the card into the current target.
+; Shapes, drawn by the card on the surface CURSURF (in its coordinates): into
+; each of its columns the shape reaches, the column the card's target.
 ;------------------------------------------------------------------------------
 ; FRECTR: a filled rectangle at X, Y, W wide, U high, in color A.
 ; ORECTR: its outline. (Both keep X, Y, W and U.)
@@ -63,40 +91,191 @@ SHAPER      STX  GX
             STY  GY
             STW  GW
             STU  GH
-            PSHS B
-            LDB  #C_COLOR
-            STB  VC_CMD
+            STA  GK_COL
+            STB  GK_OP
+            PSHS X,Y,U
+            LDX  CURSURF
+            STX  TGTSURF
+            LDB  SF_N,X
+            LEAY SF_COLS,X
+SHAPER1     PSHS B
+            BSR  COLHIT
+            BLE  SHAPER8
+            JSR  SELTGT
+            LDA  #C_COLOR
             STA  VC_CMD
-            PULS B
-            STB  VC_CMD
-            LDD  GX
+            LDA  GK_COL
+            STA  VC_CMD
+            LDA  GK_OP
+            STA  VC_CMD
+            LDD  GX             ; (x in the column)
+            SUBD COL_X,Y
             BSR  CMDD
             LDD  GY
             BSR  CMDD
             LDD  GW
             BSR  CMDD
             LDD  GH
-            BRA  CMDD
-; BLIT16: GK_SCRATCH, 16x16 at 8 bits a pixel, to X, Y of the target; A: 1 if
-; its 0s are to be left out (see-through), else 0.
-BLIT16      PSHS A
+            BSR  CMDD
+SHAPER8     LEAY COLSIZE,Y
+            PULS B
+            DECB
+            BNE  SHAPER1
+            PULS X,Y,U,PC
+; COLHIT: does GX, GW reach into column Y? (GT if so: BLE skips it.)
+COLHIT      LDD  COL_X,Y        ; the column's right edge past GX?
+            ADDD COL_W,Y
+            CMPD GX
+            BLE  COLHIT9
+            LDD  GX             ; and GX + GW past its left edge?
+            ADDD GW
+            CMPD COL_X,Y
+COLHIT9     RTS
+; SELTGT: the card's drawing target column Y of the surface TGTSURF (unless it
+; is already). (Y kept.)
+SELTGT      CMPY CURTGT
+            BEQ  SELTGT9
+            STY  CURTGT
+            LDA  #C_TARGET
+            STA  VC_CMD
+            LDA  COL_A,Y
+            STA  VC_CMD
+            LDD  COL_A+1,Y
+            JSR  CMDD
+            LDD  COL_W,Y        ; its stride, and width
+            JSR  CMDD
+            JSR  CMDD
+            LDX  TGTSURF
+            LDD  SF_H,X
+            JSR  CMDD
+            LDA  #8
+            STA  VC_CMD
+SELTGT9     RTS
+; BLIT16: GK_SCRATCH, 16x16 at 8 bits a pixel, to X, Y of CURSURF; A: 1 if its
+; 0s are to be left out (see-through), else 0.
+BLIT16      STA  GK_OP
+            STX  GX
+            STY  GY
+            LDD  #16
+            STD  GW
+            LDX  CURSURF
+            STX  TGTSURF
+            LDB  SF_N,X
+            LEAY SF_COLS,X
+BLIT161     PSHS B
+            BSR  COLHIT
+            BLE  BLIT168
+            BSR  SELTGT
             LDA  #C_BLIT
             STA  VC_CMD
             LDA  #GK_SCRATCH/$10000
             STA  VC_CMD
             LDD  #GK_SCRATCH&$FFFF
-            BSR  CMDD
+            JSR  CMDD
             LDD  #16            ; its stride, width, height
-            BSR  CMDD
-            BSR  CMDD
-            BSR  CMDD
-            TFR  X,D
-            BSR  CMDD
-            TFR  Y,D
-            BSR  CMDD
-            PULS A
+            JSR  CMDD
+            JSR  CMDD
+            JSR  CMDD
+            LDD  GX
+            SUBD COL_X,Y
+            JSR  CMDD
+            LDD  GY
+            JSR  CMDD
+            LDA  GK_OP
             STA  VC_CMD
+BLIT168     LEAY COLSIZE,Y
+            PULS B
+            DECB
+            BNE  BLIT161
             RTS
+; MKUISPR: the sprites that show the surfaces, from sprite 2 on; GK_NSPR how many.
+MKUISPR     CLR  GK_NSPR
+            LDA  #GK_SPRTAB/$10000
+            LDX  #(GK_SPRTAB+16)&$FFFF
+            JSR  PORT0
+            LDU  #GK_SURFS
+MKUISPR1    LDX  ,U++           ; each surface
+            LBEQ MKUISPR9
+            STX  TGTSURF
+            LDB  SF_N,X
+            LEAY SF_COLS,X
+MKUISPR2    PSHS B              ; each column
+            CLRD
+            STD  GK_T           ; (y down it)
+MKUISPR3    LDX  TGTSURF        ; each sprite down it: 64 high, or what is left
+            LDD  SF_H,X
+            SUBD GK_T
+            CMPD #64
+            BLS  MKUISPR4
+            LDD  #64
+MKUISPR4    STB  GK_BITS        ; (its height)
+            LDA  GK_T+1         ; its image: the column's address + y * width, / 32
+            LDB  COL_W+1,Y
+            MUL                 ; (y is a multiple of 64: its low byte, x width,
+            PSHS D              ; and its high byte x width x 256)
+            LDA  GK_T
+            LDB  COL_W+1,Y
+            MUL
+            TFR  B,A
+            CLRB
+            ADDD ,S++
+            ADDD COL_A+1,Y
+            PSHS D
+            LDA  COL_A,Y
+            ADCA #0
+            STA  GK_COL         ; (bits 23-16)
+            PULS D
+            LDF  #5
+MKUISPR5    LSR  GK_COL
+            RORA
+            RORB
+            DECF
+            BNE  MKUISPR5
+            STA  VC_DATA0
+            STB  VC_DATA0
+            LDX  TGTSURF        ; X, Y on the screen
+            LDD  SF_X,X
+            ADDD COL_X,Y
+            STA  VC_DATA0
+            STB  VC_DATA0
+            LDD  SF_Y,X
+            ADDD GK_T
+            STA  VC_DATA0
+            STB  VC_DATA0
+            LDB  COL_W+1,Y      ; its size, in front of everything
+            BSR  SIZECODE8
+            STA  GK_COL
+            LDB  GK_BITS
+            BSR  SIZECODE8
+            LSLA
+            LSLA
+            ORA  GK_COL
+            ORA  #SS_FRONT
+            STA  VC_DATA0
+            LDA  #SC_8BPP
+            STA  VC_DATA0
+            INC  GK_NSPR
+            CLRA
+            LDB  GK_BITS
+            ADDD GK_T
+            STD  GK_T
+            LDX  TGTSURF
+            CMPD SF_H,X
+            LBLO MKUISPR3
+            LEAY COLSIZE,Y
+            PULS B
+            DECB
+            LBNE MKUISPR2
+            LBRA MKUISPR1
+MKUISPR9    RTS
+; SIZECODE8: A = a sprite's size code for B pixels (8 0, 16 1, 32 2, 64 3).
+SIZECODE8   CLRA
+SIZECODE81  CMPB #8
+            BLS  SIZECODE89
+            INCA
+            LSRB
+            BRA  SIZECODE81
+SIZECODE89  RTS
 ; MASK16: the 16x16 one-bit picture at X (16 words, the leftmost pixel in each
 ; word's top bit) into GK_SCRATCH: its 1s in color A, its 0s 0.
 MASK16      STA  GK_COL
@@ -174,44 +353,110 @@ GETKEY4     STB  KEYMODS
 GETKEY8     TSTA
 GETKEY9     RTS
 ;------------------------------------------------------------------------------
-; Text, on the 80x30 text layer at VC_TEXTMAP (128 cells a row): each character
-; in TXFG on TXBG (0: see-through).
+; Text: 80x30 cells of 8x16, drawn by the card (its font) on whichever surface
+; has the cell -- each character in TXFG on TXBG (0: UI_BG). Every character
+; also goes into TXSHADOW (80 a row), what the screen says, for anyone to read.
 ;------------------------------------------------------------------------------
-; TXAT: data port 0 to column A, row B. (D, X kept.)
-TXAT        PSHS D,X
-            PSHS A
-            LDA  #128
-            MUL                 ; D = row * 128
-            ADDB ,S+
-            ADCA #0             ; + column
-            LSLD
-            LSLD                ; * 4 bytes a cell
-            ADDD #VC_TEXTMAP&$FFFF
-            TFR  D,X
-            LDA  #VC_TEXTMAP/$10000
-            JSR  PORT0
-            PULS D,X,PC
-; TXCH: the character A. (Every register kept.)
-TXCH        STA  VC_DATA0
-            PSHS A
-            LDA  TXFG
-            STA  VC_DATA0
+; TXAT: the cell to write at: column A, row B. (D, X kept.)
+TXAT        STA  TXC
+            STB  TXR
+            RTS
+; TXCH: the character A, and on to the next cell. (Every register kept.)
+TXCH        PSHS D,X,Y,U
+            STA  GK_CH
+            LDA  TXR            ; the shadow
+            CMPA #30
+            BHS  TXCH1
+            LDB  TXC
+            CMPB #80
+            BHS  TXCH1
+            LDB  #80
+            MUL
+            ADDB TXC
+            ADCA #0
+            LDX  #TXSHADOW
+            LEAX D,X
+            LDA  GK_CH
+            STA  ,X
+TXCH1       LDB  TXC            ; the cell on the screen: GX, GY
+            LDA  #8
+            MUL
+            STD  GX
+            LDB  TXR
+            LDA  #16
+            MUL
+            STD  GY
+            LDU  #GK_SURFS      ; whose is it?
+TXCH2       LDX  ,U++
+            LBEQ TXCH9
+            LDD  GX
+            SUBD SF_X,X
+            BLO  TXCH2
+            CMPD SF_W,X
+            BHS  TXCH2
+            STD  GW             ; (x in it)
+            LDD  GY
+            SUBD SF_Y,X
+            BLO  TXCH2
+            CMPD SF_H,X
+            BHS  TXCH2
+            STD  GH             ; (y in it)
+            STX  TGTSURF
+            LDB  SF_N,X         ; which column?
+            LEAY SF_COLS,X
+TXCH3       LDD  COL_X,Y
+            ADDD COL_W,Y
+            CMPD GW
+            BHI  TXCH4
+            LEAY COLSIZE,Y
+            DECB
+            BNE  TXCH3
+            BRA  TXCH9
+TXCH4       JSR  SELTGT
+            LDD  GW
+            SUBD COL_X,Y
+            STD  GW
+            LDA  #C_COLOR       ; its background ...
+            STA  VC_CMD
             LDA  TXBG
-            STA  VC_DATA0
-            CLRA
-            STA  VC_DATA0
-            PULS A,PC
+            BNE  TXCH5
+            LDA  UI_BG
+TXCH5       STA  VC_CMD
+            LDA  #C_FILLRECT
+            STA  VC_CMD
+            LDD  GW
+            JSR  CMDD
+            LDD  GH
+            JSR  CMDD
+            LDD  #8
+            JSR  CMDD
+            LDD  #16
+            JSR  CMDD
+            LDA  #C_COLOR       ; ... and the character
+            STA  VC_CMD
+            LDA  TXFG
+            STA  VC_CMD
+            LDA  #C_CHAR
+            STA  VC_CMD
+            LDD  GW
+            JSR  CMDD
+            LDD  GH
+            JSR  CMDD
+            LDA  GK_CH
+            STA  VC_CMD
+TXCH9       INC  TXC
+            PULS D,X,Y,U,PC
 ; TXSTR: the string at X (0 at its end); X is left after its 0.
 TXSTR       LDA  ,X+
             BEQ  TXSTR9
-            BSR  TXCH
+            JSR  TXCH
             BRA  TXSTR
 TXSTR9      RTS
 ; TXSPC: B spaces.
 TXSPC       TSTB
             BEQ  TXSPC9
             LDA  #$20
-TXSPC1      BSR  TXCH
+TXSPC1      JSR  TXCH
             DECB
             BNE  TXSPC1
 TXSPC9      RTS
@@ -221,7 +466,7 @@ TXFIELD     TSTB
             BEQ  TXSPC9
             LDA  ,X+
             BEQ  TXSPC
-            BSR  TXCH
+            JSR  TXCH
             DECB
             BRA  TXFIELD
 ; TXDEC4: D (0-9999) as four digits; TXDEC3: D (0-999) as three; TXDEC2:
@@ -235,17 +480,17 @@ TXDEC3      DIVD #100
             PSHS A
             TFR  B,A
             ADDA #'0
-            BSR  TXCH
+            JSR  TXCH
             PULS B
 TXDEC2      CLRA
             DIVD #10            ; B = tens, A = ones
             PSHS A
             TFR  B,A
             ADDA #'0
-            BSR  TXCH
+            JSR  TXCH
             PULS A
             ADDA #'0
-            BRA  TXCH
+            LBRA TXCH
 ; TXHEX2: A as two hex digits.
 TXHEX2      PSHS A
             LSRA
@@ -257,15 +502,32 @@ TXHEX2      PSHS A
             ANDA #$0F
 TXHEX1      ADDA #'0
             CMPA #'9
-            BLS  TXCH
+            LBLS TXCH
             ADDA #'A-'9-1
-            BRA  TXCH
-; TXROW: blank columns A to A+B-1 of row E, then put port 0 back at column A.
+            LBRA TXCH
+; TXFORGET: the shadow of columns A to A+B-1 blank on every row (what a shape
+; drawn over them has wiped).
+TXFORGET    PSHS D
+            LDX  #TXSHADOW
+            LEAX A,X
+            LDE  #30
+TXFORGET1   LDF  1,S
+            LDA  #$20
+            PSHS X
+TXFORGET2   STA  ,X+
+            DECF
+            BNE  TXFORGET2
+            PULS X
+            LEAX 80,X
+            DECE
+            BNE  TXFORGET1
+            PULS D,PC
+; TXROW: blank columns A to A+B-1 of row E, then the cell back at column A.
 TXROW       PSHS D
             TFR  E,B
             JSR  TXAT
             LDB  1,S
-            BSR  TXSPC
+            JSR  TXSPC
             PULS D
             TFR  E,B
             JMP  TXAT
@@ -626,6 +888,14 @@ GK_COL      FCB  0
 GK_R        FCB  0
 GK_G        FCB  0
 GK_B        FCB  0
+GK_OP       FCB  0
+GK_CH       FCB  0
+GK_NSPR     FCB  0          ; sprites showing the surfaces
+CURSURF     FDB  0          ; the surface shapes go on
+TGTSURF     FDB  0
+CURTGT      FDB  0          ; the column that is the card's target now
+TXC         FCB  0          ; the text cell to write at
+TXR         FCB  0
 GX          FDB  0
 GY          FDB  0
 GW          FDB  0
@@ -637,3 +907,4 @@ PR_ROW      FCB  0
 PR_WIDE     FCB  80
 PR_BUF      RMB  PR_MAX+1
 PALBUF      RMB  512
+TXSHADOW    RMB  80*30      ; what the text on the screen says

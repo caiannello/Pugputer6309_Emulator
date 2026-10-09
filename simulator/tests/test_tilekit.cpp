@@ -22,7 +22,6 @@ using pugputer::VideoDevice;
 namespace {
 
 constexpr uint64_t kSecond = 3579545;
-constexpr uint32_t kTiles = 0x020000;
 constexpr int kPanelX = 464;
 
 std::string host_file(const std::string& path) {
@@ -114,43 +113,52 @@ struct Kit {
         }
     }
     // A variable of TILEKIT's, by its name in the listing lwasm made.
-    uint16_t sym(const std::string& name) {
+    uint32_t sym(const std::string& name) {
         std::string lst = host_file(std::string(REPO_DIR) + "/gamekit/build/tilekit.lst");
         std::string key = "[ G] " + name + " ";
         size_t at = lst.find(key);
         if (at == std::string::npos) return 0;
         size_t nl = lst.find('\n', at);
         std::string line = lst.substr(at, nl - at);
-        return static_cast<uint16_t>(std::stoul(line.substr(line.find_last_of(' ') + 1), nullptr, 16));
+        return static_cast<uint32_t>(std::stoul(line.substr(line.find_last_of(' ') + 1), nullptr, 16));
     }
     uint8_t ram(const std::string& name, int offset = 0) {
         return s.bus.read_cpu(static_cast<uint16_t>(sym(name) + offset));
     }
     uint16_t ram16(const std::string& name) { return static_cast<uint16_t>(ram(name) << 8 | ram(name, 1)); }
     const vc_card& c() { return v.card(); }
-    // A cell of the map (64 wide unless said), and the layer's scrolling.
-    uint16_t cell(int x, int y, int w = 64) {
-        uint32_t a = 0x016000 + static_cast<uint32_t>((y * w + x) * 2);
+    // A cell of the map (64 wide unless said; at `base`, or TILEKIT's), and the layer's scrolling.
+    uint16_t cell(int x, int y, int w = 64, int64_t base = -1) {
+        uint32_t a = (base < 0 ? sym("MAPV") : static_cast<uint32_t>(base)) + static_cast<uint32_t>((y * w + x) * 2);
         return static_cast<uint16_t>(vram(a) << 8 | vram(a + 1));
     }
     // The screen place of map cell x, y: 8x8 tiles at 320x240, 16 screen pixels a cell.
     static int mx(int x) { return x * 16 + 8; }
     static int my(int y) { return y * 16 + 8; }
     uint8_t vram(uint32_t a) { return c().vram[a & (VC_VRAM_SIZE - 1)]; }
-    // A text row of the 80x30 screen.
+    // A text row of the 80x30 screen (what TILEKIT has written there: its shadow).
     std::string row(int r) {
         std::string t;
-        for (int col = 0; col < 80; ++col) t += static_cast<char>(c().vram[VC_RESET_TEXT_MAP + (r * 128 + col) * 4]);
+        uint32_t at = sym("TXSHADOW") + static_cast<uint32_t>(r * 80);
+        for (int col = 0; col < 80; ++col) t += static_cast<char>(s.bus.read_cpu(static_cast<uint16_t>(at + col)));
         return t;
     }
     bool shows(int r, const std::string& what) { return row(r).find(what) != std::string::npos; }
-    // A pixel of the panel (its own coordinates), as a palette index.
-    uint8_t panel(int x, int y) { return vram(static_cast<uint32_t>(y * 176 + x)); }
-    // A pixel value of tile t of an 8x8, 4-bit set.
-    int pix4(int t, int x, int y) {
-        uint8_t b = vram(kTiles + t * 32 + (y * 8 + x) / 2);
+    // A pixel of the panel (its own coordinates), as a palette index: in its columns' bitmaps.
+    uint8_t panel(int x, int y) {
+        if (x < 64) return vram(sym("PCOL0") + static_cast<uint32_t>(y * 64 + x));
+        if (x < 128) return vram(sym("PCOL1") + static_cast<uint32_t>(y * 64 + x - 64));
+        if (x < 160) return vram(sym("PCOL2") + static_cast<uint32_t>(y * 32 + x - 128));
+        return vram(sym("PCOL3") + static_cast<uint32_t>(y * 16 + x - 160));
+    }
+    // A pixel value of tile t of an 8x8, 4-bit set (the tiles at `base`, or TILEKIT's).
+    int pix4(int t, int x, int y, int64_t base = -1) {
+        uint32_t b0 = base < 0 ? sym("TILES") : static_cast<uint32_t>(base);
+        uint8_t b = vram(b0 + static_cast<uint32_t>(t * 32 + (y * 8 + x) / 2));
         return x & 1 ? b & 15 : b >> 4;
     }
+    // The sprite table.
+    const uint8_t* sprite(int n) { return c().vram + sym("GK_SPRTAB") + n * 8; }
     // The magnified tile's pixel x, y (8x8 tiles: 16 screen pixels each), on the screen.
     static int zx(int x) { return kPanelX + 24 + x * 16 + 8; }
     static int zy(int y) { return 56 + y * 16 + 8; }
@@ -194,19 +202,19 @@ TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
     k.type("TILEKIT");
     k.frames(60);
     // The questions: an 8x8, 16-color set for 320x240 unless changed.
-    CHECK(k.shows(9, "A NEW TILE SET") && k.shows(11, "8x8") && k.shows(12, "16 (4 BITS") && k.shows(13, "320x240"));
+    CHECK(k.shows(2, "NEW TILE SET AND MAP") && k.shows(4, "8x8") && k.shows(5, "16 (4 BIT)") && k.shows(6, "320x240"));
     k.dump("1-dialog");
     CHECK(k.c().in_ctrl == (VC_IN_POINTER | VC_IN_KEYS));
     k.key(0x28); // Enter
     k.frames(30);
-    CHECK(!k.shows(9, "A NEW TILE SET"));
+    CHECK(!k.shows(2, "NEW TILE SET AND MAP"));
     CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8 16 ") && k.ram("TOOL") == 0);
     CHECK(k.shows(0, "TILES (NEW)") && k.shows(28, "MAP   (NEW)") && k.shows(29, "MAP 064x064"));
     const uint8_t* l0 = k.c().cfg + VC_LAYER0;
-    CHECK(l0[VC_L_MODE] == (VC_TILE | 0x10) && k.c().cfg[VC_DC_CTRL] == 0x0F);
+    CHECK(l0[VC_L_MODE] == (VC_TILE | 0x10) && k.c().cfg[VC_DC_CTRL] == 0x09);
     // The pointer follows the mouse.
     k.mouse(300, 200);
-    const uint8_t* s0 = k.c().vram + VC_RESET_SPR_BASE;
+    const uint8_t* s0 = k.sprite(0);
     CHECK(s0[2] == 1 && s0[3] == 300 - 256 && s0[5] == 200);
     // The pen: a dot at 2,3 in white (color 15).
     k.mouse(Kit::zx(2), Kit::zy(3));
@@ -260,7 +268,7 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     k.frames(60);
     k.key(0x17); // T: 16x16
     k.key(0x07); // D: 256 colors
-    CHECK(k.shows(11, "16x16") && k.shows(12, "256 (8 BITS"));
+    CHECK(k.shows(4, "16x16") && k.shows(5, "256 (8 BIT)"));
     k.key(0x28);
     k.frames(30);
     CHECK(k.shows(29, " 16x16 256"));
@@ -270,14 +278,15 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     auto zx = [](int x) { return kPanelX + 24 + x * 8 + 4; };
     auto zy = [](int y) { return 56 + y * 8 + 4; };
     k.click(zx(15), zy(15));
-    CHECK(k.vram(kTiles + 255) == 196);
+    CHECK(k.vram(k.sym("TILES") + 255) == 196);
     // NEW (the button), then D (a copy of it): three tiles, the third like the second.
     k.click(70 * 8 + 4, 21 * 16 + 8);
     CHECK(k.shows(29, "TILE 0001/0002") && k.shows(21, "0002 TILES"));
     k.click(zx(0), zy(0));
     k.key(0x07); // D
+    k.frames(10);
     CHECK(k.shows(29, "TILE 0002/0003"));
-    CHECK(k.vram(kTiles + 256) == 196 && k.vram(kTiles + 512) == 196 && k.vram(kTiles + 511) == 0);
+    CHECK(k.vram(k.sym("TILES") + 256) == 196 && k.vram(k.sym("TILES") + 512) == 196 && k.vram(k.sym("TILES") + 511) == 0);
     // The set: click the first tile.
     k.click(kPanelX + 3 + 8, 352 + 8);
     CHECK(k.shows(29, "TILE 0000/0003"));
@@ -306,7 +315,7 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     }
     // ^N, a new 8x8 set; then ^O opens the saved one again.
     k.key(0x11, false, true);
-    CHECK(k.shows(9, "A NEW TILE SET"));
+    CHECK(k.shows(2, "NEW TILE SET AND MAP"));
     k.key(0x17); // T: back to 8x8
     k.key(0x28);
     k.frames(30);
@@ -318,7 +327,7 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     k.frames(60);
     CHECK(k.shows(28, "OPENED") && k.shows(29, "0000/0003") && k.shows(29, " 16x16 256"));
     k.dump("3-opened");
-    CHECK(k.vram(kTiles + 255) == 196 && k.c().cfg[0x200 + 2 * 196] == 0xFF && k.c().cfg[0x201 + 2 * 196] == 0xE0);
+    CHECK(k.vram(k.sym("TILES") + 255) == 196 && k.c().cfg[0x200 + 2 * 196] == 0xFF && k.c().cfg[0x201 + 2 * 196] == 0xE0);
     // A file that isn't there: said so, and the set stays.
     k.key(0x12, false, true);
     for (int i = 0; i < 8; ++i) k.key(0x2A); // (backspace the name away)
@@ -342,7 +351,7 @@ TEST(tilekit_opens_the_file_it_is_given_or_makes_it) {
     if (!k.ok) return;
     k.type("TILEKIT NEWONE");
     k.frames(60);
-    CHECK(k.shows(9, "A NEW TILE SET") && k.shows(28, "A NEW FILE"));
+    CHECK(k.shows(2, "NEW TILE SET AND MAP") && k.shows(28, "A NEW FILE"));
     k.key(0x28);
     k.frames(30);
     CHECK(k.shows(0, "NEWONE.TLS"));
@@ -364,7 +373,7 @@ TEST(tilekit_picks_clears_moves_between_tiles_and_scrolls_the_set) {
     k.type("TILEKIT");
     k.frames(60);
     k.key(0x15); // R: 640x480
-    CHECK(k.shows(13, "640x480"));
+    CHECK(k.shows(6, "640x480"));
     k.key(0x28);
     k.frames(30);
     CHECK(k.c().cfg[VC_LAYER0 + VC_L_MODE] & 0x04);
@@ -421,17 +430,17 @@ TEST(tilekit_puts_tiles_on_the_map_with_every_tool_and_undoes_them) {
     if (!k.ok) return;
     k.type("TILEKIT");
     k.frames(60);
-    CHECK(k.shows(14, "MAP WIDTH") && k.shows(14, "64 CELLS") && k.shows(15, "64 CELLS") && k.shows(16, "NO: A NEW"));
+    CHECK(k.shows(7, "MAP W  64") && k.shows(8, "MAP H  64") && k.shows(9, "KEEP   NO"));
     k.key(0x28);
     k.frames(30);
-    CHECK(k.c().cfg[VC_LAYER0 + VC_L_MAP] == 0x05 && k.c().cfg[VC_SPR_COUNT] == 2); // 64x64
+    CHECK(k.c().cfg[VC_LAYER0 + VC_L_MAP] == 0x05 && k.c().cfg[VC_SPR_COUNT] == 42); // 64x64; 2 + 40 for the surfaces
     // Tile 1: a dot. The map is all tile 0 to start with.
     k.key(0x11); // N
     k.click(Kit::zx(0), Kit::zy(0));
     CHECK(k.pix4(1, 0, 0) == 15 && k.cell(3, 2) == 0);
     // The cell under the mouse: framed by sprite 1, and in the status line.
     k.mouse(Kit::mx(3), Kit::my(2));
-    const uint8_t* s1 = k.c().vram + VC_RESET_SPR_BASE + 8;
+    const uint8_t* s1 = k.sprite(1);
     CHECK(s1[3] == 48 && s1[5] == 32 && (s1[6] >> 6) == 3 && (s1[6] & 0x0F) == 0x05); // 16x16, in front
     CHECK(k.shows(29, "AT 003,002"));
     k.mouse(kPanelX + 50, 100);
@@ -502,7 +511,7 @@ TEST(tilekit_scrolls_the_map_and_covers_what_is_past_its_end) {
     k.type("TILEKIT");
     k.frames(60);
     k.key(0x1A); // W: 128 across
-    CHECK(k.shows(14, "128 CELLS"));
+    CHECK(k.shows(7, "128"));
     k.key(0x28);
     k.frames(30);
     // 128 x 64 cells of 8x8 at 320x240: 1024 x 512 of the layer's pixels; the view 232 x 224.
@@ -545,28 +554,23 @@ TEST(tilekit_scrolls_the_map_and_covers_what_is_past_its_end) {
     CHECK(k.shows(28, "AREN'T SAVED"));
     k.key(0x1C); // Y
     k.key(0x0E); // K: keep the tiles
-    CHECK(k.shows(16, "YES: JUST A NEW MAP"));
+    CHECK(k.shows(9, "YES: NEW MAP"));
     k.key(0x1A); // W: 256
     k.key(0x1A); // W: 32
     k.key(0x0B); // H: 128
     k.key(0x0B); // H: 256
-    CHECK(k.shows(14, "32 CELLS") && k.shows(15, "256 CELLS"));
+    CHECK(k.shows(7, "MAP W  32") && k.shows(8, "MAP H  256"));
     k.key(0x0B); // H: 32
     k.key(0x28);
     k.frames(10);
     CHECK(k.c().cfg[VC_LAYER0 + VC_L_MAP] == 0x00 && k.shows(29, "TILE 0001/0002") && k.cell(10, 7, 32) == 0);
-    // 32 cells of 16 screen pixels: 512 > 464 across, so nothing covered there; down, 512 > 448.
-    auto bg = [&](int col, int row) { return k.c().vram[VC_RESET_TEXT_MAP + (row * 128 + col) * 4 + 2]; };
-    CHECK(bg(57, 27) == 0);
-    // At 640x480 a 32x32 map of 8x8 tiles is 256 pixels: the rest is covered.
+    // At 640x480 a 32x32 map of 8x8 tiles is 256 pixels: past it, a click does nothing.
     k.key(0x11, false, true);
     CHECK(k.shows(28, "AREN'T SAVED")); // (the tile set: tile 1 is new)
     k.key(0x1C); // Y
     k.key(0x15); // R: 640x480
     k.key(0x28);
     k.frames(30);
-    CHECK(bg(31, 15) == 0 && bg(32, 5) != 0 && bg(5, 16) != 0 && bg(57, 27) != 0);
-    k.dump("6-small-map");
     k.click(40 * 8, 5 * 16); // (past the map: nothing)
     CHECK(k.ram("MAPMOD") == 0);
 }
@@ -636,7 +640,7 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     // A map whose set is gone: said so.
     k.type("TILEKIT NOSUCH.MAP");
     k.frames(60);
-    CHECK(k.shows(9, "A NEW TILE SET AND MAP"));
+    CHECK(k.shows(2, "NEW TILE SET AND MAP"));
     k.key(0x28);
     k.frames(20);
     CHECK(k.shows(28, "NOSUCH.MAP") && k.shows(0, "TILES (NEW)"));
@@ -669,7 +673,7 @@ TEST(tilekit_exports_assembly_source_that_a_game_includes) {
     k.key(0x0B); // H: 128, 256, 32
     k.key(0x0B);
     k.key(0x0B);
-    CHECK(k.shows(14, "32 CELLS") && k.shows(15, "32 CELLS"));
+    CHECK(k.shows(7, "MAP W  32") && k.shows(8, "MAP H  32"));
     k.key(0x28);
     k.frames(30);
     k.key(0x11); // N: tile 1, a dot at 1,0
@@ -705,7 +709,7 @@ TEST(tilekit_exports_assembly_source_that_a_game_includes) {
     k.key(0x29); // quit (Y: not saved)
     k.key(0x1C);
     CHECK(k.prompt(200000000));
-    CHECK(k.vram(kTiles + 32) == 0); // (the card is reset)
+    CHECK(k.vram(0x020000 + 32) == 0); // (the card is reset)
     // ASM on the machine makes the game from the modules; it puts them into the card.
     k.type("ASM -f com GAME.ASM");
     CHECK(k.prompt(20000000000ull));
@@ -715,8 +719,8 @@ TEST(tilekit_exports_assembly_source_that_a_game_includes) {
     if (com.size() > 30) CHECK(com[8 + 20] == 17 && com[8 + 21] == 0 && com[8 + 22] == 2 && com[8 + 23] == 32); // (after 20 bytes of code)
     k.type("GAME");
     CHECK(k.prompt(200000000));
-    CHECK(k.pix4(1, 1, 0) == 15 && k.pix4(1, 0, 0) == 0);
-    CHECK(k.cell(2, 3, 32) == 0x0401);
+    CHECK(k.pix4(1, 1, 0, 0x020000) == 15 && k.pix4(1, 0, 0, 0x020000) == 0);
+    CHECK(k.cell(2, 3, 32, 0x016000) == 0x0401);
     CHECK(k.c().cfg[0x200 + 2 * 9] == 0xF8 && k.c().cfg[0x201 + 2 * 9] == 0x00); // (xterm's red)
 }
 

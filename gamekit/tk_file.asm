@@ -7,9 +7,10 @@
 ; questions asked on the way -- the new set's kind, a file name, "are you
 ; sure". INCLUDEd by tilekit.asm.
 ;------------------------------------------------------------------------------
-DLGROW      equ  9          ; the new set's questions: rows 9-18, columns 6-51
-DLGCOL      equ  6
-DLGW        equ  46
+DLGROW      equ  2          ; the new set's questions: in the panel, rows 2-11
+DLGCOL      equ  58
+DLGW        equ  22
+DLGVAL      equ  10         ; (where a row's answer starts in it)
 ;------------------------------------------------------------------------------
 ; A set, and the card for it.
 ;------------------------------------------------------------------------------
@@ -94,10 +95,10 @@ SETPROJ6    LSRD
             RTS
 ; SETUPDISP: the card's layers, sprites and input for the set (after a reset,
 ; with its tiles and palette in place), and everything drawn.
-SETUPDISP   LDX  #TARGETCMD     ; drawing goes into the panel
-            LDY  #VC_CMD
-            LDW  #TARGETEND-TARGETCMD
-            TFM  X+,Y
+SETUPDISP   CLRD                ; (the card has no drawing target now)
+            STD  CURTGT
+            LDX  #PANELSURF     ; shapes go on the panel
+            STX  CURSURF
             LDA  #VC_CFG/$10000 ; the layers
             LDX  #DC_CTRL
             JSR  PORT0
@@ -121,13 +122,20 @@ SETUPDISP2  LDB  TSIZE
             BNE  SETUPDISP3
             ORA  #LM_BIG
 SETUPDISP3  STA  VC_DATA0
-            LDA  #VC_SPRITES/$10000 ; sprite 0: the pointer
-            LDX  #VC_SPRITES&$FFFF
+            LDA  #GK_SPRTAB/$10000 ; sprite 0: the pointer
+            LDX  #GK_SPRTAB&$FFFF
             JSR  PORT0
             LDX  #SPRITE0
             LDY  #VC_DATA0
             LDW  #8
             TFM  X+,Y
+            JSR  MKUISPR        ; the panel's and the status rows' sprites
+            LDA  #VC_CFG/$10000
+            LDX  #SPR_COUNT
+            JSR  PORT0
+            LDA  GK_NSPR
+            ADDA #2
+            STA  VC_DATA0
             LDA  #VC_IN_PTR+VC_IN_KEYS+VC_IN_FLUSH
             STA  VC_INCTRL      ; the pointer follows the mouse; the keys are ours
             JSR  RDPAL
@@ -136,34 +144,60 @@ SETUPDISP3  STA  VC_DATA0
             LDA  #1
             STA  STATDIRTY
             JMP  REDRAWALL
-TARGETCMD   FCB  C_TARGET,PANEL/$10000,(PANEL/$100)&$FF,PANEL&$FF
-            FDB  PANELW,PANELW,480
-            FCB  8
-TARGETEND
-; From DC_CTRL: the three layers and the sprites on; the backdrop (REDRAWALL);
-; sprites in 640x480, two of them (the pointer, the cell's frame), the table
-; where it is at reset. Layer 0: the map (its mode set apart, its size and
-; scrolling by MAPSETUP); layer 1: the panel, a bitmap
-; only 176 wide, moved to the right edge; layer 2: the reset text screen.
-SETTINGS    FCB  $0F,0,1,2
-            FCB  VC_SPRITES/$10000,(VC_SPRITES/$100)&$FF,VC_SPRITES&$FF
+; From DC_CTRL: layer 0 and the sprites on; the backdrop (REDRAWALL); sprites
+; in 640x480 (how many: SETUPDISP), the table at UISPRITES. Layer 0: the map
+; (its mode set apart, its size and scrolling by MAPSETUP); layers 1 and 2 off.
+SETTINGS    FCB  $09,0,1,2
+            FCB  GK_SPRTAB/$10000,(GK_SPRTAB/$100)&$FF,GK_SPRTAB&$FF
             FCB  0,0,0,0,0,0,0,0,0
             FCB  0,0            ; (MAPSETUP: its size, scrolling)
             FCB  MAPV/$10000,(MAPV/$100)&$FF,MAPV&$FF
             FCB  TILES/$10000,(TILES/$100)&$FF,TILES&$FF
             FDB  0,0,0
             FCB  0,0
-            FCB  LM_BITMAP+LM_HIRES+LM_8BPP,0
-            FCB  PANEL/$10000,(PANEL/$100)&$FF,PANEL&$FF
-            FCB  0,0,0
-            FDB  -PANELX,0,PANELW
-            FCB  0,0
-            FCB  LM_TEXT+LM_HIRES+LM_BIG,LW_128+LH_32
-            FCB  VC_TEXTMAP/$10000,(VC_TEXTMAP/$100)&$FF,VC_TEXTMAP&$FF
-            FCB  VC_FONT/$10000,(VC_FONT/$100)&$FF,VC_FONT&$FF
-            FDB  0,0,0
-            FCB  0,0
 SETEND
+; The surfaces (gk_ui.asm): the panel, and the status rows under the map.
+GK_SURFS    FDB  PANELSURF,STATSURF,0
+PANELSURF   FDB  PANELX,0,PANELW,480
+            FCB  4
+            FDB  0,64
+            FCB  PCOL0/$10000
+            FDB  PCOL0&$FFFF
+            FDB  64,64
+            FCB  PCOL1/$10000
+            FDB  PCOL1&$FFFF
+            FDB  128,32
+            FCB  PCOL2/$10000
+            FDB  PCOL2&$FFFF
+            FDB  160,16
+            FCB  PCOL3/$10000
+            FDB  PCOL3&$FFFF
+STATSURF    FDB  0,VIEWH,VIEWW,32
+            FCB  8
+            FDB  0,64
+            FCB  SCOL/$10000
+            FDB  SCOL&$FFFF
+            FDB  64,64
+            FCB  (SCOL+$800)/$10000
+            FDB  (SCOL+$800)&$FFFF
+            FDB  128,64
+            FCB  (SCOL+$1000)/$10000
+            FDB  (SCOL+$1000)&$FFFF
+            FDB  192,64
+            FCB  (SCOL+$1800)/$10000
+            FDB  (SCOL+$1800)&$FFFF
+            FDB  256,64
+            FCB  (SCOL+$2000)/$10000
+            FDB  (SCOL+$2000)&$FFFF
+            FDB  320,64
+            FCB  (SCOL+$2800)/$10000
+            FDB  (SCOL+$2800)&$FFFF
+            FDB  384,64
+            FCB  (SCOL+$3000)/$10000
+            FDB  (SCOL+$3000)&$FFFF
+            FDB  448,16
+            FCB  (SCOL+$3800)/$10000
+            FDB  (SCOL+$3800)&$FFFF
 SPRITE0     FDB  GK_PTR/32,0,0
             FCB  SS_W16+SS_H16+SS_FRONT,SC_8BPP
 ;------------------------------------------------------------------------------
@@ -178,13 +212,15 @@ NEWDIALOG   JSR  DLGCUR
             CLR  NKEEP
             LDA  #M_DIALOG
             STA  MODE
+            JMP  REDRAWALL      ; (the panel is the questions now)
+; SHOWDLG: the questions, in the panel: a row each, its key first.
 SHOWDLG     JSR  BARTEXT
             LDB  #0
             LDX  #T_DLG0
-            BSR  DLGLINE
+            JSR  DLGLINE
             LDB  #1
             LDX  #T_EMPTY
-            BSR  DLGLINE
+            JSR  DLGLINE
             LDB  #2
             LDX  #T_DLG1
             LDY  #T_D8
@@ -192,7 +228,7 @@ SHOWDLG     JSR  BARTEXT
             CMPA #8
             BEQ  SHOWDLG1
             LDY  #T_D16
-SHOWDLG1    BSR  DLGLINE2
+SHOWDLG1    JSR  DLGLINE2
             LDB  #3
             LDX  #T_DLG2
             LDY  #T_D4BIT
@@ -228,7 +264,13 @@ SHOWDLG4    BSR  DLGLINE2
             BSR  DLGLINE
             LDB  #9
             LDX  #T_DLG4
-; DLGLINE: the question box's row B: the string at X. DLGLINE2: X (19
+            BSR  DLGLINE
+            LDB  #10
+            LDX  #T_DLG8
+            BSR  DLGLINE
+            LDB  #11
+            LDX  #T_DLG9
+; DLGLINE: the question box's row B: the string at X. DLGLINE2: X (DLGVAL
 ; characters), then Y. DLGSIZE: X, then 32 << A cells.
 DLGLINE     PSHS X
             LDA  #DLGCOL
@@ -237,12 +279,10 @@ DLGLINE     PSHS X
             PULS X
             LDB  #DLGW
             JMP  TXFIELD
-DLGSIZE     LDY  #T_SIZES       ; (10 bytes each)
-            PSHS B
-            LDB  #10
-            MUL
-            LEAY D,Y
-            PULS B
+DLGSIZE     LDY  #T_SIZES       ; (4 bytes each)
+            LSLA
+            LSLA
+            LEAY A,Y
 DLGLINE2    PSHS Y,X
             LDA  #DLGCOL
             ADDB #DLGROW
@@ -250,7 +290,7 @@ DLGLINE2    PSHS Y,X
             PULS X
             JSR  TXSTR
             PULS X
-            LDB  #DLGW-19
+            LDB  #DLGW-DLGVAL
             JMP  TXFIELD
 ; DLGCUR: the answers about the tiles as the set there is has them.
 DLGCUR      LDA  TSIZE
@@ -260,16 +300,9 @@ DLGCUR      LDA  TSIZE
             LDA  HIRES
             STA  NHIRES
             RTS
-; HIDEDLG: the box away (and the cover past the map's end back).
-HIDEDLG     CLR  TXBG
-            LDE  #DLGROW
-HIDEDLG1    LDA  #DLGCOL
-            LDB  #DLGW
-            JSR  TXROW
-            INCE
-            CMPE #DLGROW+10
-            BNE  HIDEDLG1
-            JMP  MASKMAP
+; HIDEDLG: the questions away: the panel as it was.
+HIDEDLG     CLR  MODE
+            JMP  REDRAWALL
 DLGKEY      JSR  UPCHAR
             LDA  KCODE
             CMPA #K_ESC
@@ -328,11 +361,8 @@ DLGKEY2     CMPB #'R
             EORA #1
             STA  NHIRES
 DLGKEY3     JMP  SHOWDLG
-DLGCANCEL   JSR  HIDEDLG
-            CLR  MODE
-            JMP  DRAWHELP
+DLGCANCEL   JMP  HIDEDLG
 DLGOPEN     JSR  HIDEDLG
-            CLR  MODE
             JMP  OPENPROMPT
 DLGMAKE     CLR  MODE
             LDA  NWC
@@ -403,21 +433,15 @@ STRCPY      LDA  ,X+
             STA  ,Y+
             BNE  STRCPY
             RTS
-; DLGMOUSE: a click in the box is its key.
+; DLGMOUSE: a click on a row of the questions is its key.
 DLGMOUSE    LDA  PRESSED
             BITA #VC_MB_LEFT
             BEQ  DLGMOUSE9
             CLR  KCODE
             CLR  KCHAR
             LDD  MOUSEX
-            LSRD
-            LSRD
-            LSRD
-            SUBB #DLGCOL        ; the column in the box
+            CMPD #PANELX
             BLO  DLGMOUSE9
-            CMPB #DLGW
-            BHS  DLGMOUSE9
-            STB  HCOL
             LDD  MOUSEY
             LSRD
             LSRD
@@ -426,6 +450,10 @@ DLGMOUSE    LDA  PRESSED
             SUBB #DLGROW        ; the row: its key
             CMPB #9
             BEQ  DLGMOUSE3
+            CMPB #10
+            BEQ  DLGMOUSE4
+            CMPB #11
+            BEQ  DLGMOUSE5
             CMPB #2
             BLO  DLGMOUSE9
             CMPB #7
@@ -434,17 +462,12 @@ DLGMOUSE    LDA  PRESSED
             LDA  B,X
 DLGMOUSE1   STA  KCHAR
             JMP  DLGKEY
-DLGMOUSE3   LDA  #'O            ; the bottom row: ENTER, O, or ESC
-            LDB  HCOL
-            CMPB #15
-            BHS  DLGMOUSE2
-            LDA  #K_ENTER
-            STA  KCODE
-            JMP  DLGKEY
-DLGMOUSE2   CMPB #30
-            BLO  DLGMOUSE1
-            LDA  #K_ESC
-            STA  KCODE
+DLGMOUSE3   LDA  #K_ENTER
+            BRA  DLGMOUSE6
+DLGMOUSE4   LDA  #'O
+            BRA  DLGMOUSE1
+DLGMOUSE5   LDA  #K_ESC
+DLGMOUSE6   STA  KCODE
             JMP  DLGKEY
 DLGMOUSE9   RTS
 DLGKEYS     FCB  'T,'D,'R,'W,'H,'K
@@ -1103,24 +1126,26 @@ STRCMP9     RTS
 ; Words.
 ;------------------------------------------------------------------------------
 T_EMPTY     FCB  0
-T_DLG0      FCN  " A NEW TILE SET AND MAP"
-T_DLG1      FCN  " T  TILES          "
-T_DLG2      FCN  " D  COLORS         "
-T_DLG3      FCN  " R  SCREEN         "
-T_DLG4      FCN  " ENTER MAKE IT  O OPEN A FILE  ESC CANCEL"
-T_DLG5      FCN  " W  MAP WIDTH      "
-T_DLG6      FCN  " H  MAP HEIGHT     "
-T_DLG7      FCN  " K  KEEP THE TILES "
-T_SIZES     FCN  "32 CELLS "        ; (10 bytes each)
-            FCN  "64 CELLS "
-            FCN  "128 CELLS"
-            FCN  "256 CELLS"
-T_KEEPNO    FCN  "NO: A NEW TILE SET TOO"
-T_KEEPYES   FCN  "YES: JUST A NEW MAP"
+T_DLG0      FCN  " NEW TILE SET AND MAP"
+T_DLG1      FCN  " T TILES  "
+T_DLG2      FCN  " D COLORS "
+T_DLG3      FCN  " R SCREEN "
+T_DLG4      FCN  " ENTER  MAKE IT"
+T_DLG8      FCN  " O      OPEN A FILE"
+T_DLG9      FCN  " ESC    CANCEL"
+T_DLG5      FCN  " W MAP W  "
+T_DLG6      FCN  " H MAP H  "
+T_DLG7      FCN  " K KEEP   "
+T_SIZES     FCN  "32 "              ; (4 bytes each)
+            FCN  "64 "
+            FCN  "128"
+            FCN  "256"
+T_KEEPNO    FCN  "NO"
+T_KEEPYES   FCN  "YES: NEW MAP"
 T_D8        FCN  "8x8"
 T_D16       FCN  "16x16"
-T_D4BIT     FCN  "16 (4 BITS A PIXEL)"
-T_D8BIT     FCN  "256 (8 BITS A PIXEL)"
+T_D4BIT     FCN  "16 (4 BIT)"
+T_D8BIT     FCN  "256 (8 BIT)"
 T_SAVETS    FCN  "SAVE THE TILE SET AS: "
 T_SAVEMAP   FCN  "SAVE THE MAP AS: "
 T_OPEN      FCN  "OPEN: "

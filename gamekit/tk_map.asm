@@ -4,9 +4,8 @@
 ;
 ; TILEKIT's map: the left of the screen, the card's tile layer 0 showing the
 ; map in video memory (MAPV) -- scrolled, with the cell under the mouse framed
-; by sprite 1, and what is past the end of a map smaller than the screen
-; covered by the text layer (the card would show the map again there: it
-; wraps around). The tools, on its cells; its undo steps, in the card's PSRAM.
+; by sprite 1. (Past the end of a map smaller than the screen the card shows it
+; again -- it wraps around; nothing can be done there.) The tools, on its cells; its undo steps, in the card's PSRAM.
 ; INCLUDEd by tilekit.asm.
 ;
 ; A cell is the card's map entry: bits 0-9 the tile, 10 flipped across, 11
@@ -101,7 +100,7 @@ MAPSCROLL4  LDA  #VC_CFG/$10000
             STB  VC_DATA0
             LDA  #$FF
             STA  HOVX
-            JMP  MASKMAP
+            RTS
 ; MPIX: D cells in the layer's pixels. LPIX: D screen pixels in the layer's.
 MPIX        LDF  TSHIFT
 MPIX1       LSLD
@@ -112,67 +111,6 @@ LPIX        TST  SCLSH
             BEQ  LPIX9
             LSRD
 LPIX9       RTS
-; MASKMAP: the text layer over the view: see-through over the map, shaded
-; (the font's light shade, in UI_MID on UI_BG) past its end -- a map smaller
-; than the view.
-MASKMAP     LDD  MAPW           ; how far the map reaches across the screen, in
-            BSR  MPIX           ; text columns ...
-            SUBD SCRX
-            TST  SCLSH
-            BEQ  MASKMAP1
-            LSLD
-MASKMAP1    LSRD
-            LSRD
-            LSRD
-            CMPD #VIEWW/8
-            BLS  MASKMAP2
-            LDD  #VIEWW/8
-MASKMAP2    STB  MASKC
-            LDD  MAPH           ; ... and down, in rows
-            BSR  MPIX
-            SUBD SCRY
-            TST  SCLSH
-            BEQ  MASKMAP3
-            LSLD
-MASKMAP3    LSRD
-            LSRD
-            LSRD
-            LSRD
-            CMPD #VIEWH/16
-            BLS  MASKMAP4
-            LDD  #VIEWH/16
-MASKMAP4    STB  MASKR
-            LDA  UI_MID         ; (past the end: shaded)
-            STA  TXFG
-            CLRB                ; the row
-MASKMAP5    PSHS B
-            CLRA
-            JSR  TXAT
-            LDE  #VIEWW/8
-            LDF  MASKC          ; the columns over the map
-            CMPB MASKR
-            BLO  MASKMAP6
-            CLRF                ; (a row past its end: none)
-MASKMAP6    CLR  TXBG
-            LDA  #$20
-MASKMAP7    TSTF
-            BEQ  MASKMAP8
-            JSR  TXCH
-            DECF
-            DECE
-            BNE  MASKMAP7
-            BRA  MASKMAP9
-MASKMAP8    LDB  UI_BG          ; the rest covered, shaded
-            STB  TXBG
-            LDA  #$B0
-            JSR  TXCH
-            DECE
-            BNE  MASKMAP8
-MASKMAP9    PULS B
-            INCB
-            CMPB #VIEWH/16
-            BNE  MASKMAP5
-            RTS
 ; MKCURSOR: sprite 1, the frame round the cell under the mouse: a square the
 ; size a cell is on the screen (8, 16 or 32 pixels), in UI_HI.
 MKCURSOR    LDA  TSIZE          ; its size: the tile's, doubled at 320x240
@@ -200,14 +138,14 @@ MKCURSOR4   STA  VC_DATA0
             BNE  MKCURSOR3
             DECE
             BNE  MKCURSOR2
-            LDA  #VC_SPRITES/$10000 ; sprite 1's image, size and colors (hidden)
-            LDX  #(VC_SPRITES+8)&$FFFF
+            LDA  #GK_SPRTAB/$10000 ; sprite 1's image, size and colors (hidden)
+            LDX  #(GK_SPRTAB+8)&$FFFF
             JSR  PORT0
             LDD  #CURIMG/32
             STA  VC_DATA0
             STB  VC_DATA0
-            LDX  #(VC_SPRITES+14)&$FFFF
-            LDA  #VC_SPRITES/$10000
+            LDX  #(GK_SPRTAB+14)&$FFFF
+            LDA  #GK_SPRTAB/$10000
             JSR  PORT0
             CLRA                ; 8x8
             LDB  CURSZ
@@ -238,8 +176,8 @@ HOVER1      CMPD HOVX
             STD  HOVX
             LDA  #1
             STA  STATDIRTY
-            LDA  #VC_SPRITES/$10000
-            LDX  #(VC_SPRITES+10)&$FFFF
+            LDA  #GK_SPRTAB/$10000
+            LDX  #(GK_SPRTAB+10)&$FFFF
             JSR  PORT0
             LDA  HOVX
             CMPA #$FF
