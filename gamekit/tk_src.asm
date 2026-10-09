@@ -141,8 +141,7 @@ EXPSET6     JSR  OUTNL
             BNE  EXPSET4
             LDX  #T_TILESLAB    ; the tiles, as the card holds them: 16 bytes a line
             JSR  OUTTEXT
-            LDA  #TILES/$10000
-            LDX  #TILES&$FFFF
+            JSR  TBASEAX
             JSR  PORT1
             CLRD
             STD  EXPN
@@ -234,8 +233,7 @@ EXPMAP      JSR  OUTOPEN
             JSR  OUTTEXT
             LDX  #T_CELLSLAB
             JSR  OUTTEXT
-            LDA  #MAPV/$10000   ; the cells, a row at a time, 8 a line
-            LDX  #MAPV&$FFFF
+            JSR  MBASEAX   ; the cells, a row at a time, 8 a line
             JSR  PORT1
             CLRD
             STD  EXPN

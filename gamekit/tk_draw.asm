@@ -401,11 +401,12 @@ BARTEXT     LDA  UI_FG
             LDA  UI_BG
             STA  TXBG
             RTS
-; DRAWTITLE: the panel's top row, the tile set's file, and its bottom row, the
-; map's: each with * if changed since saved.
-DRAWTITLE   BSR  PANELTEXT
+; DRAWTITLE: the panel's top row, the layers; the tile set's file under it, and
+; at the bottom the map's: each with * if changed since saved.
+DRAWTITLE   JSR  DRAWLAYERS
+            BSR  PANELTEXT
             LDA  #58
-            CLRB
+            LDB  #SETROW
             JSR  TXAT
             LDX  #T_TSNAME
             JSR  TXSTR

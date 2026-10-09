@@ -49,6 +49,7 @@ inline constexpr DemoSource kDemoSources[] = {
     {"gamekit/tk_map.asm", "ASM/GAMEKIT/TK_MAP.ASM"},
     {"gamekit/tk_src.asm", "ASM/GAMEKIT/TK_SRC.ASM"},
     {"gamekit/tk_ini.asm", "ASM/GAMEKIT/TK_INI.ASM"},
+    {"gamekit/tk_layer.asm", "ASM/GAMEKIT/TK_LAYER.ASM"},
     {"gamekit/gk_ui.asm", "ASM/GAMEKIT/GK_UI.ASM"},
     {"bios/defines.d", "ASM/GAMEKIT/DEFINES.D"},
     {"vidcard/vidcard.d", "ASM/GAMEKIT/VIDCARD.D"},

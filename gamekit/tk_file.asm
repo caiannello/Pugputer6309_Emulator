@@ -15,7 +15,8 @@ DLGVAL      equ  10         ; (where a row's answer starts in it)
 ; A set, and the card for it.
 ;------------------------------------------------------------------------------
 ; NEWPROJ: an empty set of the kind TSIZE, BPP, HIRES say: one blank tile, the
-; card's own palette (xterm's).
+; card's own palette (xterm's, or TILEKIT.INI's); three layers with maps of
+; MAPWC x MAPHC, all on this set.
 NEWPROJ     LDA  #$80
             STA  VC_CTRL        ; the card as it starts: its memory 0 (the map's
             LDD  #1             ; cells all tile 0), its colors
@@ -26,6 +27,7 @@ NEWPROJ     LDA  #$80
             CLR  MAPNAME
             CLR  MAPMOD
             CLR  FOCUS
+            JSR  NEWLAYERS
             JMP  SETUPDISP
 ; FRESH: what a set just made or opened starts with.
 FRESH       LDX  #TROW          ; every tile's own row: 0
@@ -76,16 +78,7 @@ SETPROJ3    LSLD
             DECF
             BNE  SETPROJ3
             STD  TB
-            LDD  #$8000         ; MAXT = 65536 >> TBSHIFT, at most 1024
-            LDF  TBSHIFT
-            DECF
-SETPROJ4    LSRD
-            DECF
-            BNE  SETPROJ4
-            CMPD #1024
-            BLS  SETPROJ5
-            LDD  #1024
-SETPROJ5    STD  MAXT
+            JSR  CAPACITY       ; MAXT: what there is room for
             LDD  #512           ; CHUNKT = 512 >> TBSHIFT
             LDF  TBSHIFT
 SETPROJ6    LSRD
@@ -106,22 +99,6 @@ SETUPDISP   CLRD                ; (the card has no drawing target now)
             LDY  #VC_DATA0
             LDW  #SETEND-SETTINGS
             TFM  X+,Y
-            LDA  #VC_CFG/$10000 ; layer 0 as the set's tiles are
-            LDX  #LAYER0+L_MODE
-            JSR  PORT0
-            LDA  #LM_TILE+LM_4BPP
-            LDB  BPP
-            CMPB #8
-            BNE  SETUPDISP1
-            LDA  #LM_TILE+LM_8BPP
-SETUPDISP1  TST  HIRES
-            BEQ  SETUPDISP2
-            ORA  #LM_HIRES
-SETUPDISP2  LDB  TSIZE
-            CMPB #16
-            BNE  SETUPDISP3
-            ORA  #LM_BIG
-SETUPDISP3  STA  VC_DATA0
             LDA  #GK_SPRTAB/$10000 ; sprite 0: the pointer
             LDX  #GK_SPRTAB&$FFFF
             JSR  PORT0
@@ -144,17 +121,11 @@ SETUPDISP3  STA  VC_DATA0
             LDA  #1
             STA  STATDIRTY
             JMP  REDRAWALL
-; From DC_CTRL: layer 0 and the sprites on; the backdrop (REDRAWALL); sprites
-; in 640x480 (how many: SETUPDISP), the table at UISPRITES. Layer 0: the map
-; (its mode set apart, its size and scrolling by MAPSETUP); layers 1 and 2 off.
+; From DC_CTRL: layer 0 and the sprites on (LAYERS: the layers shown); the
+; backdrop (REDRAWALL); sprites in 640x480 (how many: SETUPDISP), the table at
+; GK_SPRTAB. (The layers themselves: LAYERS.)
 SETTINGS    FCB  $09,0,1,2
             FCB  GK_SPRTAB/$10000,(GK_SPRTAB/$100)&$FF,GK_SPRTAB&$FF
-            FCB  0,0,0,0,0,0,0,0,0
-            FCB  0,0            ; (MAPSETUP: its size, scrolling)
-            FCB  MAPV/$10000,(MAPV/$100)&$FF,MAPV&$FF
-            FCB  TILES/$10000,(TILES/$100)&$FF,TILES&$FF
-            FDB  0,0,0
-            FCB  0,0
 SETEND
 ; The surfaces (gk_ui.asm): the panel, and the status rows under the map.
 GK_SURFS    FDB  PANELSURF,STATSURF,0
@@ -365,6 +336,10 @@ DLGCANCEL   JMP  HIDEDLG
 DLGOPEN     JSR  HIDEDLG
             JMP  OPENPROMPT
 DLGMAKE     CLR  MODE
+            LDA  MAPWC          ; (as it was, if the new one won't fit)
+            STA  OLDWC
+            LDA  MAPHC
+            STA  OLDHC
             LDA  NWC
             STA  MAPWC
             LDA  NHC
@@ -403,31 +378,117 @@ DLGMAKE1    LDX  #MAPNAME       ; (NEWPROJ forgets the map's name: kept here)
             STA  STATDIRTY
             JMP  DRAWHELP
 DLGMAKEMAP  CLR  KEEPNAME       ; a new map, the set as it is
-            JSR  NEWMAP
+            LDA  NWC            ; (if there is room beside its layer's tiles)
+            LDB  NHC
+            JSR  FITSMAP
+            BCC  DLGMAKEMAP1
+            LDA  OLDWC          ; (no: the map as it was)
+            STA  MAPWC
+            LDA  OLDHC
+            STA  MAPHC
+            JSR  REDRAWALL
+            LDX  #T_NOROOM
+            JMP  MESSAGE
+DLGMAKEMAP1 JSR  NEWMAP
             JMP  DRAWHELP
-; NEWMAP: a new map of MAPWC x MAPHC cells, every one tile 0.
-NEWMAP      LDA  #C_FILL
+; NEWMAP: a new map of MAPWC x MAPHC cells for this layer, every one tile 0.
+NEWMAP      JSR  MAPSETUP       ; (MBASE, MAPBYTES)
+            JSR  CAPACITY       ; (room for tiles: what the map leaves)
+            LDA  #C_FILL
             STA  VC_CMD
-            LDA  #MAPV/$10000
-            STA  VC_CMD
-            LDD  #MAPV&$FFFF
-            JSR  CMDD
-            LDD  #$0080         ; 32KB
-            JSR  CMDD
+            JSR  MBASECMD
             CLRA
             STA  VC_CMD
+            LDD  MAPBYTES
+            JSR  CMDD
+            CLRA
             STA  VC_CMD
             JSR  WAITCMD
             CLRD
             STD  SCRX
             STD  SCRY
             CLR  MAPMOD
+            CLR  MAPNAME
             CLR  UCOUNT
             CLR  UHEAD
-            JSR  MAPSETUP
             LDA  #1
             STA  STATDIRTY
+            JMP  REDRAWALL
+; FITSMAP: is there room in this layer's room for a map of A x B (the size
+; codes) beside the tiles of the tile set kept there? Carry set if not.
+FITSMAP     PSHS D
+            JSR  STOREREC
+            LDD  #64            ; the map, in 32 bytes
+            LDF  ,S
+            ADDF 1,S
+            BEQ  FITSMAP2
+FITSMAP1    LSLD
+            DECF
+            BNE  FITSMAP1
+FITSMAP2    STD  ,S
+            CLR  GK_T           ; the tile set in its room (slot CURL): in use?
+            LDB  #2
+FITSMAP3    JSR  LREC
+            LDA  LR_SET,X
+            CMPA CURL
+            BNE  FITSMAP4
+            INC  GK_T
+FITSMAP4    DECB
+            BPL  FITSMAP3
+            CLRD
+            TST  GK_T
+            BEQ  FITSMAP6
+            LDB  CURL           ; its tiles, in 32 bytes: NTILES << (shift - 5)
+            JSR  TSREC
+            LDA  TS_BPP,X
+            LDB  TS_TSIZE,X
+            BSR  TBSHOF
+            SUBA #5
+            TFR  A,F
+            LDD  TS_NTILES,X
+            TSTF
+            BEQ  FITSMAP6
+FITSMAP5    LSLD
+            DECF
+            BNE  FITSMAP5
+FITSMAP6    ADDD ,S++
+            CMPD #SLICE/32
+            BHI  FITSMAP8
+            ANDCC #$FE
             RTS
+FITSMAP8    ORCC #$01
+            RTS
+; TBSHOF: A = log2 of a tile's bytes, for A bits a pixel and B pixels square.
+TBSHOF      CMPB #16
+            BEQ  TBSHOF1
+            LDB  #6
+            BRA  TBSHOF2
+TBSHOF1     LDB  #8
+TBSHOF2     CMPA #8
+            BEQ  TBSHOF3
+            DECB
+TBSHOF3     TFR  B,A
+            RTS
+; ROOMFOR: D = how many tiles of 1 << A bytes fit in this tile set's room,
+; beside the map of the layer kept there (1024 at most).
+ROOMFOR     PSHS A
+            LDB  CURSET
+            JSR  LREC
+            JSR  STOREREC
+            LDB  CURSET
+            JSR  LREC
+            JSR  LMAPBYTES
+            PSHS D
+            LDD  #SLICE
+            SUBD ,S++
+            LDF  ,S+
+ROOMFOR1    LSRD
+            DECF
+            BNE  ROOMFOR1
+            CMPD #1024
+            BLS  ROOMFOR9
+            LDD  #1024
+ROOMFOR9    RTS
 ; STRCPY: the string at X to Y.
 STRCPY      LDA  ,X+
             STA  ,Y+
@@ -688,8 +749,7 @@ SAVEFILE1   ANDA #2
             LDY  #512
             BSR  FWRITE
             BCS  SAVEERR
-            LDA  #TILES/$10000  ; the tiles, from the card, 512 bytes at a time
-            LDX  #TILES&$FFFF
+            JSR  TBASEAX  ; the tiles, from the card, 512 bytes at a time
             JSR  PORT1
             LDD  NTILES
             STD  FLEFT
@@ -833,6 +893,14 @@ LOADFILE2   LDD  HDRBUF+8
             PSHS X
             CMPD ,S++
             LBHI NOTSET
+            PSHS D              ; room for them, beside this layer's map?
+            LDA  HDRBUF+5
+            LDB  HDRBUF+4
+            JSR  TBSHOF
+            JSR  ROOMFOR
+            CMPD ,S
+            PULS D
+            LBLO NOROOM
             STD  NTILES         ; yes: it is the set from here on
             LDA  HDRBUF+4
             STA  TSIZE
@@ -843,17 +911,14 @@ LOADFILE2   LDD  HDRBUF+8
             STA  HIRES
             JSR  SETPROJ
             JSR  FRESH
-            LDA  #$80           ; the card fresh, then the palette
-            STA  VC_CTRL
-            LDX  #PALBUF
+            LDX  #PALBUF        ; the palette (the card's: all the layers')
             LDY  #512
             JSR  FREAD
             BCS  LOADSHORT
             CMPX #512
             BNE  LOADSHORT
             JSR  WRPAL
-            LDA  #TILES/$10000  ; and the tiles
-            LDX  #TILES&$FFFF
+            JSR  TBASEAX  ; and the tiles
             JSR  PORT0
             LDD  NTILES
             STD  FLEFT
@@ -886,8 +951,6 @@ LOAD9       LDA  HDRBUF+6       ; the tiles' own rows, if they are there
             STA  COLOR
 LOAD10      BSR  CLOSEF
             JSR  NAMEIT
-            CLR  MAPNAME        ; (the card reset: the map is blank)
-            CLR  MAPMOD
             JSR  SETUPDISP
             LDX  #T_OPENED
             JSR  MESSAGE
@@ -895,11 +958,15 @@ LOAD10      BSR  CLOSEF
             RTS
 LOADSHORT   BSR  CLOSEF         ; (what there was of it, anyway)
             JSR  NAMEIT
-            CLR  MAPNAME
-            CLR  MAPMOD
             JSR  SETUPDISP
             LDX  #T_SHORT
             JSR  MESSAGE
+            ORCC #$01
+            RTS
+NOROOM      BSR  CLOSEF
+            LDX  #T_NOROOM
+            JSR  MESSAGE
+            LDA  #ERR_TOOBIG
             ORCC #$01
             RTS
 NOTSET      BSR  CLOSEF
@@ -948,8 +1015,7 @@ SAVEMAP4    LDX  #MHDR
             LDY  #48
             BSR  MWRITE
             BCS  SAVEMAPE
-            LDA  #MAPV/$10000   ; the cells, from the card, 512 bytes at a time
-            LDX  #MAPV&$FFFF
+            JSR  MBASEAX   ; the cells, from the card, 512 bytes at a time
             JSR  PORT1
             LDD  MAPBYTES
             STD  FLEFT
@@ -1038,7 +1104,11 @@ LOADMAP     LDY  #MPATHBUF      ; (its name kept apart: opening its tile set
             LDX  #MHDR+8        ; no: that one
             JSR  LOADFILE
             LBCS NOSETFOR
-LOADMAP1    LDA  NWC
+LOADMAP1    LDA  NWC            ; room for it, beside the tiles in its layer's room?
+            LDB  NHC
+            JSR  FITSMAP
+            LBCS LMNOROOM
+            LDA  NWC
             STA  MAPWC
             LDA  NHC
             STA  MAPHC
@@ -1046,8 +1116,8 @@ LOADMAP1    LDA  NWC
             STD  SCRX
             STD  SCRY
             JSR  MAPSETUP
-            LDA  #MAPV/$10000   ; the cells, into the card
-            LDX  #MAPV&$FFFF
+            JSR  CAPACITY
+            JSR  MBASEAX   ; the cells, into the card
             JSR  PORT0
             LDD  MAPBYTES
             STD  FLEFT
@@ -1077,6 +1147,9 @@ LMSHORT     JSR  MCLOSE         ; (what there was of it)
             JSR  MAPNAMED
             CLR  UCOUNT
             LDX  #T_SHORT
+            BRA  LMFAIL
+LMNOROOM    JSR  MCLOSE
+            LDX  #T_NOROOM
             BRA  LMFAIL
 NOTMAP      JSR  MCLOSE
             LDX  #T_NOTMAP
@@ -1162,6 +1235,7 @@ T_BADNAME   FCN  "NOT A FILE NAME (8.3: NAME.EXT)"
 T_ISDIR     FCN  "THAT IS A DIRECTORY"
 T_FERR      FCN  "FILE ERROR $"
 T_NEWFILE   FCN  "A NEW FILE: WHAT KIND OF TILE SET AND MAP?"
+T_NOROOM    FCN  "NO ROOM: THE LAYER'S TILES AND MAP ARE 48KB AT MOST"
 T_NOTMAP    FCN  "THAT ISN'T A MAP FILE (OR NOT ONE THIS CAN HOLD)"
 T_MAPTS     FCN  "ITS TILE SET WON'T OPEN: "
 T_MAPTSEND
@@ -1169,6 +1243,8 @@ T_MAPTSEND
 NTS         FCB  8          ; the new set's answers
 NBPP        FCB  4
 NHIRES      FCB  0
+OLDWC       FCB  0
+OLDHC       FCB  0
 NWC         FCB  1          ;   the map's width and height (codes, as MAPWC)
 NHC         FCB  1
 NKEEP       FCB  0          ;   1: just a new map, for the set there is

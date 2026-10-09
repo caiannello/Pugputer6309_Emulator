@@ -50,8 +50,7 @@ TK_BASE     equ  $4000
 TK_STACK    equ  $EF00
 
 ; Video memory.
-TILES       equ  $000000    ; the tile set: up to 64KB
-MAPV        equ  $010000    ; layer 0's map: up to 32KB
+                            ; $000000-$023FFF: the three layers' rooms (tk_layer.asm)
 PCOL0       equ  $024000    ; the panel (a surface: gk_ui.asm): 4 columns, 64, 64,
 PCOL1       equ  $02B800    ;   32 and 16 wide, 480 high
 PCOL2       equ  $033000
@@ -69,9 +68,9 @@ VIEWH       equ  448
 ; surface, shown by sprites -- the card's three layers are all the map's.
 PANELX      equ  464
 PANELW      equ  176
-TOOLY       equ  20         ; the tool buttons: 7 of 22x22, 25 apart, from x 1
+TOOLY       equ  34         ; the tool buttons: 7 of 22x22, 25 apart, from x 1
 ZOOMX       equ  24         ; the magnified tile: 128x128
-ZOOMY       equ  56
+ZOOMY       equ  60
 PALX        equ  8          ; the palette: 16x16 colors of 10x8
 PALY        equ  192
 SLY         equ  322        ; red, green and blue: bars 12 high
@@ -83,6 +82,8 @@ TSX         equ  3          ; the tile set: 10 across, 5 down, 17 apart
 TSY         equ  352
 TSVIS       equ  50         ;   (so many in sight)
 TSROW       equ  21         ; the text row above it (NEW, DUP)
+LAYROW      equ  0          ; the panel's text rows: the layers,
+SETROW      equ  1          ;   the tile set's file
 MAPROW      equ  28         ; the panel's text row under it: the map's name
 HELPROW     equ  28         ; the text row of the keys, or a message
 STATROW     equ  29         ; the text row of what is being edited
@@ -109,6 +110,7 @@ R_DUP       equ  8
 R_TSET      equ  9
 R_MAP       equ  10
 R_PAN       equ  11         ; (the map being moved with the middle button)
+R_LAYER     equ  12         ; the layer bar
 
 ; What the keys do.
 M_EDIT      equ  0
@@ -217,6 +219,9 @@ UPCHAR9     RTS
 EDITKEY     LDA  KCODE
             CMPA #K_ESC
             LBEQ QUITCMD
+            JSR  LAYERKEY       ; (1 2 3: the layers)
+            BCC  EDITKEY9
+            LDA  KCODE
             JSR  MAPKEYS        ; (the arrows, Home: the map scrolls)
             BCC  EDITKEY9
             LDA  KCODE
@@ -265,6 +270,10 @@ KEYTAB      FCB  'P
             FDB  NEXTTILE
             FCB  '>
             FDB  NEXTTILE
+            FCB  '[
+            FDB  LAYERBACK
+            FCB  ']
+            FDB  LAYERFWD
             FCB  'H
             FDB  FLIPH
             FCB  'V
@@ -376,8 +385,9 @@ REGION      LSLA
             JMP  ,X
 REGION9     RTS
 PRESSTAB    FDB  0,TOOLCLICK,ZPRESS,PALCLICK,0,0,0,NEWTILE,DUPTILE,TSETCLICK,MPRESS,0
-DRAGTAB     FDB  0,0,ZDRAG,0,SLDRAG,SLDRAG,SLDRAG,0,0,0,MDRAG,MPAN
-UPTAB       FDB  0,0,0,0,PALDONE,PALDONE,PALDONE,0,0,0,0,0
+            FDB  LAYERCLICK
+DRAGTAB     FDB  0,0,ZDRAG,0,SLDRAG,SLDRAG,SLDRAG,0,0,0,MDRAG,MPAN,0
+UPTAB       FDB  0,0,0,0,PALDONE,PALDONE,PALDONE,0,0,0,0,0,0
 ; HITTEST: what the mouse is over: A the region (R_...), B which part of it.
 HITTEST     LDD  MOUSEX
             CMPD #PANELX
@@ -391,6 +401,21 @@ HTPANEL     SUBD #PANELX
             STD  HX
             LDD  MOUSEY
             STD  HY
+            CMPD #16            ; the layer bar
+            BHS  HT1
+            LDD  MOUSEX
+            LSRD
+            LSRD
+            LSRD
+            SUBB #LAYBARCOL
+            LBLO HTNONE
+            CLRA
+            DIVD #3
+            CMPB #3
+            LBHS HTNONE
+            LDA  #R_LAYER
+            RTS
+HT1         LDD  HY
             CMPD #TOOLY         ; the tools
             BLO  HT2
             CMPD #TOOLY+22
@@ -827,8 +852,13 @@ UNDOSLOT    LDA  #UNDOSIZE/2
             TFR  D,X
             RTS
 PUSHUNDO    LDB  UHEAD
-            LDX  #UTYPE         ; (a tile's step)
-            CLR  B,X
+            LDX  #UTYPE         ; (a tile's step, and its layer's)
+            LDA  CURL
+            LSLA
+            LSLA
+            LSLA
+            LSLA
+            STA  B,X
             BSR  UNDOSLOT
             LDD  TILE
             STD  ,X++
@@ -865,14 +895,26 @@ UNDO1       DEC  UCOUNT
             ANDB #UNDOS-1
             STB  UHEAD
             LDX  #UTYPE
-            TST  B,X
+            LDA  B,X
+            STA  UTHIS
+            LSRA                ; (another layer's step: that layer first)
+            LSRA
+            LSRA
+            LSRA
+            CMPA CURL
+            BEQ  UNDO0
+            TFR  A,B
+            JSR  SELLAYER
+UNDO0       LDB  UHEAD
+            LDA  UTHIS
+            BITA #1
             BEQ  UNDO3
             JSR  MAPBACKU       ; a map's step: the map as it was
             LDA  #1
             STA  MAPMOD
             STA  STATDIRTY
             RTS
-UNDO3       BSR  UNDOSLOT
+UNDO3       JSR  UNDOSLOT
             LDD  ,X++
             PSHS X
             CMPD TILE           ; another tile: go to it first
@@ -995,8 +1037,10 @@ TILEADDR    LDF  TBSHIFT
 TILEADDR1   LSLD
             DECF
             BNE  TILEADDR1
+            ADDD TBASE+1        ; + where the tile set is
             TFR  D,X
-            LDA  #TILES/$10000
+            LDA  TBASE
+            ADCA #0
             RTS
 ; LOADTILE: TILEBUF from the card.
 LOADTILE    LDD  TILE
@@ -1190,6 +1234,7 @@ SETTROW     PSHS A
             INCLUDE "tk_file.asm"
             INCLUDE "tk_src.asm"
             INCLUDE "tk_ini.asm"
+            INCLUDE "tk_layer.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------
@@ -1250,7 +1295,9 @@ FOLD        FCB  0
 FIDX        FCB  0
 UHEAD       FCB  0          ; the next undo slot
 UCOUNT      FCB  0          ; steps that can be undone
-UTYPE       FCB  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; each slot: 0 a tile's, 1 the map's
+UTYPE       FCB  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; each slot: bit 0 the map's (else a
+                            ; tile's); bits 4-5 its layer
+UTHIS       FCB  0
 USLOT       FCB  0,0,0      ; a map step's place in the PSRAM
 MAPWC       FCB  1          ; the map: its width, 32 << this (64)
 MAPHC       FCB  1          ;   and height (64)
@@ -1259,7 +1306,7 @@ MAPH        FDB  64
 MAPWSH      FCB  6          ;   log2 of the width
 MAPBYTES    FDB  8192
 SCLSH       FCB  1          ;   1 at 320x240: a layer pixel is 2 screen ones
-SCRX        FDB  0          ;   scrolled to here (the layer's pixels)
+SCRX        FDB  0          ; the view, scrolled to here (the screen's pixels)
 SCRY        FDB  0
 MAPMOD      FCB  0          ;   changed since saved
 MPEN        FDB  0          ;   the cell the tool puts down
@@ -1277,6 +1324,8 @@ FX          FCB  0          ; the map's fill (FX, FY: a word)
 FY          FCB  0
 FOLDC       FDB  0
 FUP         FCB  0
+EXTW        FDB  0          ; how far the layers reach (the screen's pixels)
+EXTH        FDB  0
 PICKED      FDB  0          ; the cell picked up
 FDOWN       FCB  0
             INCLUDE "gk_ui.asm" ; (it ends with space reserved, as this does)
@@ -1288,6 +1337,9 @@ MFSTACK     RMB  MFMAX*2
 TROW        RMB  1024       ; each tile's own row (16-color sets): its picture in it
 PAL8BUF     RMB  512        ; TILEKIT.INI's palettes: for 256-color sets
 PAL4BUF     RMB  512        ;   and for 16-color ones
+LRECS       RMB  3*LRSIZE   ; the layers' records (tk_layer.asm)
+TSRECS      RMB  3*TSRSIZE  ;   and the tile sets' (these two together)
+TROWS       RMB  3*1024     ;   and the tile sets' own TROWs
 TILEBUF     RMB  256        ; the tile being edited, a byte a pixel
 THUMBBUF    RMB  256
 FSTACK      RMB  256

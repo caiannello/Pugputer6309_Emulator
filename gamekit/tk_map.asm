@@ -15,8 +15,9 @@ MFMAX       equ  1024       ; the fill's stack: places to look from, at most
 ;------------------------------------------------------------------------------
 ; The map's size, and the card for it.
 ;------------------------------------------------------------------------------
-; MAPSETUP: MAPW, MAPH and the rest from MAPWC, MAPHC; the scroll kept in the
-; map; layer 0, the cursor and the cover set up for it.
+; MAPSETUP: MAPW, MAPH and the rest from MAPWC, MAPHC and HIRES (the layer
+; being edited); MBASE; the cursor; the scroll kept in the layers; the card's
+; layers set up.
 MAPSETUP    LDD  #32            ; MAPW = 32 << MAPWC
             LDF  MAPWC
             BEQ  MAPSETUP2
@@ -48,69 +49,66 @@ MAPSETUP6   STD  MAPBYTES
             INC  SCLSH
 MAPSETUP7   LDA  #$FF           ; (nothing under the mouse yet)
             STA  HOVX
-            LDA  #VC_CFG/$10000 ; layer 0: its size, where it is
-            LDX  #LAYER0+L_MAP
-            JSR  PORT0
-            LDA  MAPHC
-            LSLA
-            LSLA
-            ORA  MAPWC
-            STA  VC_DATA0
-            LDA  #MAPV/$10000
-            STA  VC_DATA0
-            LDD  #MAPV&$FFFF
-            STA  VC_DATA0
-            STB  VC_DATA0
+            LDB  CURL           ; MBASE: the end of its layer's room, less the map
+            INCB
+            JSR  SLICEOF
+            PSHS D
+            LDD  MAPBYTES
+            TFR  A,B
+            CLRA
+            PSHS D
+            LDD  2,S
+            SUBD ,S++
+            LEAS 2,S
+            STD  MBASE
+            CLR  MBASE+2
             JSR  MKCURSOR
-; MAPSCROLL: SCRX, SCRY kept in the map, and the layer scrolled there.
-MAPSCROLL   LDD  MAPW           ; the most across: the map's width less the view's
-            BSR  MPIX
-            STD  GK_T
-            LDD  #VIEWW
-            BSR  LPIX
-            PSHS D
-            LDD  GK_T
-            SUBD ,S++
+; MAPSCROLL: SCRX, SCRY (the screen's pixels) kept within the largest layer,
+; and the card's layers set up and scrolled there.
+MAPSCROLL   JSR  STOREREC
+            CLRD
+            STD  EXTW
+            STD  EXTH
+            LDB  #2
+MAPSCROLL1  PSHS B              ; the most any layer reaches
+            JSR  LEXTENT
+            CMPD EXTW
+            BLS  MAPSCROLL2
+            STD  EXTW
+MAPSCROLL2  CMPW EXTH
+            BLS  MAPSCROLL3
+            STW  EXTH
+MAPSCROLL3  PULS B
+            DECB
             BPL  MAPSCROLL1
+            LDD  EXTW           ; less the view: the most it can scroll
+            SUBD #VIEWW
+            BPL  MAPSCROLL4
             CLRD
-MAPSCROLL1  CMPD SCRX
-            BHS  MAPSCROLL2
+MAPSCROLL4  CMPD SCRX
+            BHS  MAPSCROLL5
             STD  SCRX
-MAPSCROLL2  LDD  MAPH           ; and down
-            BSR  MPIX
-            STD  GK_T
-            LDD  #VIEWH
-            BSR  LPIX
-            PSHS D
-            LDD  GK_T
-            SUBD ,S++
-            BPL  MAPSCROLL3
+MAPSCROLL5  LDD  EXTH
+            SUBD #VIEWH
+            BPL  MAPSCROLL6
             CLRD
-MAPSCROLL3  CMPD SCRY
-            BHS  MAPSCROLL4
+MAPSCROLL6  CMPD SCRY
+            BHS  MAPSCROLL7
             STD  SCRY
-MAPSCROLL4  LDA  #VC_CFG/$10000
-            LDX  #LAYER0+L_HSCROLL
-            JSR  PORT0
-            LDD  SCRX
-            STA  VC_DATA0
-            STB  VC_DATA0
-            LDD  SCRY
-            STA  VC_DATA0
-            STB  VC_DATA0
-            LDA  #$FF
+MAPSCROLL7  LDA  #$FF
             STA  HOVX
-            RTS
-; MPIX: D cells in the layer's pixels. LPIX: D screen pixels in the layer's.
+            JMP  LAYERS
+; MPIX: D cells (signed) in the layer's pixels. SPIX: in the screen's.
 MPIX        LDF  TSHIFT
 MPIX1       LSLD
             DECF
             BNE  MPIX1
             RTS
-LPIX        TST  SCLSH
-            BEQ  LPIX9
-            LSRD
-LPIX9       RTS
+SPIX        BSR  MPIX
+            TST  SCLSH
+            BEQ  SPIX9
+            LSLD
+SPIX9       RTS
 ; MKCURSOR: sprite 1, the frame round the cell under the mouse: a square the
 ; size a cell is on the screen (8, 16 or 32 pixels), in UI_HI.
 MKCURSOR    LDA  TSIZE          ; its size: the tile's, doubled at 320x240
@@ -184,21 +182,15 @@ HOVER1      CMPD HOVX
             BEQ  HOVER2
             CLRA                ; X: the cell's left edge on the screen
             LDB  HOVX
-            JSR  MPIX
+            JSR  SPIX
             SUBD SCRX
-            TST  SCLSH
-            BEQ  HOVER3
-            LSLD
-HOVER3      STA  VC_DATA0
+            STA  VC_DATA0
             STB  VC_DATA0
             CLRA                ; Y: its top
             LDB  HOVY
-            JSR  MPIX
+            JSR  SPIX
             SUBD SCRY
-            TST  SCLSH
-            BEQ  HOVER4
-            LSLD
-HOVER4      STA  VC_DATA0
+            STA  VC_DATA0
             STB  VC_DATA0
             LDA  CURATTR
             ORA  #SS_FRONT
@@ -220,8 +212,8 @@ HOVER5      STA  VC_DATA0
 MAPCELL     LDD  MOUSEX
             CMPD #VIEWW
             BHS  MAPCELL9
-            JSR  LPIX
             ADDD SCRX
+            BSR  LPIX
             BSR  CELLOF
             CMPD MAPW
             BHS  MAPCELL9
@@ -229,8 +221,8 @@ MAPCELL     LDD  MOUSEX
             LDD  MOUSEY
             CMPD #VIEWH
             BHS  MAPCELL9
-            JSR  LPIX
             ADDD SCRY
+            BSR  LPIX
             BSR  CELLOF
             CMPD MAPH
             BHS  MAPCELL9
@@ -239,7 +231,11 @@ MAPCELL     LDD  MOUSEX
             RTS
 MAPCELL9    ORCC #$01
             RTS
-; CELLOF: the layer's pixel D as a cell.
+; LPIX: D screen pixels in the layer's. CELLOF: the layer's pixel D as a cell.
+LPIX        TST  SCLSH
+            BEQ  LPIX9
+            LSRD
+LPIX9       RTS
 CELLOF      LDF  TSHIFT
 CELLOF1     LSRD
             DECF
@@ -256,9 +252,10 @@ CELLADDR1   LSLD
             ADDB ,S
             ADCA #0
             LSLD                ; 2 bytes a cell
-            ADDD #MAPV&$FFFF
+            ADDD MBASE+1        ; + where the map is
             TFR  D,X
-            LDA  #MAPV/$10000
+            LDA  MBASE
+            ADCA #0
             LEAS 2,S
             RTS
 ; GETCELL: D = cell A = x, B = y.
@@ -423,24 +420,17 @@ MLINE       JSR  PEEKMAPU       ; the map as it was, then the line to here
 ; MPAN: the middle button held: the map moves with the mouse.
 MPAN        LDD  PANMX          ; across: where it started less how far the mouse went
             SUBD MOUSEX
-            JSR  LPIX2
             ADDD PANSX
             BPL  MPAN1
             CLRD
 MPAN1       STD  SCRX
             LDD  PANMY
             SUBD MOUSEY
-            JSR  LPIX2
             ADDD PANSY
             BPL  MPAN2
             CLRD
 MPAN2       STD  SCRY
             JMP  MAPSCROLL
-; LPIX2: D (signed) screen pixels in the layer's.
-LPIX2       TST  SCLSH
-            BEQ  LPIX29
-            ASRD
-LPIX29      RTS
 ; MFILL: from cell A = x, B = y, every cell like it that touches it (not
 ; diagonally) becomes MPEN: a row at a time, left to right, with a stack of the
 ; places above and below to go on from.
@@ -527,10 +517,7 @@ MFILL99     RTS
 MAPCLEAR    JSR  PUSHMAPU
             LDA  #C_FILL
             STA  VC_CMD
-            LDA  #MAPV/$10000
-            STA  VC_CMD
-            LDD  #MAPV&$FFFF
-            JSR  CMDD
+            JSR  MBASECMD
             CLRA
             STA  VC_CMD
             LDD  MAPBYTES
@@ -575,7 +562,7 @@ MAPKEYS2    LDB  KEYMODS        ; how far: a cell, or 8 with Shift
             LSLD
             LSLD
             LSLD
-MAPKEYS3    JSR  MPIX           ; (in the layer's pixels; signed)
+MAPKEYS3    JSR  SPIX           ; (in the screen's pixels; signed)
             ADDD ,X
             BPL  MAPKEYS4
             CLRD
@@ -593,7 +580,7 @@ MAPWHEEL    LDB  WHEEL
             BEQ  MAPWHEEL1
             LDX  #SCRX
 MAPWHEEL1   PULS D
-            JSR  MPIX           ; (signed: a whole number of cells)
+            JSR  SPIX           ; (signed: a whole number of cells)
             PSHS D
             LDD  ,X
             SUBD ,S++           ; away from you: towards the top
@@ -607,15 +594,17 @@ MAPWHEEL2   STD  ,X
 ; PUSHMAPU: the map as it is, as the newest step.
 PUSHMAPU    LDB  UHEAD
             LDX  #UTYPE
-            LDA  #1
+            LDA  CURL           ; (the map's step, and its layer's)
+            LSLA
+            LSLA
+            LSLA
+            LSLA
+            INCA
             STA  B,X
             BSR  MAPSLOT
             LDA  #C_COPY        ; video memory -> its slot
             STA  VC_CMD
-            LDA  #MAPV/$10000
-            STA  VC_CMD
-            LDD  #MAPV&$FFFF
-            JSR  CMDD
+            JSR  MBASECMD
             BSR  SLOTOUT
             CLRA
             STA  VC_CMD
@@ -632,10 +621,7 @@ MAPBACKU    BSR  MAPSLOT
             LDA  #C_COPY        ; its slot -> video memory
             STA  VC_CMD
             BSR  SLOTOUT
-            LDA  #MAPV/$10000
-            STA  VC_CMD
-            LDD  #MAPV&$FFFF
-            JSR  CMDD
+            JSR  MBASECMD
             CLRA
             STA  VC_CMD
             LDD  MAPBYTES
