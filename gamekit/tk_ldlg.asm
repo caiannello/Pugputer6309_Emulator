@@ -308,6 +308,8 @@ LROOM99     ORCC #$01
             RTS
 ; LDLGDO: the layer as asked.
 LDLGDO      CLR  MODE
+            LDA  #1
+            STA  PROJCHG
             JSR  TROWOUT
             LDB  CURL
             JSR  LREC

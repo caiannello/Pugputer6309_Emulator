@@ -420,6 +420,14 @@ DRAWTITLE   JSR  DRAWLAYERS
             JSR  TXSTR
             LDX  #MAPNAME
             LDA  MAPMOD
+            BSR  DRAWNAME
+            LDA  #58
+            LDB  #PROJROW
+            JSR  TXAT
+            LDX  #T_PROJNAME
+            JSR  TXSTR
+            LDX  #PROJNAME
+            LDA  PROJCHG
 ; DRAWNAME: the name at X ("(NEW)" if none), then * if A isn't 0, in 15 places.
 DRAWNAME    STA  NAMEMOD
             TST  ,X
@@ -440,7 +448,7 @@ DRAWNAME4   JSR  TXCH
             INCB
             JMP  TXSPC
 ; DRAWTSLABEL: above the set: how many tiles, and the NEW and DUP buttons.
-DRAWTSLABEL BSR  PANELTEXT
+DRAWTSLABEL JSR  PANELTEXT
             LDA  #58
             LDB  #TSROW
             JSR  TXAT
@@ -586,6 +594,7 @@ ICONS       FDB  $000C,$001E,$003F,$007E,$00FC,$01F8,$03F0,$07E0 ; pen
 ;------------------------------------------------------------------------------
 T_TSNAME    FCN  " TILES "
 T_MAPNAME   FCN  " MAP   "
+T_PROJNAME  FCN  " PROJ  "
 T_NONAME    FCN  "(NEW)"
 T_TILES     FCN  " TILES"
 T_NEWBTN    FCN  " NEW"

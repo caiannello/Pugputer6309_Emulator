@@ -462,6 +462,9 @@ TOGGLESHOW  JSR  LREC
             LDA  LR_SHOW,X
             EORA #1
             STA  LR_SHOW,X
+            LDA  #1
+            STA  PROJCHG
+            STA  STATDIRTY
             JSR  LAYERS
             LBRA DRAWLAYERS
 ; LAYERKEY: 1 2 3 (A the usage code): edit that layer, or with Shift show or
@@ -495,6 +498,8 @@ LAYERMOVE   LDA  ,X             ; (swapped with its neighbor)
             LDB  ,Y
             STB  ,X
             STA  ,Y
+            LDA  #1
+            STA  PROJCHG
             JSR  LAYERS
             JSR  DRAWLAYERS
             LDA  #1

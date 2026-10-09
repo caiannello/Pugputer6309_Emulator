@@ -80,11 +80,12 @@ SLBX        equ  120        ;   blue 0-31
 SWX         equ  158        ; the color itself
 TSX         equ  3          ; the tile set: 10 across, 5 down, 17 apart
 TSY         equ  352
-TSVIS       equ  50         ;   (so many in sight)
+TSVIS       equ  40         ;   (so many in sight: 4 rows)
 TSROW       equ  21         ; the text row above it (NEW, DUP)
 LAYROW      equ  0          ; the panel's text rows: the layers,
 SETROW      equ  1          ;   the tile set's file
-MAPROW      equ  28         ; the panel's text row under it: the map's name
+MAPROW      equ  27         ; the panel's text rows under it: the map's name,
+PROJROW     equ  28         ;   the project's
 HELPROW     equ  28         ; the text row of the keys, or a message
 STATROW     equ  29         ; the text row of what is being edited
 
@@ -288,6 +289,8 @@ KEYTAB      FCB  'P
             FDB  SAVECMD
             FCB  $01            ; ^A
             FDB  SAVEASCMD
+            FCB  $17            ; ^W
+            FDB  SAVELAYCMD
             FCB  $05            ; ^E
             FDB  EXPORTCMD
             FCB  $0C            ; ^L
@@ -1238,6 +1241,7 @@ SETTROW     PSHS A
             INCLUDE "tk_ini.asm"
             INCLUDE "tk_layer.asm"
             INCLUDE "tk_ldlg.asm"
+            INCLUDE "tk_proj.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------
@@ -1335,6 +1339,20 @@ FDOWN       FCB  0
 FILENAME    RMB  PR_MAX+1   ; the tile set's file
 MAPNAME     RMB  PR_MAX+1   ; the map's
 MPATHBUF    RMB  PR_MAX+1
+PROJNAME    RMB  PR_MAX+1   ; the project's file
+PPATH       RMB  PR_MAX+1
+PSTEMBUF    RMB  8
+TOKBUF      RMB  TOKMAX+1
+STAGE       RMB  0          ; a project being opened: what its file says
+STILES      RMB  3*(TOKMAX+1)
+SMAP        RMB  3*(TOKMAX+1)
+SSCREEN     RMB  3
+SSHOW       RMB  3
+SORDER      RMB  3
+SEDIT       RMB  1
+SNPAL       RMB  2
+SPAL        RMB  512
+STAGEEND    RMB  0
 EXPNAME     RMB  PR_MAX+1   ; an export's name, to start with
 MFSTACK     RMB  MFMAX*2
 TROW        RMB  1024       ; each tile's own row (16-color sets): its picture in it

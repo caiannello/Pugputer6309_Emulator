@@ -28,6 +28,8 @@ NEWPROJ     LDA  #$80
             CLR  MAPMOD
             CLR  FOCUS
             JSR  NEWLAYERS
+            CLR  PROJNAME
+            CLR  PROJCHG
             JMP  SETUPDISP
 ; FRESH: what a set just made or opened starts with.
 FRESH       LDX  #TROW          ; every tile's own row: 0
@@ -545,9 +547,18 @@ DLGKEYS     FCB  'T,'D,'R,'W,'H,'K
 ; SAVECMD: the tile set and the map, each if it has changed (asking for its
 ; name if it has none: a map's file names its tile set's, so the set needs one).
 ; SAVEASCMD: both, asking for both names.
-SAVECMD     CLR  SAVEAS
-            BRA  SAVETS
-SAVEASCMD   LDA  #1
+SAVECMD     TST  PROJNAME       ; the project (its name asked for, the first time)
+            BEQ  SAVEASCMD
+            LDX  #PROJNAME
+            JMP  SAVEPROJ
+SAVEASCMD   LDX  #T_SAVEPROJ    ; the project, under a name asked for
+            LDY  #PROJNAME
+            LDU  #T_EXTTKT
+            STU  PREXT
+            LDU  #SAVEPROJ
+            JMP  ASKNAME
+; SAVELAYCMD: the layer's tile set and map, under names asked for.
+SAVELAYCMD  LDA  #1
             STA  SAVEAS
 SAVETS      TST  SAVEAS
             BNE  SAVETS1
@@ -589,9 +600,9 @@ NEWCMD      CLR  KEEPNAME
             LDU  #NEWDIALOG
             BRA  IFSAVED
 QUITCMD     LDU  #QUITNOW
-IFSAVED     TST  MODIFIED       ; changes not saved: ask first
-            BNE  IFSAVED0
-            TST  MAPMOD
+IFSAVED     PSHS U              ; changes not saved (in any layer): ask first
+            JSR  ANYMOD
+            PULS U
             BEQ  IFSAVED1
 IFSAVED0    LDX  #T_DISCARD
             BRA  CONFIRM
@@ -672,10 +683,26 @@ PROMPTKEY1  CLR  MODE
 ; OPENANY: the file named at X: a map (.MAP), with its tile set; anything else,
 ; a tile set (and a new map for it). Carry set (A the error) if it couldn't be.
 OPENANY     PSHS X
+            LDY  #T_EXTTKT      ; a project?
+            BSR  ENDSIN
+            PULS X
+            LBEQ LOADPROJ
+            PSHS X
             BSR  ISMAP
             PULS X
             LBEQ LOADMAP
             JMP  LOADFILE
+; ENDSIN: the name at X ends in the extension at Y (4 characters)? (Z set if so.)
+ENDSIN      LDA  ,X+
+            BNE  ENDSIN
+            LEAX -5,X
+            LDB  #4
+ENDSIN1     LDA  ,X+
+            CMPA ,Y+
+            BNE  ENDSIN9
+            DECB
+            BNE  ENDSIN1
+ENDSIN9     RTS
 ; ISMAP: the name at X ends in ".MAP"? (Z set if so.)
 ISMAP       LDA  ,X+            ; (to its end)
             BNE  ISMAP
@@ -1226,6 +1253,7 @@ T_D8        FCN  "8x8"
 T_D16       FCN  "16x16"
 T_D4BIT     FCN  "16 (4 BIT)"
 T_D8BIT     FCN  "256 (8 BIT)"
+T_SAVEPROJ  FCN  "SAVE THE PROJECT AS: "
 T_SAVETS    FCN  "SAVE THE TILE SET AS: "
 T_SAVEMAP   FCN  "SAVE THE MAP AS: "
 T_OPEN      FCN  "OPEN: "

@@ -18,7 +18,10 @@ MFMAX       equ  1024       ; the fill's stack: places to look from, at most
 ; MAPSETUP: MAPW, MAPH and the rest from MAPWC, MAPHC and HIRES (the layer
 ; being edited); MBASE; the cursor; the scroll kept in the layers; the card's
 ; layers set up.
-MAPSETUP    LDD  #32            ; MAPW = 32 << MAPWC
+MAPSETUP    BSR  MAPCALC
+            BRA  MAPSETUP0
+; MAPCALC: MAPW, MAPH, MAPWSH, MAPBYTES, SCLSH, MBASE (no more).
+MAPCALC     LDD  #32            ; MAPW = 32 << MAPWC
             LDF  MAPWC
             BEQ  MAPSETUP2
 MAPSETUP1   LSLD
@@ -62,7 +65,8 @@ MAPSETUP7   LDA  #$FF           ; (nothing under the mouse yet)
             LEAS 2,S
             STD  MBASE
             CLR  MBASE+2
-            JSR  MKCURSOR
+            RTS
+MAPSETUP0   JSR  MKCURSOR
 ; MAPSCROLL: SCRX, SCRY (the screen's pixels) kept within the largest layer,
 ; and the card's layers set up and scrolled there.
 MAPSCROLL   JSR  STOREREC

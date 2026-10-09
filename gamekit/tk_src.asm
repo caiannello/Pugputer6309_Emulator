@@ -276,7 +276,7 @@ OUTCLOSE    JSR  OUTFLUSH
             BCS  OUTCLOSE9
             LDA  OERR
             BNE  OUTCLOSE9
-            LDX  #T_EXPORTED
+            LDX  OUTMSG
             JSR  MESSAGE
             ANDCC #$FE
             RTS
@@ -602,6 +602,7 @@ T_CELLSLAB  FCC  "; The cells, a row at a time"
             FCB  0
 T_ROWCOM    FCN  "; row "
 ;------------------------------------------------------------------------------
+OUTMSG      FDB  T_EXPORTED ; what OUTCLOSE says when it is done
 OHANDLE     FCB  0
 OERR        FCB  0          ; a write failed: its error
 OPTR        FDB  0          ; where the next character goes in IOBUF

@@ -57,6 +57,7 @@ struct Kit {
             disk_file("TK_INI.ASM", host_file(repo + "/gamekit/tk_ini.asm")),
             disk_file("TK_LAYER.ASM", host_file(repo + "/gamekit/tk_layer.asm")),
             disk_file("TK_LDLG.ASM", host_file(repo + "/gamekit/tk_ldlg.asm")),
+            disk_file("TK_PROJ.ASM", host_file(repo + "/gamekit/tk_proj.asm")),
             disk_file("GK_UI.ASM", host_file(repo + "/gamekit/gk_ui.asm")),
             disk_file("DEFINES.D", host_file(repo + "/bios/defines.d")),
             disk_file("VIDCARD.D", host_file(repo + "/vidcard/vidcard.d")),
@@ -215,7 +216,7 @@ TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
     k.frames(30);
     CHECK(!k.shows(2, "NEW TILE SET AND MAP"));
     CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8 16 ") && k.ram("TOOL") == 0);
-    CHECK(k.shows(1, "TILES (NEW)") && k.shows(28, "MAP   (NEW)") && k.shows(29, "MAP 064x064"));
+    CHECK(k.shows(1, "TILES (NEW)") && k.shows(27, "MAP   (NEW)") && k.shows(29, "MAP 064x064"));
     const uint8_t* l0 = k.c().cfg + VC_LAYER0;
     CHECK(l0[VC_L_MODE] == (VC_TILE | 0x10) && k.c().cfg[VC_DC_CTRL] == 0x0F); // (3 layers, sprites)
     // The pointer follows the mouse.
@@ -303,14 +304,16 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     uint16_t c196 = static_cast<uint16_t>(k.c().cfg[0x200 + 2 * 196] << 8 | k.c().cfg[0x201 + 2 * 196]);
     CHECK(c196 == 0xFFE0); // red 31, green 63, blue 0
     CHECK(k.shows(29, "R31 G63 B00"));
-    // ^S: the name, and saved.
-    k.key(0x16, false, true);
+    // ^W: the layer's tile set (then its map: Esc, not that), under a name.
+    k.key(0x1A, false, true);
     CHECK(k.shows(28, "SAVE THE TILE SET AS: _"));
     k.text("SET1");
     CHECK(k.shows(28, "SAVE THE TILE SET AS: SET1_"));
     k.key(0x28);
     k.frames(30);
-    CHECK(k.shows(28, "SAVED") && k.shows(1, "SET1.TLS ") && !k.shows(1, "SET1.TLS*")); // (the map: unchanged)
+    CHECK(k.shows(28, "SAVE THE MAP AS: "));
+    k.key(0x29);
+    CHECK(k.shows(1, "SET1.TLS ") && !k.shows(1, "SET1.TLS*"));
     std::vector<uint8_t> f = k.disk("/SET1.TLS");
     CHECK(f.size() == 16 + 512 + 3 * 256);
     if (f.size() == 16 + 512 + 3 * 256) {
@@ -362,9 +365,12 @@ TEST(tilekit_opens_the_file_it_is_given_or_makes_it) {
     k.frames(30);
     CHECK(k.shows(1, "NEWONE.TLS"));
     CHECK(k.shows(1, "NEWONE.TLS*")); // (not written yet)
-    k.key(0x16, false, true); // ^S: it has a name, so no question
+    k.key(0x1A, false, true); // ^W: its name to start with
+    CHECK(k.shows(28, "SAVE THE TILE SET AS: NEWONE.TLS_"));
+    k.key(0x28);
     k.frames(30);
-    CHECK(k.shows(28, "SAVED") && k.shows(1, "NEWONE.TLS "));
+    k.key(0x29); // (not the map)
+    CHECK(k.shows(1, "NEWONE.TLS "));
     CHECK(k.disk("/NEWONE.TLS").size() == 16 + 512 + 32 + 1); // (+ the tile's row)
     k.key(0x29);
     CHECK(k.prompt(200000000));
@@ -425,8 +431,8 @@ TEST(tilekit_picks_clears_moves_between_tiles_and_scrolls_the_set) {
     k.mouse(kPanelX + 50, 380);
     k.v.mouse_wheel(-5);
     k.frames(5);
-    k.click(kPanelX + 3 + 8, 352 + 8); // the first in sight now: row 2 (5 rows of 10 in sight)
-    CHECK(k.shows(29, "TILE 0020/0070"));
+    k.click(kPanelX + 3 + 8, 352 + 8); // the first in sight now: row 3 (4 rows of 10 in sight)
+    CHECK(k.shows(29, "TILE 0030/0070"));
     k.dump("4-many");
 }
 
@@ -453,7 +459,7 @@ TEST(tilekit_puts_tiles_on_the_map_with_every_tool_and_undoes_them) {
     CHECK((s1[6] >> 6) == 0 && k.shows(29, "AT ---,---"));
     // The pen: tile 1 at 3,2; flipped across (H) at 4,2; in palette row 1 at 5,2.
     k.click(Kit::mx(3), Kit::my(2));
-    CHECK(k.cell(3, 2) == 0x0001 && k.shows(28, "MAP   (NEW)*"));
+    CHECK(k.cell(3, 2) == 0x0001 && k.shows(27, "MAP   (NEW)*"));
     k.key(0x0B); // H
     CHECK(k.shows(29, "FLIP H-"));
     k.click(Kit::mx(4), Kit::my(2));
@@ -592,8 +598,8 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     k.click(Kit::zx(2), Kit::zy(2));
     k.click(Kit::mx(1), Kit::my(1));
     CHECK(k.cell(1, 1) == 1);
-    // ^S: the tile set's name, then the map's.
-    k.key(0x16, false, true);
+    // ^W: the tile set's name, then the map's.
+    k.key(0x1A, false, true);
     CHECK(k.shows(28, "SAVE THE TILE SET AS: _"));
     k.text("LV");
     k.key(0x28);
@@ -602,7 +608,7 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     k.text("LV1");
     k.key(0x28);
     k.frames(20);
-    CHECK(k.shows(1, "LV.TLS ") && k.shows(28, "LV1.MAP "));
+    CHECK(k.shows(1, "LV.TLS ") && k.shows(27, "LV1.MAP "));
     std::vector<uint8_t> m = k.disk("/LV1.MAP");
     CHECK(m.size() == 48 + 64 * 64 * 2);
     if (m.size() == 48 + 64 * 64 * 2) {
@@ -617,10 +623,13 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     k.key(0x1A); // W: 128
     k.key(0x28);
     k.frames(20);
-    CHECK(k.shows(1, "LV.TLS ") && k.shows(28, "MAP   (NEW)") && k.shows(29, "MAP 128x064") && k.cell(1, 1, 128) == 0);
+    CHECK(k.shows(1, "LV.TLS ") && k.shows(27, "MAP   (NEW)") && k.shows(29, "MAP 128x064") && k.cell(1, 1, 128) == 0);
     k.click(Kit::mx(2), Kit::my(3));
     CHECK(k.cell(2, 3, 128) == 1);
-    k.key(0x16, false, true); // ^S: the set is saved already; just the map's name
+    k.key(0x1A, false, true); // ^W: the set's name (saved already: as it is), then the map's
+    CHECK(k.shows(28, "SAVE THE TILE SET AS: LV.TLS_"));
+    k.key(0x28);
+    k.frames(20);
     CHECK(k.shows(28, "SAVE THE MAP AS: _"));
     k.text("LV2");
     k.key(0x28);
@@ -632,14 +641,14 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     k.text("LV1.MAP");
     k.key(0x28);
     k.frames(60);
-    CHECK(k.shows(28, "OPENED") && k.shows(29, "MAP 064x064") && k.cell(1, 1) == 1 && k.shows(28, "LV1.MAP "));
+    CHECK(k.shows(28, "OPENED") && k.shows(29, "MAP 064x064") && k.cell(1, 1) == 1 && k.shows(27, "LV1.MAP "));
     CHECK(k.shows(29, "TILE 0001/0002") || k.shows(29, "/0002"));
     k.key(0x29);
     CHECK(k.prompt(200000000));
     // From the shell: a map opens with its tile set.
     k.type("TILEKIT LV2.MAP");
     k.frames(120);
-    CHECK(k.shows(1, "LV.TLS ") && k.shows(28, "LV2.MAP ") && k.shows(29, "MAP 128x064") && k.cell(2, 3, 128) == 1);
+    CHECK(k.shows(1, "LV.TLS ") && k.shows(27, "LV2.MAP ") && k.shows(29, "MAP 128x064") && k.cell(2, 3, 128) == 1);
     CHECK(k.pix4(1, 2, 2) == 15);
     k.key(0x29);
     CHECK(k.prompt(200000000));
@@ -649,7 +658,7 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     CHECK(k.shows(2, "NEW TILE SET AND MAP"));
     k.key(0x28);
     k.frames(20);
-    CHECK(k.shows(28, "NOSUCH.MAP") && k.shows(1, "TILES (NEW)"));
+    CHECK(k.shows(27, "NOSUCH.MAP") && k.shows(1, "TILES (NEW)"));
 }
 
 
@@ -811,10 +820,11 @@ TEST(tilekit_shows_each_tile_in_its_own_row_and_keeps_them) {
     k.key(0x37); // . : tile 1 (row 5 again)
     CHECK(k.shows(29, "COLOR 082") && thumb(0, 0, 0) == 114);
     // Saved with the set, and back when it is opened.
-    k.key(0x16, false, true);
+    k.key(0x1A, false, true);
     k.text("ROWS");
     k.key(0x28);
     k.frames(20);
+    k.key(0x29); // (not the map)
     std::vector<uint8_t> f = k.disk("/ROWS.TLS");
     CHECK(f.size() == 16 + 512 + 2 * 32 + 2 && f.size() > 7 && (f[6] & 2));
     if (f.size() == 16 + 512 + 2 * 32 + 2) CHECK(f[16 + 512 + 64] == 7 && f[16 + 512 + 65] == 5);
@@ -974,4 +984,69 @@ TEST(tilekit_changes_a_layer_keeping_what_converts) {
     CHECK(k.ram("CURSET") == 1 && base(hw(1), VC_L_TILEBASE) == 0x00C000 && base(hw(0), VC_L_TILEBASE) == 0);
     CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8 16") && (hw(1)[VC_L_MODE] & 0x04) && !(hw(0)[VC_L_MODE] & 0x04));
     k.dump("9-layer-dialog");
+}
+
+TEST(tilekit_saves_and_opens_a_whole_project) {
+    Kit k;
+    if (!k.ok) return;
+    k.type("TILEKIT");
+    k.frames(60);
+    k.key(0x28);
+    k.frames(30);
+    // Layer 1: tile 1 on its map. Layer 2: a set of its own (^L, S), tile 1 too, on its map;
+    // 640x480. Layer 3: hidden, at the front still. A color changed.
+    k.key(0x11);
+    k.click(Kit::zx(1), Kit::zy(1));
+    k.click(Kit::mx(1), Kit::my(1));
+    k.key(0x1F); // 2
+    k.key(0x0F, false, true);
+    k.key(0x16); // S: its own
+    k.key(0x28);
+    k.frames(30);
+    k.key(0x11);
+    k.click(Kit::zx(2), Kit::zy(2));
+    k.click(Kit::mx(2), Kit::my(2));
+    k.key(0x20, true); // Shift+3: layer 3 hidden
+    k.mouse(kPanelX + 8 + 10, 322 + 5, 1); // (color 15's red: down to 2)
+    k.mouse(kPanelX + 8 + 2, 322 + 5, 1);
+    k.mouse(kPanelX + 8 + 2, 322 + 5, 0);
+    k.frames(60); // (the editor's colors: picked again, everything redrawn)
+    CHECK(k.shows(28, "PROJ  (NEW)*"));
+    // ^S: the project's name; the rest named after it.
+    k.key(0x16, false, true);
+    CHECK(k.shows(28, "SAVE THE PROJECT AS: _"));
+    k.text("GAME");
+    k.key(0x28);
+    k.frames(120);
+    CHECK(k.shows(28, "GAME.TKT ") && k.ram("CURL") == 1);
+    CHECK(k.disk("/GAME1.TLS").size() == 16 + 512 + 2 * 32 + 2 && k.disk("/GAME2.TLS").size() == 16 + 512 + 2 * 32 + 2);
+    CHECK(k.disk("/GAME1.MAP").size() == 48 + 8192 && k.disk("/GAME2.MAP").size() == 48 + 8192 &&
+          k.disk("/GAME3.MAP").size() == 48 + 8192);
+    std::vector<uint8_t> t = k.disk("/GAME.TKT");
+    std::string ts(t.begin(), t.end());
+    CHECK(ts.find("[PROJECT]\r\nORDER 1 2 3\r\nEDIT 2\r\n") != std::string::npos);
+    CHECK(ts.find("[LAYER1]\r\nTILES GAME1.TLS\r\nMAP GAME1.MAP\r\nSCREEN 320\r\nSHOW YES") != std::string::npos);
+    CHECK(ts.find("[LAYER2]\r\nTILES GAME2.TLS") != std::string::npos);
+    CHECK(ts.find("[LAYER3]\r\nTILES GAME1.TLS\r\nMAP GAME3.MAP\r\nSCREEN 320\r\nSHOW NO") != std::string::npos);
+    CHECK(ts.find("[PALETTE]\r\n000000 840000 008200") != std::string::npos); // (RGB565, back in 8 bits)
+    CHECK(ts.find(" 10FFFF\r\n") != std::string::npos || ts.find(" 10FFFF ") != std::string::npos); // (color 15)
+    std::vector<uint8_t> m3 = k.disk("/GAME3.MAP");
+    if (m3.size() > 20) CHECK(std::string(reinterpret_cast<const char*>(&m3[8])) == "GAME1.TLS");
+    // Saved: nothing asked on the way out.
+    k.key(0x29);
+    CHECK(k.prompt(200000000));
+    // The project from the shell: every layer as it was.
+    k.type("TILEKIT GAME.TKT");
+    k.frames(300);
+    CHECK(k.shows(28, "GAME.TKT ") && k.shows(27, "GAME2.MAP ") && k.ram("CURL") == 1);
+    auto hw = [&](int n) { return k.c().cfg + VC_LAYER0 + VC_LAYER_SIZE * n; };
+    auto base = [&](const uint8_t* l, int at) { return static_cast<uint32_t>(l[at] << 16 | l[at + 1] << 8 | l[at + 2]); };
+    CHECK(base(hw(0), VC_L_TILEBASE) == 0 && base(hw(1), VC_L_TILEBASE) == 0x00C000 && base(hw(2), VC_L_TILEBASE) == 0);
+    CHECK(k.c().cfg[VC_DC_CTRL] == 0x0B); // (layer 3 hidden)
+    CHECK(k.cell(1, 1, 64, 0x00A000) == 1 && k.cell(2, 2, 64, 0x016000) == 1);
+    CHECK(k.pix4(1, 1, 1, 0) == 15 && k.pix4(1, 2, 2, 0x00C000) == 15);
+    CHECK(k.c().cfg[0x200 + 2 * 15] == 0x17 && k.c().cfg[0x201 + 2 * 15] == 0xFF); // (red 2)
+    CHECK(!k.shows(28, "GAME.TKT*"));
+    k.key(0x29);
+    CHECK(k.prompt(200000000));
 }
