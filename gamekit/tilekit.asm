@@ -1354,6 +1354,7 @@ SNPAL       RMB  2
 SPAL        RMB  512
 STAGEEND    RMB  0
 EXPNAME     RMB  PR_MAX+1   ; an export's name, to start with
+EPATH       RMB  PR_MAX+1   ; the project module's
 MFSTACK     RMB  MFMAX*2
 TROW        RMB  1024       ; each tile's own row (16-color sets): its picture in it
 PAL8BUF     RMB  512        ; TILEKIT.INI's palettes: for 256-color sets

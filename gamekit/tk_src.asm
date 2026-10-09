@@ -14,32 +14,358 @@
 ;
 ; The text goes out through IOBUF, 512 bytes at a time. INCLUDEd by tilekit.asm.
 ;------------------------------------------------------------------------------
-; EXPORTCMD: ask for the tile set's module's name, then the map's (Esc skips one).
-EXPORTCMD   LDX  #FILENAME      ; the set's: its file's name, .ASM
-            LDY  #T_DEFSET
+; EXPORTCMD: the project as assembly source: its name asked for (the
+; project's, .ASM, to start with); then a module for each tile set in use and
+; each map, named after it (GAME.ASM: GAME1T.ASM ... the sets, GAME1M.ASM ...
+; the maps), and the project's own module, GAME.ASM, which INCLUDEs them.
+EXPORTCMD   LDX  #PROJNAME
+            LDY  #T_DEFPROJ
             JSR  ASMNAME
-            LDX  #T_EXPSET
+            LDX  #T_EXPPROJ
             LDY  #EXPNAME
             LDU  #T_EXTASM
             STU  PREXT
-            LDU  #EXPMAPQ       ; (Esc: on to the map)
-            STU  PRSKIP
-            LDU  #DOEXPSET
+            LDU  #EXPPROJ
             JMP  ASKNAME
-DOEXPSET    JSR  EXPSET
-            BCC  EXPMAPQ
-            RTS                 ; (it failed: said so)
-EXPMAPQ     LDX  #MAPNAME       ; the map's
-            LDY  #T_DEFMAP
-            JSR  ASMNAME
-            LDX  #T_EXPMAP
+; EXPPROJ: the project's modules, the project's own at X.
+EXPPROJ     LDY  #EPATH
+            JSR  STRCPY
+            LDX  #EPATH         ; ESTEM: its name, 6 characters at most
+            TFR  X,Y
+EXPPROJ1    LDA  ,X+
+            BEQ  EXPPROJ2
+            CMPA #'/
+            BNE  EXPPROJ1
+            TFR  X,Y
+            BRA  EXPPROJ1
+EXPPROJ2    LDX  #ESTEM
+            LDB  #6
+EXPPROJ3    LDA  ,Y+
+            BEQ  EXPPROJ4
+            CMPA #'.
+            BEQ  EXPPROJ4
+            STA  ,X+
+            DECB
+            BNE  EXPPROJ3
+EXPPROJ4    CLR  ,X
+            LDA  CURL
+            STA  PORIG
+            CLR  PSLOT          ; each tile set in use: GAMEnT.ASM
+EXPPROJ5    LDB  PSLOT
+            JSR  SLOTUSER
+            BCS  EXPPROJ6
+            JSR  SWITCHQ
+            LDB  PSLOT
+            LDA  #'T
+            JSR  COMPNAME
+            LDX  #EXPNAME
+            JSR  EXPSET
+            LBCS EXPPROJ99
+EXPPROJ6    INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ5
+            CLR  PSLOT          ; each map: GAMEnM.ASM
+EXPPROJ7    LDB  PSLOT
+            JSR  SWITCHQ
+            LDB  PSLOT
+            LDA  #'M
+            JSR  COMPNAME
+            LDX  #EXPNAME
+            JSR  EXPMAP
+            LBCS EXPPROJ99
+            INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ7
+            JSR  STOREREC       ; the project's own module
+            LDX  #EPATH
+            JSR  OUTOPEN
+            LBCS EXPPROJE
+            LDX  #T_PRJHEAD
+            JSR  OUTTEXT
+            CLR  PSLOT          ; INCLUDE "GAMEnT.ASM" ...
+EXPPROJ8    LDB  PSLOT
+            JSR  SLOTUSER
+            BCS  EXPPROJ9
+            LDA  #'T
+            LDB  PSLOT
+            JSR  OUTINC
+EXPPROJ9    INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ8
+            CLR  PSLOT
+EXPPROJ10   LDA  #'M
+            LDB  PSLOT
+            JSR  OUTINC
+            INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ10
+            LDX  #T_PRJVBASE    ; where they go: one after another
+            JSR  OUTTEXT
+            LDA  #'V
+            STA  PREVK
+            CLR  PSLOT
+EXPPROJ11   LDB  PSLOT
+            JSR  SLOTUSER
+            BCS  EXPPROJ12
+            LDA  #'T
+            LDB  PSLOT
+            JSR  OUTPLACE
+EXPPROJ12   INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ11
+            CLR  PSLOT
+EXPPROJ13   LDA  #'M
+            LDB  PSLOT
+            JSR  OUTPLACE
+            INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ13
+            LDX  #T_PRJEND      ; @_END
+            JSR  OUTTEXT
+            JSR  OUTPREV
+            JSR  OUTNL
+            LDX  #T_PRJSHOW     ; @_SHOW: the layers shown
+            JSR  OUTTEXT
+            CLRB
+            LDA  #1
+            STA  LBIT
+            CLR  LDCBITS
+EXPPROJ14   PSHS B
+            LDX  #ORDER
+            LDB  B,X
+            JSR  LREC
+            TST  LR_SHOW,X
+            BEQ  EXPPROJ15
+            LDA  LDCBITS
+            ORA  LBIT
+            STA  LDCBITS
+EXPPROJ15   LSL  LBIT
+            PULS B
+            INCB
+            CMPB #3
+            BLO  EXPPROJ14
+            CLRA
+            LDB  LDCBITS
+            JSR  OUTDEC
+            JSR  OUTNL
+            LDX  #T_PRJCODE     ; @_TOCARD: each set, each map, the palette, the layers
+            JSR  OUTTEXT
+            CLR  PSLOT
+EXPPROJ16   LDB  PSLOT
+            JSR  SLOTUSER
+            BCS  EXPPROJ17
+            LDA  #'T
+            LDB  PSLOT
+            JSR  OUTTOCARD
+EXPPROJ17   INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ16
+            CLR  PSLOT
+EXPPROJ18   LDA  #'M
+            LDB  PSLOT
+            JSR  OUTTOCARD
+            INC  PSLOT
+            LDA  PSLOT
+            CMPA #3
+            BLO  EXPPROJ18
+            LDX  #T_PRJCODE2
+            JSR  OUTTEXT
+            CLRB                ; @_LAYERS: the card's layers, from the back
+EXPPROJ19   PSHS B
+            LDX  #ORDER
+            LDB  B,X
+            STB  LTHIS
+            JSR  LREC
+            STX  LRP
+            JSR  OUTFCB         ; its mode, its map's size
+            LDB  LR_SET,X
+            STB  GK_BITS
+            JSR  TSREC
+            LDA  #LM_TILE+LM_4BPP
+            LDB  TS_BPP,X
+            CMPB #8
+            BNE  EXPPROJ20
+            LDA  #LM_TILE+LM_8BPP
+EXPPROJ20   LDB  TS_TSIZE,X
+            CMPB #16
+            BNE  EXPPROJ21
+            ORA  #LM_BIG
+EXPPROJ21   LDX  LRP
+            TST  LR_HIRES,X
+            BEQ  EXPPROJ22
+            ORA  #LM_HIRES
+EXPPROJ22   JSR  OUTHEX2
+            LDA  #',
+            JSR  OUTCH
+            LDX  LRP
+            LDA  LR_HC,X
+            LSLA
+            LSLA
+            ORA  LR_WC,X
+            JSR  OUTHEX2
+            JSR  OUTNL
+            JSR  OUTFCB         ; its map's place, its tiles'
+            LDA  #'M
+            LDB  LTHIS
+            JSR  OUTADDR3
+            JSR  OUTNL
+            JSR  OUTFCB
+            LDA  #'T
+            LDB  GK_BITS
+            JSR  OUTADDR3
+            JSR  OUTNL
+            LDX  #T_PRJLREST
+            JSR  OUTTEXT
+            PULS B
+            INCB
+            CMPB #3
+            LBLO EXPPROJ19
+            LDX  #T_PRJPAL      ; @_PAL: the palette
+            JSR  OUTTEXT
+            LDX  #PALBUF
+            LDE  #32
+EXPPROJ23   JSR  OUTFDB
+            LDF  #8
+EXPPROJ24   LDD  ,X++
+            JSR  OUTHEX4
+            DECF
+            BEQ  EXPPROJ25
+            LDA  #',
+            JSR  OUTCH
+            BRA  EXPPROJ24
+EXPPROJ25   JSR  OUTNL
+            DECE
+            BNE  EXPPROJ23
+            JSR  OUTCLOSE
+            BRA  EXPPROJ99
+EXPPROJE    JSR  FILEERR
+EXPPROJ99   LDB  PORIG          ; back to the layer being edited
+            JSR  SWITCHQ
+            JMP  REDRAWBACK
+; COMPNAME: EXPNAME = ESTEM, the digit B+1, the letter A, .ASM.
+COMPNAME    PSHS D
+            LDX  #ESTEM
             LDY  #EXPNAME
-            LDU  #T_EXTASM
-            STU  PREXT
-            LDU  #0             ; (Esc: done)
-            STU  PRSKIP
-            LDU  #EXPMAP
-            JMP  ASKNAME
+COMPNAME1   LDA  ,X+
+            BEQ  COMPNAME2
+            STA  ,Y+
+            BRA  COMPNAME1
+COMPNAME2   LDB  1,S
+            ADDB #'1
+            STB  ,Y+
+            LDA  ,S
+            STA  ,Y+
+            LEAS 2,S
+            LDX  #T_EXTASM
+            JMP  STRCPY
+; OUTCOMP: a component module's name (labels' start): ESTEM, B+1, A.
+OUTCOMP     PSHS D
+            LDX  #ESTEM
+            JSR  OUTTEXT
+            LDA  1,S
+            ADDA #'1
+            JSR  OUTCH
+            PULS D
+            JMP  OUTCH
+; OUTINC: |INCLUDE "GAMEnX.ASM"
+OUTINC      PSHS D
+            LDX  #T_PRJINC
+            JSR  OUTTEXT
+            PULS D
+            BSR  OUTCOMP
+            LDX  #T_PRJINC2
+            JMP  OUTTEXT
+; OUTPLACE: @_Xn|EQU  (the one before), and this one is the one before now.
+OUTPLACE    STA  PLACEK
+            STB  PLACED
+            LDX  #T_AT_
+            JSR  OUTTEXT
+            LDA  PLACEK
+            JSR  OUTCH
+            LDA  PLACED
+            ADDA #'1
+            JSR  OUTCH
+            LDX  #T_EQU
+            JSR  OUTTEXT
+            BSR  OUTPREV
+            JSR  OUTNL
+            LDA  PLACEK
+            STA  PREVK
+            LDA  PLACED
+            STA  PREVD
+            RTS
+; OUTPREV: where the one before ends: @_VBASE, or @_Tn+GAMEnT_TBYTES, or
+; @_Mn+GAMEnM_BYTES.
+OUTPREV     LDA  PREVK
+            CMPA #'V
+            BNE  OUTPREV1
+            LDX  #T_PRJVB
+            JMP  OUTTEXT
+OUTPREV1    LDX  #T_AT_
+            JSR  OUTTEXT
+            LDA  PREVK
+            JSR  OUTCH
+            LDA  PREVD
+            ADDA #'1
+            JSR  OUTCH
+            LDA  #'+
+            JSR  OUTCH
+            LDA  PREVK
+            LDB  PREVD
+            JSR  OUTCOMP
+            LDX  #T_PRJTB
+            LDA  PREVK
+            CMPA #'T
+            BEQ  OUTPREV2
+            LDX  #T_PRJMB
+OUTPREV2    JMP  OUTTEXT
+; OUTTOCARD: |LDA #@_Xn/$10000 |LDX #@_Xn&$FFFF |JSR GAMEnX_TOCARD
+OUTTOCARD   STA  PLACEK
+            STB  PLACED
+            LDX  #T_PRJLDA
+            JSR  OUTTEXT
+            BSR  OUTPLACEN
+            LDX  #T_PRJLDA2
+            JSR  OUTTEXT
+            LDX  #T_PRJLDX
+            JSR  OUTTEXT
+            BSR  OUTPLACEN
+            LDX  #T_PRJLDX2
+            JSR  OUTTEXT
+            LDX  #T_PRJJSR
+            JSR  OUTTEXT
+            LDA  PLACEK
+            LDB  PLACED
+            JSR  OUTCOMP
+            LDX  #T_PRJJSR2
+            JMP  OUTTEXT
+; OUTPLACEN: @_Xn
+OUTPLACEN   LDX  #T_AT_
+            JSR  OUTTEXT
+            LDA  PLACEK
+            JSR  OUTCH
+            LDA  PLACED
+            ADDA #'1
+            JMP  OUTCH
+; OUTADDR3: @_Xn/$10000,(@_Xn/$100)&$FF,@_Xn&$FF
+OUTADDR3    STA  PLACEK
+            STB  PLACED
+            BSR  OUTPLACEN
+            LDX  #T_PRJA1
+            JSR  OUTTEXT
+            BSR  OUTPLACEN
+            LDX  #T_PRJA2
+            JSR  OUTTEXT
+            BSR  OUTPLACEN
+            LDX  #T_PRJA3
+            JMP  OUTTEXT
 ; ASMNAME: EXPNAME = the name of the file at X without its extension (or the one
 ; at Y, if X is empty), and .ASM.
 ASMNAME     TST  ,X
@@ -471,12 +797,10 @@ T_POWERS    FDB  10000,1000,100,10,1
 ;------------------------------------------------------------------------------
 ; Words. (In the text written: @ the labels' start, | the opcode column.)
 ;------------------------------------------------------------------------------
-T_EXPSET    FCN  "EXPORT THE TILE SET AS: "
-T_EXPMAP    FCN  "EXPORT THE MAP AS: "
+T_EXPPROJ   FCN  "EXPORT THE PROJECT AS: "
+T_DEFPROJ   FCN  "GAME"
 T_EXPORTED  FCN  "EXPORTED"
 T_EXTASM    FCN  ".ASM"
-T_DEFSET    FCN  "TILES"
-T_DEFMAP    FCN  "MAP"
 T_FDB       FCN  "|FDB  "
 T_FCB       FCN  "|FCB  "
 T_EQU       FCN  "|EQU  "
@@ -601,6 +925,109 @@ T_CELLSLAB  FCC  "; The cells, a row at a time"
             FCB  $0A
             FCB  0
 T_ROWCOM    FCN  "; row "
+T_PRJHEAD   FCC  "; Project @ from TILEKIT: its three tile layers, ready for the card."
+            FCB  $0A
+            FCC  "; INCLUDE this after VIDCARD.D. @_TOCARD puts the tile sets and maps into"
+            FCB  $0A
+            FCC  "; video memory one after another from @_VBASE (to @_END), the palette"
+            FCB  $0A
+            FCC  "; @_PAL into the card, and sets its three layers up as they were in TILEKIT"
+            FCB  $0A
+            FCC  "; (@_LAYERS, from the back; @_SHOW, the ones shown), scrolled to 0, 0."
+            FCB  $0A
+            FCB  0
+T_PRJINC    FCN  '|INCLUDE "'
+T_PRJINC2   FCC  '.ASM"'
+            FCB  $0A
+            FCB  0
+T_PRJVBASE  FCC  "@_VBASE|EQU  $000000"
+            FCB  $0A
+            FCB  0
+T_PRJVB     FCN  "@_VBASE"
+T_AT_       FCN  "@_"
+T_PRJTB     FCN  "_TBYTES"
+T_PRJMB     FCN  "_BYTES"
+T_PRJEND    FCN  "@_END|EQU  "
+T_PRJSHOW   FCN  "@_SHOW|EQU  "
+T_PRJCODE   FCC  "@_TOCARD"
+            FCB  $0A
+            FCB  0
+T_PRJLDA    FCN  "|LDA  #"
+T_PRJLDA2   FCC  "/$10000"
+            FCB  $0A
+            FCB  0
+T_PRJLDX    FCN  "|LDX  #"
+T_PRJLDX2   FCC  "&$FFFF"
+            FCB  $0A
+            FCB  0
+T_PRJJSR    FCN  "|JSR  "
+T_PRJJSR2   FCC  "_TOCARD"
+            FCB  $0A
+            FCB  0
+T_PRJCODE2  FCC  "|LDA  #VC_PAL/$10000"
+            FCB  $0A
+            FCC  "|STA  VC_ADDR0"
+            FCB  $0A
+            FCC  "|LDX  #VC_PAL&$FFFF"
+            FCB  $0A
+            FCC  "|STX  VC_ADDR0M"
+            FCB  $0A
+            FCC  "|LDD  #1"
+            FCB  $0A
+            FCC  "|STD  VC_INC0"
+            FCB  $0A
+            FCC  "|LDX  #@_PAL"
+            FCB  $0A
+            FCC  "|LDY  #VC_DATA0"
+            FCB  $0A
+            FCC  "|LDW  #512"
+            FCB  $0A
+            FCC  "|TFM  X+,Y"
+            FCB  $0A
+            FCC  "|LDA  #VC_CFG/$10000"
+            FCB  $0A
+            FCC  "|STA  VC_ADDR0"
+            FCB  $0A
+            FCC  "|LDX  #LAYER0"
+            FCB  $0A
+            FCC  "|STX  VC_ADDR0M"
+            FCB  $0A
+            FCC  "|LDX  #@_LAYERS"
+            FCB  $0A
+            FCC  "|LDW  #48"
+            FCB  $0A
+            FCC  "|TFM  X+,Y"
+            FCB  $0A
+            FCC  "|LDX  #DC_CTRL"
+            FCB  $0A
+            FCC  "|STX  VC_ADDR0M"
+            FCB  $0A
+            FCC  "|LDA  #@_SHOW"
+            FCB  $0A
+            FCC  "|STA  VC_DATA0"
+            FCB  $0A
+            FCC  "|RTS"
+            FCB  $0A
+            FCC  "; The card's layers, from the back: mode and map size, the map's place,"
+            FCB  $0A
+            FCC  "; the tiles' place, scrolling and the rest"
+            FCB  $0A
+            FCC  "@_LAYERS"
+            FCB  $0A
+            FCB  0
+T_PRJA1     FCN  "/$10000,("
+T_PRJA2     FCN  "/$100)&$FF,"
+T_PRJA3     FCN  "&$FF"
+T_PRJLREST  FCC  "|FDB  0,0,0"
+            FCB  $0A
+            FCC  "|FCB  0,0"
+            FCB  $0A
+            FCB  0
+T_PRJPAL    FCC  "; The palette: 256 colors, RGB565"
+            FCB  $0A
+            FCC  "@_PAL"
+            FCB  $0A
+            FCB  0
 ;------------------------------------------------------------------------------
 OUTMSG      FDB  T_EXPORTED ; what OUTCLOSE says when it is done
 OHANDLE     FCB  0
@@ -610,4 +1037,9 @@ OCOL        FCB  0          ; the column it is in
 OCOUNT      FCB  0
 ODIGIT      FCB  0
 EXPN        FDB  0
+PREVK       FCB  0          ; the project's places: the one before (V, T or M)
+PREVD       FCB  0          ;   and its number
+PLACEK      FCB  0
+PLACED      FCB  0
+ESTEM       FCB  0,0,0,0,0,0,0 ; the project module's name, 6 at most
 OPFX        FCB  0,0,0,0,0,0,0,0,0,0 ; the labels' start

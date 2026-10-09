@@ -662,81 +662,71 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
 }
 
 
-TEST(tilekit_exports_assembly_source_that_a_game_includes) {
-    // A game: the two modules, put into the card by their own routines.
-    const char* game = "            INCLUDE \"VIDCARD.D\"\r\n"
-                       "            ORG  $4000\r\n"
-                       "START       LDA  #$02\r\n"
-                       "            LDX  #$0000\r\n"
-                       "            JSR  TILES_TOCARD\r\n"
-                       "            LDA  #$01\r\n"
-                       "            LDX  #$6000\r\n"
-                       "            JSR  LV_TOCARD\r\n"
-                       "            LDA  #$2B\r\n" // B_EXIT
-                       "            SWI2\r\n"
-                       "            FCB  TILES_LMODE,LV_LMAP,TILES_NTILES,LV_W\r\n"
-                       "            INCLUDE \"TILES.ASM\"\r\n"
-                       "            INCLUDE \"LV.ASM\"\r\n"
-                       "            END  START\r\n";
-    Kit k({disk_file("GAME.ASM", game)});
+TEST(tilekit_exports_the_project_as_assembly_source_that_a_game_includes) {
+    const char* world = "            INCLUDE \"VIDCARD.D\"\r\n"
+                        "            ORG  $4000\r\n"
+                        "START       JSR  GAME_TOCARD\r\n"
+                        "            LDA  #$2B\r\n" // B_EXIT
+                        "            SWI2\r\n"
+                        "            INCLUDE \"GAME.ASM\"\r\n"
+                        "            END  START\r\n";
+    Kit k({disk_file("WORLD.ASM", world)});
     if (!k.ok) return;
     k.type("TILEKIT");
     k.frames(60);
-    k.key(0x1A); // W: 128, 256, 32
-    k.key(0x1A);
-    k.key(0x1A);
-    k.key(0x0B); // H: 128, 256, 32
-    k.key(0x0B);
-    k.key(0x0B);
-    CHECK(k.shows(7, "MAP W  32") && k.shows(8, "MAP H  32"));
+    for (int i = 0; i < 3; ++i) k.key(0x1A); // W: 32
+    for (int i = 0; i < 3; ++i) k.key(0x0B); // H: 32
     k.key(0x28);
     k.frames(30);
-    k.key(0x11); // N: tile 1, a dot at 1,0
+    // Layer 1: tile 1 (a dot at 1,0) at 1,1. Layer 2: a set of its own, tile 1 (a dot at
+    // 2,2) at 3,3, flipped across. Layer 3: hidden.
+    k.key(0x11);
     k.click(Kit::zx(1), Kit::zy(0));
+    k.click(Kit::mx(1), Kit::my(1));
+    k.key(0x1F);
+    k.key(0x0F, false, true);
+    k.key(0x16);
+    k.key(0x28);
+    k.frames(30);
+    k.key(0x11);
+    k.click(Kit::zx(2), Kit::zy(2));
     k.key(0x0B); // H
-    k.click(Kit::mx(2), Kit::my(3));
-    CHECK(k.cell(2, 3, 32) == 0x0401);
-    // ^E: the set's module (TILES.ASM, as the set has no name), then the map's.
+    k.click(Kit::mx(3), Kit::my(3));
+    k.key(0x20, true);
+    // ^E: the project's name (GAME, as it has none), then everything.
     k.key(0x08, false, true);
-    CHECK(k.shows(28, "EXPORT THE TILE SET AS: TILES.ASM_"));
+    CHECK(k.shows(28, "EXPORT THE PROJECT AS: GAME.ASM_"));
     k.key(0x28);
-    k.frames(30);
-    CHECK(k.shows(28, "EXPORT THE MAP AS: MAP.ASM_"));
-    for (int i = 0; i < 7; ++i) k.key(0x2A);
-    k.text("LV");
-    k.key(0x28);
-    k.frames(30);
-    CHECK(k.shows(28, "EXPORTED"));
-    std::vector<uint8_t> t = k.disk("/TILES.ASM"), m = k.disk("/LV.ASM");
-    std::string ts(t.begin(), t.end()), ms(m.begin(), m.end());
-    CHECK(ts.find("TILES_LMODE EQU  17\r\n") != std::string::npos); // a tile layer, 4 bits a pixel
-    CHECK(ts.find("TILES_NTILES EQU  2\r\n") != std::string::npos);
-    CHECK(ts.find("TILES_PAL\r\n            FDB  $0000,$8000,$0400,$8400") != std::string::npos);
-    CHECK(ts.find("; tile 1\r\n            FCB  $0F,$00,$00,$00") != std::string::npos);
-    CHECK(ms.find("LV_LMAP     EQU  0\r\n") != std::string::npos && ms.find("LV_W        EQU  32") != std::string::npos);
-    CHECK(ms.find("; row 3\r\n            FDB  $0000,$0000,$0401,$0000") != std::string::npos);
-    // ^E again, Esc at the first: straight on to the map's.
-    k.key(0x08, false, true);
+    k.frames(240);
+    for (const char* f : {"/GAME1T.ASM", "/GAME2T.ASM", "/GAME1M.ASM", "/GAME2M.ASM", "/GAME3M.ASM", "/GAME.ASM"})
+        CHECK(!k.disk(f).empty());
+    CHECK(k.disk("/GAME3T.ASM").empty()); // (no layer uses the third set)
+    std::vector<uint8_t> g = k.disk("/GAME.ASM");
+    std::string gs(g.begin(), g.end());
+    CHECK(gs.find("            INCLUDE \"GAME1T.ASM\"\r\n            INCLUDE \"GAME2T.ASM\"\r\n") != std::string::npos);
+    CHECK(gs.find("GAME_T2     EQU  GAME_T1+GAME1T_TBYTES\r\n") != std::string::npos);
+    CHECK(gs.find("GAME_M1     EQU  GAME_T2+GAME2T_TBYTES\r\n") != std::string::npos);
+    CHECK(gs.find("GAME_END    EQU  GAME_M3+GAME3M_BYTES\r\n") != std::string::npos);
+    CHECK(gs.find("GAME_SHOW   EQU  3\r\n") != std::string::npos);
+    CHECK(gs.find("JSR  GAME2M_TOCARD") != std::string::npos);
     k.key(0x29);
-    CHECK(k.shows(28, "EXPORT THE MAP AS: "));
-    k.key(0x29);
-    CHECK(k.shows(28, "P L F K E U"));
-    k.key(0x29); // quit (Y: not saved)
     k.key(0x1C);
     CHECK(k.prompt(200000000));
-    CHECK(k.vram(0x020000 + 32) == 0); // (the card is reset)
-    // ASM on the machine makes the game from the modules; it puts them into the card.
-    k.type("ASM -f com GAME.ASM");
-    CHECK(k.prompt(20000000000ull));
-    CHECK(k.s.received.find("rror") == std::string::npos);
-    std::vector<uint8_t> com = k.disk("/GAME.COM");
-    CHECK(com.size() > 8 + 512 + 64 + 2048);
-    if (com.size() > 30) CHECK(com[8 + 20] == 17 && com[8 + 21] == 0 && com[8 + 22] == 2 && com[8 + 23] == 32); // (after 20 bytes of code)
-    k.type("GAME");
-    CHECK(k.prompt(200000000));
-    CHECK(k.pix4(1, 1, 0, 0x020000) == 15 && k.pix4(1, 0, 0, 0x020000) == 0);
-    CHECK(k.cell(2, 3, 32, 0x016000) == 0x0401);
-    CHECK(k.c().cfg[0x200 + 2 * 9] == 0xF8 && k.c().cfg[0x201 + 2 * 9] == 0x00); // (xterm's red)
+    // A game: ASM on the machine makes it; it puts everything into the card.
+    k.type("ASM -f com WORLD.ASM");
+    CHECK(k.prompt(40000000000ull));
+    CHECK(k.s.received.find("rror") == std::string::npos && k.s.received.find("Cannot") == std::string::npos);
+    k.type("WORLD");
+    CHECK(k.prompt(400000000));
+    auto hw = [&](int n) { return k.c().cfg + VC_LAYER0 + VC_LAYER_SIZE * n; };
+    auto base = [&](const uint8_t* l, int at) { return static_cast<uint32_t>(l[at] << 16 | l[at + 1] << 8 | l[at + 2]); };
+    // One after another from 0: set 1 (2 tiles, 64 bytes), set 2 (64), then the maps (2KB each).
+    CHECK(base(hw(0), VC_L_TILEBASE) == 0 && base(hw(1), VC_L_TILEBASE) == 64 && base(hw(2), VC_L_TILEBASE) == 0);
+    CHECK(base(hw(0), VC_L_MAPBASE) == 128 && base(hw(1), VC_L_MAPBASE) == 128 + 2048 &&
+          base(hw(2), VC_L_MAPBASE) == 128 + 4096);
+    CHECK(hw(0)[VC_L_MODE] == 0x11 && hw(0)[VC_L_MAP] == 0 && k.c().cfg[VC_DC_CTRL] == 3);
+    CHECK(k.cell(1, 1, 32, 128) == 1 && k.cell(3, 3, 32, 128 + 2048) == 0x0401);
+    CHECK(k.pix4(1, 1, 0, 0) == 15 && k.pix4(1, 2, 2, 64) == 15);
 }
 
 namespace {

@@ -8,14 +8,17 @@ make, a game loads straight into the card.
 
 | File | |
 |---|---|
-| `tilekit.asm` | `TILEKIT.COM`, the tile set and map editor (below); it includes the next six |
+| `tilekit.asm` | `TILEKIT.COM`, the tile set and map editor (below); it includes the next nine |
 | `tk_map.asm` | its map |
+| `tk_layer.asm` | its three layers |
+| `tk_ldlg.asm` | the layer's questions (its tile set, kind of tiles, screen, map size) |
+| `tk_proj.asm` | its projects (`.TKT`) |
 | `tk_src.asm` | its export as assembly source |
 | `tk_ini.asm` | reading `TILEKIT.INI` |
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
-| `gk_ui.asm` | what the kit's editors share: the mouse and keys, text on the screen, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
+| `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
 `compile.sh` (or `compile.bat`) assembles it with lwtools into `build/tilekit.bin`, which
 carries its own program header; `mkdiskimg` puts it in `/CMD` as `TILEKIT.COM`. On the
@@ -28,9 +31,9 @@ there makes the same program.
 TILEKIT [file]
 ```
 
-With a file, it opens it: a map (a name ending in `.MAP`) with its tile set, or a tile set
-(`.TLS`, which is added to a name without an extension). A name that isn't a file yet is the new
-set's (or map's). Without one, it asks what to make:
+With a file, it opens it: a project (a name ending in `.TKT`), a map (`.MAP`) with its tile set,
+or a tile set (`.TLS`, which is added to a name without an extension). A name that isn't a file
+yet is the new set's (or map's). Without one, it asks what to make (Ctrl+N asks again):
 
 - **tiles** 8x8 or 16x16 (T),
 - **colors** 16 a tile (4 bits a pixel; which 16 -- one of the palette's 16 rows -- is chosen
@@ -38,11 +41,53 @@ set's (or map's). Without one, it asks what to make:
 - **screen** 320x240 or 640x480 (R): how the map is shown, as the game will show it,
 - **the map's width and height** (W, H): 32, 64, 128 or 256 cells each, 16384 cells (32KB) at
   most -- the card's own map sizes,
-- **keep the tiles** (K): just a new map, for the tile set there is. This is how several maps
-  share one set.
+- **keep the tiles** (K): just a new map for the layer being edited, on its tile set.
 
-Those are the card's own tile layers, so a set and a map are what a game's tile layer uses as
-they are. A new set's palette comes from `TILEKIT.INI` (below).
+That makes three layers, each with a map of that size, all on that tile set (the layer
+questions, below, give a layer one of its own). They are the card's own tile layers, so a set
+and a map are what a game's tile layer uses as they are. A new set's palette comes from
+`TILEKIT.INI` (below).
+
+### Layers
+
+The card has three tile layers, and TILEKIT edits all three -- one at a time, seeing them all,
+as a game would show them (the editor itself is drawn on sprites, in front of them). Each layer
+has a **map** and a **tile set**: its own, or another layer's (layers can share one -- fewer
+tiles to draw, and less video memory). The palette is the card's: every layer's.
+
+The **layer bar**, the panel's top row, shows the layers from the back to the front; the one
+being edited is lit up, a hidden one dim, and `...` asks about the one being edited.
+
+| | |
+|---|---|
+| a layer's button, or 1 2 3 | edit that layer: its tile set comes up in the panel, the tools draw on its map |
+| right-click, or Shift+1 2 3 | show or hide it |
+| `[` `]` | move the layer being edited back or forward |
+| `...`, or Ctrl+L | the layer's questions (below) |
+
+The view is one: every layer scrolls with it, at its own resolution, so they stay lined up.
+
+**The layer's questions** (in the panel; a row's key, or a click on it; Enter does it, Esc
+doesn't):
+
+| | |
+|---|---|
+| S | its tile set: its own, or layer 1's, 2's or 3's |
+| T, D | its own set's tiles: 8x8 or 16x16, 16 or 256 colors (another's: as they are) |
+| R | its screen: 320x240 or 640x480 |
+| W, H | its map's width and height |
+
+What can be kept is: a map made larger or smaller keeps its cells where they were (cut off, or
+tile 0 around them); tiles of 16 colors made 256 keep their pixels, each in the palette row the
+tile was last used in. Tiles of 256 colors made 16, or of another size, can't be: the tile set
+starts again with one blank tile -- after you say yes. (The other layers on that set change with
+it.)
+
+**Room.** Each layer has 48KB of the card's video memory: its own tile set at the start, its
+map at the end (the editor has the rest). A tile set can have as many tiles as its layer's map
+leaves room for -- with a 64x64 map (8KB), 1280 8x8 tiles of 16 colors (1024 at most, the
+card's), 640 of 256 colors, 160 16x16 of 256 colors; with a 256x64 map (32KB), 64 of those.
+More tiles, or a larger map, than fit are refused (the layer's questions check first).
 
 ### 16 colors: the palette's rows
 
@@ -62,12 +107,14 @@ and the rows are saved with the set.
 
 ### The screen
 
-- **Left:** the map, as the card's tile layer shows it, the cell under the mouse framed. A tile
-  being drawn changes wherever it is in the map as it is drawn. A map smaller than the screen
-  has what is past its end shaded (the card would show the map over again there).
-- **Right, from the top:** the tile set's file; the tools; the tile magnified, to draw in; the
-  palette (16 rows of 16); red, green and blue of the color picked, and that color; the set, 10
-  tiles a row, with NEW and DUP; the map's file. A `*` after a name: changed since saved.
+- **Left:** the three layers' maps, as the card shows them, the cell under the mouse framed (in
+  the layer being edited). A tile being drawn changes wherever it is in the maps as it is drawn.
+  (A map smaller than the screen shows over again past its end -- the card's maps wrap around;
+  clicks there do nothing.)
+- **Right, from the top:** the layer bar; the tile set's file; the tools; the tile magnified, to
+  draw in; the palette (16 rows of 16); red, green and blue of the color picked, and that color;
+  the set, 10 tiles a row, with NEW and DUP; the map's file; the project's. A `*` after a name:
+  changed since saved.
 - **Bottom:** the keys (or a message, or a question); the tile, the flips, the color, the map's
   size, the cell under the mouse, the kind of set.
 
@@ -118,15 +165,41 @@ A large fill takes a while: a 64x64 map, about half a second.
 | + (=), - | the next or previous color |
 | PgUp, PgDn | the previous or next row of the palette |
 | arrows | scroll the map a cell (with Shift, 8); Home: back to its top left |
-| Ctrl+S | save: the tile set, then the map, each if it has changed (a name asked for if it has none: the map's file names its set's, so the set needs one) |
-| Ctrl+A | save as: both, asking both names |
-| Ctrl+E | export as assembly source: the tile set's module, then the map's (below) |
-| Ctrl+O | open a map (`.MAP`, with its set) or a tile set (and a new map) |
-| Ctrl+N | a new set and map, or a new map for this set |
+| 1 2 3, Shift+1 2 3, `[` `]`, Ctrl+L | the layers (above) |
+| Ctrl+S | save the project: everything that has changed (below) |
+| Ctrl+A | save the project as another name |
+| Ctrl+W | save the layer's tile set, then its map, under names asked for (Esc skips one) |
+| Ctrl+E | export the project as assembly source (below) |
+| Ctrl+O | open a project (`.TKT`), or into the layer being edited a map (`.MAP`, with its set) or a tile set |
+| Ctrl+N | a new project (or with K, a new map for the layer being edited) |
 | Esc | back to the shell |
 
 A file name is typed at the bottom: Enter takes it, Esc gives up. Opening, making new or
-leaving with changes not saved asks first (Y or N).
+leaving with changes not saved (in any layer) asks first (Y or N).
+
+### Projects
+
+A project is everything at once, under one name: a `.TKT` file naming each layer's tile set and
+map files, with how each is shown, the layers' order and the palette. Ctrl+S saves it (asking
+its name the first time) and with it every tile set and map that has changed; any that have no
+names yet are named after the project -- `GAME.TKT`'s are `GAME1.TLS`, `GAME1.MAP`,
+`GAME2.MAP` ... (a set by the number of the layer whose room it is in). Opening it opens them
+all. The sets and maps are ordinary `.TLS` and `.MAP` files: they can be opened alone, or named
+by other projects. It is text:
+
+```
+; TILEKIT project
+[PROJECT]
+ORDER 1 2 3          the layers, from the back
+EDIT 2               the one being edited
+[LAYER1]             (and [LAYER2], [LAYER3])
+TILES GAME1.TLS      its tile set: layers naming the same file share it
+MAP GAME1.MAP        its map
+SCREEN 320           320 (x240) or 640 (x480)
+SHOW YES             or NO
+[PALETTE]
+000000 840000 ...    256 colors, RRGGBB
+```
 
 ### TILEKIT.INI: the palettes a set starts with
 
@@ -185,61 +258,60 @@ points and the cells to its `L_MAPBASE`, as they are, and sets `L_MAP` to the si
 
 ### Exporting as assembly source
 
-Ctrl+E writes the tile set and the map as assembly source, each a module of its own for a game
-to `INCLUDE` (after `VIDCARD.D`): first the set's (its name asked for, the set's file's with
-`.ASM` to start with), then the map's. Esc at the first goes on to the second, so a second map
-of a set already exported can be exported alone -- several maps share one set's module. Each
-module's labels start with its file's name (`LV1.ASM`: `LV1_...`; an `X` first if that starts
-with a digit), so they don't clash:
+Ctrl+E writes the project as assembly source for a game to `INCLUDE` (after `VIDCARD.D`): its
+name is asked for (`GAME.ASM` -- the project's name, to start with), and with it go a module for
+each tile set in use (`GAME1T.ASM` ...) and each map (`GAME1M.ASM`, `GAME2M.ASM`,
+`GAME3M.ASM`), each with labels of its own:
 
-| The set's module (`TILES.ASM`) | |
+| A set's module (`GAME1T.ASM`) | |
 |---|---|
-| `TILES_TSIZE`, `TILES_BPP`, `TILES_NTILES` | the tile size, bits a pixel, how many tiles |
-| `TILES_TBYTES` | the tiles' bytes, all told (`TILES_THALF`: half that) |
-| `TILES_LMODE` | `L_MODE` for a tile layer showing them (tiles, bits a pixel, 640x480 or not, 16x16 or not) |
-| `TILES_TOCARD` | a routine: the palette into the card, and the tiles to A:X in video memory |
-| `TILES_PAL` | the palette: 256 `FDB`s, RGB565 |
-| `TILES_TILES` | the tiles, `FCB`s as the card holds them, each after a `; tile n` comment |
+| `GAME1T_TSIZE`, `_BPP`, `_NTILES` | the tile size, bits a pixel, how many tiles |
+| `GAME1T_TBYTES` | the tiles' bytes, all told (`_THALF`: half that) |
+| `GAME1T_LMODE` | `L_MODE` for a tile layer showing them |
+| `GAME1T_TOCARD` | a routine: the palette into the card, and the tiles to A:X in video memory |
+| `GAME1T_PAL`, `GAME1T_TILES` | the palette (256 `FDB`s, RGB565); the tiles (`FCB`s, as the card holds them, each after a `; tile n` comment) |
 
-| The map's module (`LV1.ASM`) | |
+| A map's module (`GAME1M.ASM`) | |
 |---|---|
-| `LV1_W`, `LV1_H` | its size, in cells |
-| `LV1_LMAP` | `L_MAP` for a tile layer showing it |
-| `LV1_BYTES` | its cells' bytes |
-| `LV1_TOCARD` | a routine: the cells to A:X in video memory |
-| `LV1_CELLS` | the cells, `FDB`s, a row at a time, each after a `; row n` comment |
+| `GAME1M_W`, `_H` | its size, in cells |
+| `GAME1M_LMAP` | `L_MAP` for a tile layer showing it |
+| `GAME1M_BYTES` | its cells' bytes |
+| `GAME1M_TOCARD` | a routine: the cells to A:X in video memory |
+| `GAME1M_CELLS` | the cells, `FDB`s, a row at a time, each after a `; row n` comment |
+
+| The project's (`GAME.ASM`) | |
+|---|---|
+| `GAME_VBASE` | where they go in video memory: change it to suit -- the rest follow |
+| `GAME_T1` ..., `GAME_M1` ..., `GAME_END` | where each set and map goes: one after another from `GAME_VBASE` |
+| `GAME_TOCARD` | a routine: every set and map into the card, the palette, and the card's three layers set up as they were in TILEKIT (scrolled to 0, 0) |
+| `GAME_LAYERS`, `GAME_SHOW` | the three layers' settings (48 bytes, from the back), and `DC_CTRL`'s bits for the ones shown |
+| `GAME_PAL` | the palette |
 
 A game, then:
 
 ```
             INCLUDE "VIDCARD.D"
             ...
-            LDA  #$02           ; the tiles to $020000
-            LDX  #$0000
-            JSR  TILES_TOCARD
-            LDA  #$01           ; the map to $016000
-            LDX  #$6000
-            JSR  LV1_TOCARD
-            ...                 ; and a layer: L_MODE TILES_LMODE, L_MAP LV1_LMAP,
-                                ; L_MAPBASE $016000, L_TILEBASE $020000
-            INCLUDE "TILES.ASM"
-            INCLUDE "LV1.ASM"
+            JSR  GAME_TOCARD    ; everything in place, the layers on
+            ...
+            INCLUDE "GAME.ASM"  ; (it INCLUDEs the rest)
 ```
 
 The data is part of the program then, so it has to fit in its memory beside the code (a
-program can be about 44KB): a large set, or many maps, a game reads from the `.TLS` and `.MAP`
+program can be about 44KB): large sets, or large maps, a game reads from the `.TLS` and `.MAP`
 files instead, whose layout is above -- the palette, tiles and cells in them are in the card's
 form too, ready to be copied through a data port.
 
 ### On the card
 
-TILEKIT sets the card up itself: layer 0 is the map (at `$016000`, up to 32KB; the tiles at
-`$020000`), layer 1 the panel on the right (a bitmap 176 pixels wide, 8 bits a pixel, at
-`$000000`, scrolled to the screen's right edge -- left of it, a bitmap shows nothing), layer 2
-the reset text screen (which also shades what is past a small map). Sprite 0 is the pointer,
-which the card moves with the mouse (`INCTRL` bit 0); sprite 1 frames the cell under it (its
-image at `$036000`). The map's undo steps are copies of it the card makes in its PSRAM
-(`$800000`, 32KB each).
+TILEKIT leaves the card's three tile layers to the project: each layer's 48KB room is from
+`$000000`, `$00C000`, `$018000` (a tile set at the start, the map at the end). The editor draws
+itself on surfaces (`gk_ui.asm`): bitmaps from `$024000` -- the panel in 4 columns, the status
+rows in 8 -- shown by 40 sprites in front of the layers (at most 14 on a line, of the card's
+32). Sprite 0 is the pointer, which the card moves with the mouse (`INCTRL` bit 0); sprite 1
+frames the cell under it. The sprite table is at `$03CC00`; the text is drawn in the card's own
+font, at `$03F000`. The maps' undo steps are copies the card makes in its PSRAM (`$800000`,
+32KB each), and a map being resized passes through it too.
 
 ### Still to come
 
