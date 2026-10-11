@@ -1,6 +1,6 @@
 # The game kit
 
-![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/gamekit/blob/main/media/gamekit.png?raw=true)
+![Nano-like text editor](https://github.com/caiannello/Pugputer6309_Emulator/gamekit/blob/main/media/tilekit.png?raw=true)
 
 Tools for making a game's graphics (and, to come, its music) on the Pugputer itself, on the
 video card's screen and with the card's mouse and keyboard. In the emulator those are the video
