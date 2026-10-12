@@ -24,9 +24,9 @@ the limits it may impose that the emulator doesn't.
 | File | |
 |---|---|
 | `core/vc.h`, `core/vc.c` | the card: registers, address space, commands, the scanline renderer |
-| `core/vc_font.c` | the font it starts with (Spleen 8x16, code page 437; see `../NOTICE.md`) |
+| `core/vc_font.c` | the font it starts with (ToshibaSat 8x16, code page 437; see `../NOTICE.md`) |
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
-| `tools/bdf2c.py` | makes `vc_font.c` from a BDF font |
+| `tools/font2c.py` | makes `vc_font.c` from an 8x16 CP437 font (BDF, or a pixel-outline TrueType font) |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
 | `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), `VIDMOUSE` (the mouse and keyboard), and `VIDLIB.ASM`, the helpers they share |
 | `../basic309/` | BASIC's statements for the card (`SCREEN`, `LINE`, `CIRCLE`, `SPRITE`, ...: `../basic309/README.md`) |

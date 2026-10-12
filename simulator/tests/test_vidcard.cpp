@@ -70,7 +70,7 @@ TEST(vidcard_resets_to_a_blank_text_screen_with_the_xterm_palette) {
     CHECK(k->cfg[VC_DC_CTRL] == 0x01 && k->cfg[VC_SPR_COUNT] == 128);
     // 80x30 cells of 8x16: a space in color 7 on 0 (transparent, so the black backdrop).
     CHECK(k->vram[VC_RESET_TEXT_MAP] == ' ' && k->vram[VC_RESET_TEXT_MAP + 1] == 7);
-    CHECK(k->vram[VC_RESET_FONT + 'A' * 16 + 2] == 0x7C);
+    CHECK(std::equal(vc_font8x16, vc_font8x16 + 256 * 16, k->vram + VC_RESET_FONT));
     for (int y : {0, 240, 479})
         for (uint16_t p : k.line(y)) CHECK(p == 0);
 }
@@ -107,18 +107,21 @@ TEST(vidcard_data_ports_step_through_every_part_of_the_address_space) {
 TEST(vidcard_text_layer_draws_cells_in_their_colors) {
     Card k;
     k.put(VC_RESET_TEXT_MAP, {'A', 9, 4, 0});
-    // 'A', row 2 of its glyph: .#####.. -- red on navy, then the next cell (a space on 0).
-    std::vector<uint16_t> l = k.line(2);
-    CHECK(l[0] == k.color(4) && l[1] == k.color(9) && l[5] == k.color(9) && l[6] == k.color(4) && l[7] == k.color(4));
+    // 'A', row 4 of its glyph, in the font's pixels: red on navy, then the next cell (a space on 0).
+    auto lit = [](int ch, int row, int x) { return (vc_font8x16[ch * 16 + row] & (0x80 >> x)) != 0; };
+    std::vector<uint16_t> l = k.line(4);
+    for (int x = 0; x < 8; ++x) CHECK(l[x] == k.color(lit('A', 4, x) ? 9 : 4));
     CHECK(l[8] == 0);
     CHECK(k.line(0)[1] == k.color(4)); // an empty row of the glyph is the background
     // Scrolled one pixel left.
     k.layer(0)[VC_L_HSCROLL + 1] = 1;
-    CHECK(k.line(2)[0] == k.color(9));
+    l = k.line(4);
+    for (int x = 0; x < 7; ++x) CHECK(l[x] == k.color(lit('A', 4, x + 1) ? 9 : 4));
     // The second row of cells starts at line 16; the map is 128 cells wide.
     k.layer(0)[VC_L_HSCROLL + 1] = 0;
     k.put(VC_RESET_TEXT_MAP + 4 * 128, {'A', 10, 0, 0});
-    CHECK(k.line(18)[1] == k.color(10) && k.line(18)[0] == 0);
+    l = k.line(20);
+    for (int x = 0; x < 8; ++x) CHECK(l[x] == (lit('A', 4, x) ? k.color(10) : 0));
 }
 
 TEST(vidcard_tile_layer_draws_tiles_with_flips_and_palette_offsets) {
@@ -290,7 +293,9 @@ TEST(vidcard_commands_pack_pixels_and_move_memory) {
     CHECK(k->vram[0x1000] == 0x0A && k->vram[0x1001] == 0x30);
     // A character in the current color, over what's there.
     k.cmd({VC_C_TARGET, 0, 0x20, 0, W(8), W(8), W(16), 8, VC_C_COLOR, 7, VC_C_CHAR, W(0), W(0), 'A'});
-    CHECK(k->vram[0x2000 + 2 * 8 + 1] == 7 && k->vram[0x2000 + 2 * 8] == 0);
+    for (int r = 0; r < 16; ++r)
+        for (int x = 0; x < 8; ++x)
+            CHECK(k->vram[0x2000 + r * 8 + x] == ((vc_font8x16['A' * 16 + r] & (0x80 >> x)) ? 7 : 0));
     // COPY overlapping upwards and downwards, FILL.
     k.put(0x3000, {1, 2, 3, 4, 5});
     k.cmd({VC_C_COPY, 0, 0x30, 0x00, 0, 0x30, 0x01, 0, 0, 4});

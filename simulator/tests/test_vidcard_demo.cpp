@@ -173,7 +173,9 @@ TEST(vidcard_demo_vidtext_shows_the_text_layers) {
     CHECK(be16(d.layer(1) + VC_L_HSCROLL) - hs >= 29);
     const uint8_t* marquee = d.c().vram + 0x030000 + (11 * 64 + 2) * 4; // (a 64-cell-wide map)
     CHECK(marquee[0] == '*' && marquee[2] == 0);
-    CHECK(d.v.pixel(4 * 8 + 5, 3 * 16 + 8) == d.shown(75)); // a side of the first box
+    int side = 0; // a side of the first box: the leftmost lit pixel in row 8 of its corner
+    while (!(vc_font8x16[0xC9 * 16 + 8] & (0x80 >> side))) ++side;
+    CHECK(d.v.pixel(4 * 8 + side, 3 * 16 + 8) == d.shown(75));
     d.dump("1");
     // Page 2: the 8x8 font is the 8x16 one, two lines ORed into one.
     d.key();

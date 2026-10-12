@@ -98,9 +98,10 @@ TEST(basic309_video_draws_with_the_pen_or_a_color) {
 TEST(basic309_video_text_on_the_bitmap_and_on_the_text_screen) {
     Machine m;
     CHECK(m.ok);
-    // GPRINT: the font's pixels in the color; the rest untouched. 'A', row 2: .#####..
+    // GPRINT: the font's pixels in the color; the rest untouched. 'A', row 4, starts at x 16.
     CHECK(m.run("SCREEN 1:GCLS 1:GPRINT (8,200),\"XA\",11") == "");
-    CHECK(m.px8(17, 202) == 11 && m.px8(16, 202) == 1 && m.px8(18, 202) == 11);
+    for (int x = 0; x < 8; ++x)
+        CHECK(m.px8(16 + x, 204) == ((vc_font8x16['A' * 16 + 4] & (0x80 >> x)) ? 11 : 1));
     // TPRINT: cells of the text screen: character, color, background.
     CHECK(m.run("TPRINT (5,3),\"HI\",10,4") == "");
     uint32_t cell = VC_RESET_TEXT_MAP + (3 * 128 + 5) * 4;

@@ -40,33 +40,17 @@ rhythm section), carbon14 and opl3 of forums.submarine.org.uk (tremolo and phase
 Gambrell and Olli Niemitalo (the OPL2 ROMs) and John McMaster and digshadow of siliconpr0n.org
 (the die photographs).
 
-## Frederic Cambus -- Spleen
+## VileR -- The Ultimate Oldschool PC Font Pack
 
-The video card's font (`vidcard/core/vc_font.c`) is made from **Spleen** 8x16, its code page 437
-version, by **Frederic Cambus** (<https://github.com/fcambus/spleen>), under the BSD 2-Clause
-license:
-
-> Copyright (c) 2018-2024, Frederic Cambus
-> All rights reserved.
->
-> Redistribution and use in source and binary forms, with or without modification, are permitted
-> provided that the following conditions are met:
->
-> * Redistributions of source code must retain the above copyright notice, this list of
->   conditions and the following disclaimer.
-> * Redistributions in binary form must reproduce the above copyright notice, this list of
->   conditions and the following disclaimer in the documentation and/or other materials provided
->   with the distribution.
->
-> THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
-> IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
-> FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-> CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-> CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-> SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-> THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-> OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-> POSSIBILITY OF SUCH DAMAGE.
+The video card's font (`vidcard/core/vc_font.c`) is **ToshibaSat 8x16**, the code page 437
+text font of Toshiba's Satellite laptops, as recreated by **VileR** in **The Ultimate Oldschool
+PC Font Pack** (<https://int10h.org/oldschool-pc-fonts/>), (c) 2016-2020
+VileR. It is converted, unchanged, from the pack's `Px437_ToshibaSat_8x16.ttf` into a table of
+bytes by `vidcard/tools/font2c.py`, and is used under the **Creative Commons
+Attribution-ShareAlike 4.0 International License**
+(<https://creativecommons.org/licenses/by-sa/4.0/>). That license covers the font alone, not the
+rest of this project: if you change the font and share it, share your version under the same
+license.
 
 ## The music in the demos
 
