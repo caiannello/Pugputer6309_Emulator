@@ -75,6 +75,7 @@ inline constexpr DemoProgram kDemoPrograms[] = {
     {"demo/build/vidtiles.bin", "DEMO/VIDTILES.COM", 0x4000},
     {"demo/build/vidgfx.bin", "DEMO/VIDGFX.COM", 0x4000},
     {"demo/build/vidmouse.bin", "DEMO/VIDMOUSE.COM", 0x4000},
+    {"demo/build/mandel.bin", "DEMO/MANDEL.COM", 0x4000},
 };
 
 // Files the demo programs use, copied to /DEMO as they are: the songs VGMPLAY plays.

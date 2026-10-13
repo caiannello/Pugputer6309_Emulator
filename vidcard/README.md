@@ -28,7 +28,7 @@ the limits it may impose that the emulator doesn't.
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
 | `tools/font2c.py` | makes `vc_font.c` from an 8x16 CP437 font (BDF, or a pixel-outline TrueType font) |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
-| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), `VIDMOUSE` (the mouse and keyboard), and `VIDLIB.ASM`, the helpers they share |
+| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), `VIDMOUSE` (the mouse and keyboard), `MANDEL` (the Mandelbrot set, with the MC6839 floating-point ROM), and `VIDLIB.ASM`, the helpers they share |
 | `../basic309/` | BASIC's statements for the card (`SCREEN`, `LINE`, `CIRCLE`, `SPRITE`, ...: `../basic309/README.md`) |
 
 ## Registers ($FF80-$FF9F)

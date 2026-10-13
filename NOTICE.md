@@ -68,6 +68,13 @@ scream", the stock sound effect first heard in *Distant Drums* (Warner Bros., 19
 (`WILHELM.VGM`). The recordings remain the property of their owners; these few seconds of each,
 remade by an FM synthesizer, are included as a demonstration of the hardware.
 
+## The MC6839 floating-point ROM
+
+`demo/programs/ASM/VIDEO/MANDEL.ASM` carries a copy of Motorola's MC6839 floating-point ROM
+(8192 bytes, as `FCB` data; it identifies itself as "COPYRIGHT (C) MOTOROLA 1982"). Motorola
+made the MC6839 as a mask-programmed ROM for 6809 systems. It is included, as the vintage
+library the program was written around, for this demonstration; it remains Motorola's.
+
 ## Hardware and standards
 
 - The **Hitachi HD6309** CPU (and Motorola MC6809 behind it), the **Rockwell R65C51** UART, the

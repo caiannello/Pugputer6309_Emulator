@@ -386,3 +386,57 @@ TEST(vidcard_demo_vidmouse_draws_with_the_mouse_and_takes_the_keys) {
     CHECK(d.prompt(100000000));
     CHECK(d.c().in_ctrl == 0 && d.cfg(VC_DC_CTRL)[0] == 0x01);
 }
+
+// MANDEL: the MC6839 floating-point ROM sets up each pixel, 8.8 fixed point iterates. ASM
+// always builds it; drawing the picture takes about five minutes of CPU time (20 s here),
+// so that runs only when PUGPUTER_SLOW_TESTS is set.
+TEST(vidcard_demo_mandel_draws_the_set) {
+    Demo d("MANDEL");
+    if (!d.built) return;
+    if (!std::getenv("PUGPUTER_SLOW_TESTS")) {
+        std::printf("  (drawing skipped: set PUGPUTER_SLOW_TESTS=1 to run it)\n");
+        return;
+    }
+    d.type("MANDEL");
+    // It draws until data port 0 has gone past the last pixel (320x240 bytes from VRAM 0).
+    double seconds = 0;
+    while (d.c().addr[0] < 320 * 240 && seconds < 3600) {
+        d.run(10.0);
+        seconds += 10;
+    }
+    std::printf("  drew it in about %.0f s of CPU time\n", seconds);
+    CHECK(d.c().addr[0] == 320 * 240);
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01 && d.cfg(VC_DC_BACK)[0] == 0);
+    CHECK(d.layer(0)[VC_L_MODE] == (VC_BITMAP | 3 << 3) && be16(d.layer(0) + VC_L_STRIDE) == 320);
+    // The palette is the V9958's: GGGRRRBB. 8 (n = 1): red 2 of 7; $E0 (n = 28): green.
+    CHECK(d.shown(0) == 0x000000 && d.shown(255) == 0xFFFFFF);
+    CHECK(d.shown(0x08) == vc_rgb888(0x4800) && d.shown(0xE0) == vc_rgb888(0x07E0));
+    auto px = [&](int x, int y) { return d.vram(static_cast<uint32_t>(y * 320 + x)); };
+    // Real -2.25 to 0.75, imaginary -1.125 to 1.125, 3/320 a pixel. In the big cardioid
+    // (-0.25, 0) and the circle left of it (-1, 0): in the set, black. Far outside, the corner
+    // (-2.25, -1.125): out at once, black too. Just outside, at (0.3, 0) and (-0.75, -0.15), some
+    // iterations.
+    CHECK(px(213, 120) == 0 && px(133, 120) == 0 && px(0, 0) == 0);
+    CHECK(px(272, 120) != 0 && px(160, 104) != 0);
+    // Every pixel is an iteration count times 8; many of the 32 show up.
+    bool used[32] = {};
+    int odd = 0;
+    for (int i = 0; i < 320 * 240; ++i) {
+        uint8_t p = d.vram(static_cast<uint32_t>(i));
+        if (p & 7) ++odd;
+        used[p >> 3] = true;
+    }
+    int colors = 0;
+    for (bool u : used) colors += u;
+    CHECK(odd == 0 && colors >= 24);
+    // The picture is (nearly) the same above and below the real axis -- 8.8 fixed point
+    // rounds the two halves a little differently.
+    int same = 0;
+    for (int y = 1; y < 120; ++y)
+        for (int x = 0; x < 320; ++x) same += px(x, y) == px(x, 240 - y);
+    CHECK(same > 119 * 320 * 9 / 10);
+    d.dump("1");
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
+}
