@@ -16,15 +16,17 @@ with its picture on DVI/HDMI: 640x480 at 60 frames a second. To a program it is 
 - a **mouse and keyboard** on its USB port: the mouse's position and buttons, a queue of key
   presses and releases, and a pointer (sprite 0) that follows the mouse by itself.
 
-The card's behavior is written once, in portable C (`core/`), which the emulator runs now and the
-card's firmware is to run as well. The emulator shows it in a window (see "In the emulator"). The
-firmware isn't written yet; "On the card" describes how the RP2350 is to do it, and
-the limits it may impose that the emulator doesn't.
+The card's behavior is written once, in portable C (`core/`), which the emulator runs and the
+card's firmware (`firmware/`) runs too. The emulator shows it in a window (see "In the emulator").
+"On the card" describes the hardware and how the RP2350 does it, and the limits it may impose
+that the emulator doesn't. The same board also gives the Pugputer its SD card (see "The SD
+card").
 
 | File | |
 |---|---|
 | `core/vc.h`, `core/vc.c` | the card: registers, address space, commands, the scanline renderer |
 | `core/vc_font.c` | the font it starts with (ToshibaSat 8x16, code page 437; see `../NOTICE.md`) |
+| `firmware/` | the RP2350's firmware: the bus, the picture, the SD card (`firmware/README.md`) |
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
 | `tools/font2c.py` | makes `vc_font.c` from an 8x16 CP437 font (BDF, or a pixel-outline TrueType font) |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
@@ -302,40 +304,67 @@ it.
 
 ## On the card
 
-What the RP2350 is to do; the firmware is still to be written, around `core/`.
+The firmware is in `firmware/` (how to build and flash it: `firmware/README.md`). It is written
+but not yet tried on the hardware.
 
 **Board and bus.** The Olimex RP2350-PICO2-XXL (RP2350B, 16MB flash, 8MB PSRAM, microSD), its
-16 bus pins in one run for PIO, through two TXS0108E level shifters (5V bus, 3.3V GPIO):
+bus pins in one run for PIO (GPIO 16-47), mostly through two TXS0108E level shifters (5V bus,
+3.3V GPIO):
 
 | GPIO | | GPIO | |
 |---|---|---|---|
-| 32 | /CS (`/PCS` from the ATF16V8B) | 42-46 | A0-A4 |
-| 33 | /WR (low in the second half of a write cycle) | 47 | R/W (valid with the address) |
-| 34-41 | D0-D7 | 31 | the level shifters' enable (pulled low until the firmware runs) |
-| 30 | /IRQ, through an open-drain buffer (2N7002 or 74LVC1G07): the bus line is shared | 12-19 | DVI: D2+ D2- CK+ CK- D1+ D1- D0+ D0- (220 ohm each) |
-| 25 | the board's LED | 8; 9-11, 24 | the PSRAM's chip select; the microSD (SPI1) |
+| 32 | /CS: the GAL's select, for `$FF80-$FF9F` *and* `$FFD8-$FFDB` | 42-46 | A0-A4 |
+| 33 | /WR (low in the second half of a write cycle) | 47 | SD-select: the GAL's second output, high for `$FFD8-$FFDB` |
+| 34-41 | D0-D7 | 29 | R/W (valid with the address), through a 74LVC1G34 at 3.3V (the shifters' 16 channels are taken) |
+| 30 | to the gate of a 2N7002 (10K to ground) that pulls the bus's shared /IRQ low: high = asserted | 31 | the level shifters' OE (10K to ground: off until the firmware is ready) |
+| 12-19 | DVI: D2+ D2- CK+ CK- D1+ D1- D0+ D0- (220 ohm each) | 25 | the board's LED: lit while the SD card is ready, dark while it's busy |
+| 8 | the PSRAM's chip select (on the board) | 9-11, 24 | the microSD, SPI1: CS, SCK, MOSI, MISO (on the board) |
+| 0-1 | UART0 (the UEXT connector): the firmware's messages, 115200 baud | | |
 
-- The ATF16V8B decodes `$FF80-$FF9F` from `/IO` and A5-A7 (A2-A4 go to the card as register
-  bits, not into the decode).
-- **R/W** is needed for reads: `/PCS` falls with the address, but `/WR` only in the second half of
-  a write, too late to know a read from a write. With R/W on GPIO47 (the level shifter's channel
-  that carried /IRQ), the card knows as soon as it's selected, and has until E falls, about 150ns,
-  to drive the data.
+- **The GAL** (ATF16V8B) makes two outputs: **/CS**, low for either `$FF80-$FF9F` or
+  `$FFD8-$FFDB`, and **SD-select**, high only for `$FFD8-$FFDB`. The card reads A0-A4 and
+  SD-select as one 6-bit register number: 0-31 are the video card's registers, and the SD card's
+  four land at 56-59 (A0-A4 = `$18-$1B`, plus 32).
+- **/CS must go high between bus cycles**, even between two back-to-back accesses to the card
+  (an `LDD`, a `TFM`): the card answers each read when /CS falls and drives the data until it
+  rises. Qualifying the decode with E or Q (/CS low only while E or Q is high) does it.
+- **R/W** is needed for reads: /CS falls with the address, but /WR only in the second half of a
+  write, too late to know a read from a write. With R/W the card knows as soon as it's selected,
+  and has until E falls, about 150ns, to drive the data.
 - HDMI connector pin 18 wants +5V (from VCC, through a small resistor or polyfuse): displays use
   it to see that a source is there.
 - VSYS from the bus's VCC through a Schottky diode, so the card runs from the bus and USB can
   stay plugged in.
 
-**Serving the bus.** One PIO block (its GPIO window set to 16-47) with two state machines:
-writes are latched on /WR's rising edge and passed to a core as {register, data}; reads take
-A0-A4 as an index into a 32-byte copy of the registers kept in SRAM, fetched by a chained DMA and
-driven onto D0-D7 until /CS rises -- no CPU in the way. The firmware keeps that copy current
-(`DATA0`/`DATA1` hold the byte at the port's address, fetched again after every access).
+**Serving the bus.** One PIO block (its GPIO window set to 16-47) with two state machines
+(`firmware/src/bus.pio`):
+- **reads** take the register number as an index into a 64-byte copy of the registers kept in
+  SRAM; a chained DMA fetches the byte, which is driven onto D0-D7 until /CS rises -- no CPU in
+  the way;
+- **every access** (reads too: some have side effects, like a data port stepping on) is logged,
+  {read or write, register, data, with the data latched as /WR rises}, by DMA into a ring of 4096,
+  and an interrupt on core 0 applies them in order and brings the copy up to date
+  (`DATA0`/`DATA1` hold the byte at the port's address, fetched again after every access). The
+  CPU's fastest accesses (`TFM`, one every 840ns) set how quickly that must happen.
+- Drawing commands go into a 4KB queue that core 0's main loop works through; `STATUS` says
+  busy while any are waiting, and "queue full" near its end. A reset waits for the command
+  being drawn to finish, and the accesses after it wait in the ring until it's done.
 
 **Drawing the picture.** Core 1 runs `vc_render_line()` a line ahead of the beam into one of two
-line buffers; HSTX's TMDS encoder sends it out as DVI (RGB565 in, 640x480, pixel clock 25.2MHz).
-Core 0 serves the registers and runs the commands. Video memory and the settings are in SRAM;
-the PSRAM (through the XIP cache) is only read by `COPY`, `BLIT` and the ports.
+line buffers; HSTX's TMDS encoder sends it out as DVI (RGB565 in, 640x480, pixel clock 25.2MHz:
+the system clock is 252MHz, HSTX half of it). Core 0 serves the registers and runs the commands.
+Video memory and the settings are in SRAM; the PSRAM (through the XIP cache) is only read by
+`COPY`, `BLIT` and the ports. The firmware runs from SRAM too (copied from flash at start).
+
+**The SD card.** The Pugputer's SD interface (`SD_LBA`, `SD_DATA`, `SD_CMDSTA` at `$FFD8-$FFDB`:
+`../bios/defines.d`) is the board's microSD card, so the BIOS, DOS and the emulator need no
+change. The firmware works it in SPI mode (25MHz once it's awake): a block comes off the card in
+about 0.3ms, while the BIOS takes about 2.3ms to copy one out of `SD_DATA`, so SPI mode is no
+bottleneck. Reads keep `BUSY` set until the block is in the buffer. Writes are taken at once and
+written while the CPU gets on (SD cards may take up to 250ms over a write, about as long as the
+BIOS waits): another write or a read waits for it, and if it can't be written, the next command
+fails once with `ERROR`. Until the card has woken up at power-on, the status says `BUSY`. The
+board's card-detect switch isn't wired to a GPIO, so `CARD` means "the card answered".
 
 **Mouse and keyboard.** The RP2350's USB port as a host (TinyUSB's HID host, through a small
 hub for a keyboard and a mouse, whose 5V then comes from the bus, not from the board's VBUS
@@ -343,6 +372,7 @@ diode), in the boot protocols: a mouse reports how far it moved, which `vc_mouse
 reports the keys held, whose changes become `vc_key()` calls (with the repeat of a held key made
 by the firmware). If USB host turns out not to fit beside the picture, a PIO USB port on spare
 GPIOs, or a separate input card at another address with the same registers, would do instead.
+(Not in the firmware yet: it comes once the bus, the picture and the SD card work.)
 
 **Limits to confirm on the hardware.** A line takes 31.8us: about 4700 cycles at 150MHz, 8000 at
 252MHz. Three hires layers plus 32 wide sprites on one line may not fit in that. If they don't,

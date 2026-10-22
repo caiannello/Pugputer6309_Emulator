@@ -44,4 +44,5 @@
 /utils/*.bin
 /utils/*.lst
 /demo/build/
+/vidcard/firmware/build/
 /gamekit/build/

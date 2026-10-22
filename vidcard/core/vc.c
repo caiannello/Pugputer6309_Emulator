@@ -5,6 +5,18 @@
 
 #define VRAM_MASK (VC_VRAM_SIZE - 1)
 
+/* The interrupt flags are set by the beam (vc_begin_line), the commands and the input, and
+ * cleared by the CPU. The card's firmware does those on two cores and in an interrupt
+ * handler, so it builds this with VC_ATOMIC_FLAGS: each change is then one atomic step,
+ * and none is lost to another made at the same moment. */
+#ifdef VC_ATOMIC_FLAGS
+#define SET_FLAGS(c, f) ((void)__atomic_fetch_or(&(c)->isr, (uint8_t)(f), __ATOMIC_RELAXED))
+#define CLEAR_FLAGS(c, f) ((void)__atomic_fetch_and(&(c)->isr, (uint8_t)~(f), __ATOMIC_RELAXED))
+#else
+#define SET_FLAGS(c, f) ((c)->isr |= (uint8_t)(f))
+#define CLEAR_FLAGS(c, f) ((c)->isr &= (uint8_t)~(f))
+#endif
+
 /* Parameter bytes each command takes (after its opcode). */
 static const uint8_t k_params[VC_C_COUNT] = {
     0,  /* NOP */
@@ -289,7 +301,7 @@ static void command_byte(vc_card *c, uint8_t v) {
     if (c->cmd_len > need) {
         run_command(c);
         c->cmd_len = 0;
-        c->isr |= VC_IRQ_CMDDONE;
+        SET_FLAGS(c, VC_IRQ_CMDDONE);
     }
 }
 
@@ -365,7 +377,7 @@ void vc_write(vc_card *c, uint8_t reg, uint8_t v) {
         if (v & 0x80) vc_reset(c);
         break;
     case VC_IEN: c->ien = v & 0x0F; break;
-    case VC_ISR: c->isr &= (uint8_t)~v; break;
+    case VC_ISR: CLEAR_FLAGS(c, v); break;
     case VC_LINE_H: c->irq_line = (uint16_t)((c->irq_line & 0x00FF) | (v & 0x03) << 8); break;
     case VC_LINE_L: c->irq_line = (uint16_t)((c->irq_line & 0xFF00) | v); break;
     case VC_CMD: command_byte(c, v); break;
@@ -385,7 +397,7 @@ void vc_mouse_to(vc_card *c, int x, int y, uint8_t buttons) {
     if (x > VC_WIDTH - 1) x = VC_WIDTH - 1;
     if (y < 0) y = 0;
     if (y > VC_HEIGHT - 1) y = VC_HEIGHT - 1;
-    if (x != c->mouse_x || y != c->mouse_y || b != c->buttons) c->isr |= VC_IRQ_INPUT;
+    if (x != c->mouse_x || y != c->mouse_y || b != c->buttons) SET_FLAGS(c, VC_IRQ_INPUT);
     c->mouse_x = (uint16_t)x;
     c->mouse_y = (uint16_t)y;
     c->buttons = b;
@@ -400,7 +412,7 @@ void vc_mouse_wheel(vc_card *c, int clicks) {
     if (!clicks) return;
     c->wheel = (int8_t)(w > 127 ? 127 : w < -128 ? -128 : w);
     c->buttons |= 0x80;
-    c->isr |= VC_IRQ_INPUT;
+    SET_FLAGS(c, VC_IRQ_INPUT);
 }
 
 /* The characters keys type on a US keyboard, by usage code from $04 (A) to $38 (/):
@@ -439,7 +451,7 @@ void vc_key(vc_card *c, uint8_t usage, int down) {
         e[1] = (uint8_t)(key_char(c, usage) | (down ? 0 : 0x80));
         ++c->keyq_len;
     }
-    c->isr |= VC_IRQ_INPUT;
+    SET_FLAGS(c, VC_IRQ_INPUT);
 }
 
 int vc_irq(const vc_card *c) { return (c->ien & c->isr) != 0; }
@@ -447,7 +459,7 @@ int vc_irq(const vc_card *c) { return (c->ien & c->isr) != 0; }
 void vc_begin_line(vc_card *c, uint16_t line) {
     c->line = line;
     if (line == VC_HEIGHT) {
-        c->isr |= VC_IRQ_VSYNC;
+        SET_FLAGS(c, VC_IRQ_VSYNC);
         ++c->frame;
         if (c->in_ctrl & VC_IN_POINTER) { /* sprite 0 to the mouse, in the sprites' pixels */
             int hires = c->cfg[VC_SPR_CTRL] & 1;
@@ -459,7 +471,7 @@ void vc_begin_line(vc_card *c, uint16_t line) {
             c->vram[(a + 5) & VRAM_MASK] = (uint8_t)y;
         }
     }
-    if (line == c->irq_line) c->isr |= VC_IRQ_LINE;
+    if (line == c->irq_line) SET_FLAGS(c, VC_IRQ_LINE);
 }
 
 /* ---- the picture ---- */
