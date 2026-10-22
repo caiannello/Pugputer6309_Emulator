@@ -59,7 +59,6 @@ void bus_init(void) {
     for (uint p = PIN_A0; p < PIN_A0 + 5; ++p) bus_pin(p);
     bus_pin(PIN_SDSEL);
     bus_pin(PIN_CS);
-    bus_pin(PIN_WR);
     bus_pin(PIN_RW);
 
     /* bus_read: the index from A0 (6 pins), the byte out on D0-D7. */

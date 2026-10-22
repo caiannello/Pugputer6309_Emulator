@@ -11,14 +11,15 @@
 /* DVI through HSTX, GPIO 12-19: D2+ D2- CK+ CK- D1+ D1- D0+ D0- (220 ohm each). */
 #define PIN_DVI_FIRST 12
 
-/* The Pugputer's bus. All but R/W come through two TXS0108E level shifters; the PIO
+/* The Pugputer's bus, through two TXS0108E level shifters (16 channels); the PIO
  * that serves it has its GPIO window at 16-47. */
-#define PIN_CS 32    /* /CS: the GAL's select, for $FF80-$FF9F and $FFD8-$FFDB */
-#define PIN_WR 33    /* /WR: low in the second half of a write cycle */
+#define PIN_CS 32    /* /CS: the GAL's select, for $FF80-$FF9F and $FFD8-$FFDB, low only
+                        while E or Q is high: its rising edge is when a write's data is
+                        taken (the Pugputer's /WR is R/W itself, so it can't time that) */
 #define PIN_D0 34    /* D0-D7: 34-41 */
 #define PIN_A0 42    /* A0-A4: 42-46 */
 #define PIN_SDSEL 47 /* the GAL's second output: high when $FFD8-$FFDB is selected */
-#define PIN_RW 29    /* R/W, valid with the address (through a 74LVC1G34 at 3.3 V) */
+#define PIN_RW 33    /* R/W, straight from the CPU: valid with the address */
 #define PIN_IRQ 30   /* to the gate of a 2N7002 that pulls the bus's /IRQ low: high = asserted */
 #define PIN_BUS_OE 31 /* the level shifters' OE: pulled low (off) until the firmware is ready */
 #define BUS_PIO_GPIO_BASE 16

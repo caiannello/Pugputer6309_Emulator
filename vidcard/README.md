@@ -308,14 +308,14 @@ The firmware is in `firmware/` (how to build and flash it: `firmware/README.md`)
 but not yet tried on the hardware.
 
 **Board and bus.** The Olimex RP2350-PICO2-XXL (RP2350B, 16MB flash, 8MB PSRAM, microSD), its
-bus pins in one run for PIO (GPIO 16-47), mostly through two TXS0108E level shifters (5V bus,
-3.3V GPIO):
+bus pins in one run for PIO (GPIO 16-47), through two TXS0108E level shifters (5V bus, 3.3V
+GPIO):
 
 | GPIO | | GPIO | |
 |---|---|---|---|
 | 32 | /CS: the GAL's select, for `$FF80-$FF9F` *and* `$FFD8-$FFDB` | 42-46 | A0-A4 |
-| 33 | /WR (low in the second half of a write cycle) | 47 | SD-select: the GAL's second output, high for `$FFD8-$FFDB` |
-| 34-41 | D0-D7 | 29 | R/W (valid with the address), through a 74LVC1G34 at 3.3V (the shifters' 16 channels are taken) |
+| 33 | R/W, straight from the CPU (valid with the address) | 47 | SD-select: the GAL's second output, high for `$FFD8-$FFDB` |
+| 34-41 | D0-D7 | | |
 | 30 | to the gate of a 2N7002 (10K to ground) that pulls the bus's shared /IRQ low: high = asserted | 31 | the level shifters' OE (10K to ground: off until the firmware is ready) |
 | 12-19 | DVI: D2+ D2- CK+ CK- D1+ D1- D0+ D0- (220 ohm each) | 25 | the board's LED: lit while the SD card is ready, dark while it's busy |
 | 8 | the PSRAM's chip select (on the board) | 9-11, 24 | the microSD, SPI1: CS, SCK, MOSI, MISO (on the board) |
@@ -325,12 +325,20 @@ bus pins in one run for PIO (GPIO 16-47), mostly through two TXS0108E level shif
   `$FFD8-$FFDB`, and **SD-select**, high only for `$FFD8-$FFDB`. The card reads A0-A4 and
   SD-select as one 6-bit register number: 0-31 are the video card's registers, and the SD card's
   four land at 56-59 (A0-A4 = `$18-$1B`, plus 32).
-- **/CS must go high between bus cycles**, even between two back-to-back accesses to the card
-  (an `LDD`, a `TFM`): the card answers each read when /CS falls and drives the data until it
-  rises. Qualifying the decode with E or Q (/CS low only while E or Q is high) does it.
-- **R/W** is needed for reads: /CS falls with the address, but /WR only in the second half of a
-  write, too late to know a read from a write. With R/W the card knows as soon as it's selected,
-  and has until E falls, about 150ns, to drive the data.
+- **/CS times every access**, so the GAL qualifies its decode with E or Q: /CS is low only while
+  E or Q is high, from Q rising (the address valid) to E falling. It then goes high between bus
+  cycles, even between two back-to-back accesses to the card (an `LDD`, a `TFM`). The card
+  answers a read as /CS falls and drives the data until it rises; it takes a write's data as
+  /CS rises, when E falls.
+- **R/W** says which: the card samples it as /CS falls, and has until E falls, about 150ns, to
+  drive a read's data.
+- **The Pugputer's /RD and /WR aren't used.** The CPU card's GAL makes them from R/W alone (/WR
+  is R/W, /RD its inverse, a little later), not gated by E, so they say whether a cycle reads or
+  writes but not *when* its data is valid. During back-to-back writes (an `STD`, a `TFM`) /WR
+  stays low throughout, with no edge between them, and a part that takes its data as /WR rises
+  takes it when the address changes, at the start of the next cycle. They'd be true strobes if
+  the GAL gated them with E (low only while E is high): worth doing the next time it's
+  reprogrammed. This card doesn't depend on it either way.
 - HDMI connector pin 18 wants +5V (from VCC, through a small resistor or polyfuse): displays use
   it to see that a source is there.
 - VSYS from the bus's VCC through a Schottky diode, so the card runs from the bus and USB can
@@ -342,7 +350,7 @@ bus pins in one run for PIO (GPIO 16-47), mostly through two TXS0108E level shif
   SRAM; a chained DMA fetches the byte, which is driven onto D0-D7 until /CS rises -- no CPU in
   the way;
 - **every access** (reads too: some have side effects, like a data port stepping on) is logged,
-  {read or write, register, data, with the data latched as /WR rises}, by DMA into a ring of 4096,
+  {read or write, register, data, with a write's taken as /CS rises}, by DMA into a ring of 4096,
   and an interrupt on core 0 applies them in order and brings the copy up to date
   (`DATA0`/`DATA1` hold the byte at the port's address, fetched again after every access). The
   CPU's fastest accesses (`TFM`, one every 840ns) set how quickly that must happen.
