@@ -316,7 +316,7 @@ GPIO):
 |---|---|---|---|
 | 32 | /CS: the GAL's select, for `$FF80-$FF9F` *and* `$FFD8-$FFDB` | 42-46 | A0-A4 |
 | 33 | R/W, straight from the CPU (valid with the address) | 47 | SD-select: the GAL's second output, high for `$FFD8-$FFDB` |
-| 34-41 | D0-D7 | 29 | /RES, through a 10K/20K divider (5V to 3.3V): when it falls, the card and the SD interface are reset, as the emulator does |
+| 34-41 | D0-D7 | 29 | /RES, through a 100K/200K divider (5V to 3.3V; a light load, so /RES still reaches the 6309's RESET threshold against the CPU card's 10K pull-up): when it falls, the card and the SD interface are reset, as the emulator does |
 | 30 | to the gate of an IRLML6344 (10K to ground) that pulls the bus's shared /IRQ low: high = asserted | 31 | the level shifters' OE (10K to ground: off until the firmware is ready) |
 | 12-19 | DVI: D2+ D2- CK+ CK- D1+ D1- D0+ D0- (220 ohm each) | 25 | the board's LED: lit while the SD card is ready, dark while it's busy |
 | 8 | the PSRAM's chip select (on the board) | 9-11, 24 | the microSD, SPI1: CS, SCK, MOSI, MISO (on the board) |

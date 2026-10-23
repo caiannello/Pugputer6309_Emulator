@@ -21,7 +21,7 @@
 #define PIN_SDSEL 47 /* the GAL's second output: high when $FFD8-$FFDB is selected */
 #define PIN_RW 33    /* R/W, straight from the CPU: valid with the address */
 #define PIN_IRQ 30   /* to the gate of a MOSFET that pulls the bus's /IRQ low: high = asserted */
-#define PIN_RESET 29 /* the bus's /RES, through a 10K/20K divider: falls when the Pugputer resets */
+#define PIN_RESET 29 /* the bus's /RES, through a 100K/200K divider: falls when the Pugputer resets */
 #define PIN_BUS_OE 31 /* the level shifters' OE: pulled low (off) until the firmware is ready */
 #define BUS_PIO_GPIO_BASE 16
 
