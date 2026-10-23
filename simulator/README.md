@@ -212,6 +212,13 @@ the result to the CPU. `IrqLine::NMI` is edge-pulsed on a device's
 false->true transition (no current device uses it; it's there for a
 future timer). Addresses outside every mapping fall through to RAM.
 
+**Not emulated yet: the CPU card's 16 Hz clock.** On the real machine an oscillator on the CPU
+card pulses NMI 16 times a second, and the BIOS counts the ticks (`V_NMI` in `bios/time.asm`,
+read with `RTC_GETTIX`). The emulator has no such device, so the count never advances here. No
+software depends on it yet; when some does (timing escape sequences from the UART, a periodic
+check in the editor, task switching), it's a small `IDevice` on `IrqLine::NMI` that pulses
+every 1/16 second of CPU time.
+
 ### `UartR65C51` -- R65C51 ACIA-compatible UART
 
 Register-exact against
