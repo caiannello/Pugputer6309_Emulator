@@ -29,6 +29,9 @@ bool card_bus_event(uint32_t e);
 /* Core 0's main loop: a reset if one is waiting, then a share of the queued drawing
  * commands. */
 void card_poll(void);
+/* The Pugputer is being reset (/RES fell): the card and the SD interface are put back as
+ * they start, as the emulator does, by the main loop. Safe from an interrupt. */
+void card_system_reset(void);
 /* Core 1: the beam has reached `line` (0-524). */
 void card_begin_line(uint16_t line);
 

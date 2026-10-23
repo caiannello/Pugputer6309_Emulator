@@ -1,0 +1,45 @@
+Name     VIDCARD ;
+PartNo   00 ;
+Date     2026-10-23 ;
+Revision 01 ;
+Designer Craig Iannello ;
+Company  Pugbutt.com ;
+Assembly Video card ;
+Location IC3 ;
+Device   g16v8a ;
+
+/* The video card's address decoder (ATF16V8B): see ../README.md, "On the card".
+ *
+ *   /VCS   low for $FF80-$FF9F (the video card) and $FFD8-$FFDB (the SD card), while E or
+ *          Q is high: from Q rising (the address valid) to E falling (a write's data
+ *          taken), high between bus cycles, even back-to-back ones
+ *   SDCS   high for $FFD8-$FFDB (the RP2350 reads it with A0-A4 as a 6th address bit)
+ *   /OPL   low for $FFE0-$FFE3 (the YMF262), while E is high: the YMF262 takes a
+ *          write's data as its /CS rises, which is then as E falls
+ *
+ * /IO is the CPU card's select for the I/O page ($FFxx); A7-A2 pick the device in it.
+ * Pin 1 is grounded and unused. */
+
+/* Inputs */
+Pin 2  = E ;
+Pin 3  = Q ;
+Pin 4  = A2 ;
+Pin 5  = A3 ;
+Pin 6  = A4 ;
+Pin 7  = A5 ;
+Pin 8  = A6 ;
+Pin 9  = A7 ;
+Pin 11 = !IO ;
+
+/* Outputs */
+Pin 19 = !VCS ;
+Pin 18 = SDCS ;
+Pin 17 = !OPL ;
+
+VIDEO = IO & A7 & !A6 & !A5 ;                      /* $FF80-$FF9F */
+SD    = IO & A7 &  A6 & !A5 &  A4 &  A3 & !A2 ;    /* $FFD8-$FFDB */
+OPL3  = IO & A7 &  A6 &  A5 & !A4 & !A3 & !A2 ;    /* $FFE0-$FFE3 */
+
+VCS  = (VIDEO # SD) & (E # Q) ;
+SDCS = SD ;
+OPL  = OPL3 & E ;

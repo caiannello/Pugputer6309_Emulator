@@ -27,7 +27,7 @@ uint8_t __attribute__((aligned(64))) regcopy[64];
 #define CMDQ_FULL (CMDQ_SIZE - 64) /* STATUS says "queue full" from here */
 static uint8_t cmdq[CMDQ_SIZE];
 static volatile uint32_t cmdq_in, cmdq_out;
-static volatile bool reset_waiting;
+static volatile bool reset_waiting, system_reset;
 
 static spin_lock_t *lock;
 
@@ -151,8 +151,17 @@ bool card_bus_event(uint32_t e) {
     return true;
 }
 
+void card_system_reset(void) {
+    system_reset = true;
+    reset_waiting = true;
+}
+
 void card_poll(void) {
     if (reset_waiting) {
+        if (system_reset) {
+            system_reset = false;
+            blockdev_reset();
+        }
         cmdq_out = cmdq_in; /* commands sent before the reset: the reset clears them anyway */
         vc_reset(&card);
         uint32_t s = copy_lock();

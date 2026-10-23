@@ -36,6 +36,13 @@ static void say(int row, const char *text) {
     for (; *text; ++text, cell += 4) cell[0] = (uint8_t)*text;
 }
 
+/* /RES fell: the Pugputer is being reset (not at power-on, when it's low from the start). */
+static void on_reset(uint gpio, uint32_t events) {
+    (void)gpio;
+    (void)events;
+    card_system_reset();
+}
+
 int main(void) {
     clocks_init();
     stdio_init_all(); /* UART0 on GPIO 0-1 (the UEXT connector), 115200 baud */
@@ -56,6 +63,10 @@ int main(void) {
              gpio_get(PIN_LED) ? "ready" : "not found");
     printf("\n%s\n", line);
     say(1, line);
+
+    gpio_init(PIN_RESET);
+    gpio_disable_pulls(PIN_RESET); /* (the divider sets its level) */
+    gpio_set_irq_enabled_with_callback(PIN_RESET, GPIO_IRQ_EDGE_FALL, true, on_reset);
 
     for (;;) {
         card_poll();

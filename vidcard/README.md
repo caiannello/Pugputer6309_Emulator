@@ -27,6 +27,7 @@ card").
 | `core/vc.h`, `core/vc.c` | the card: registers, address space, commands, the scanline renderer |
 | `core/vc_font.c` | the font it starts with (ToshibaSat 8x16, code page 437; see `../NOTICE.md`) |
 | `firmware/` | the RP2350's firmware: the bus, the picture, the SD card (`firmware/README.md`) |
+| `hardware/VIDCARD.PLD` | the card's address decoder (ATF16V8B, CUPL): /CS, SD-select, and the OPL3's select |
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
 | `tools/font2c.py` | makes `vc_font.c` from an 8x16 CP437 font (BDF, or a pixel-outline TrueType font) |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
@@ -315,16 +316,18 @@ GPIO):
 |---|---|---|---|
 | 32 | /CS: the GAL's select, for `$FF80-$FF9F` *and* `$FFD8-$FFDB` | 42-46 | A0-A4 |
 | 33 | R/W, straight from the CPU (valid with the address) | 47 | SD-select: the GAL's second output, high for `$FFD8-$FFDB` |
-| 34-41 | D0-D7 | | |
-| 30 | to the gate of a 2N7002 (10K to ground) that pulls the bus's shared /IRQ low: high = asserted | 31 | the level shifters' OE (10K to ground: off until the firmware is ready) |
+| 34-41 | D0-D7 | 29 | /RES, through a 10K/20K divider (5V to 3.3V): when it falls, the card and the SD interface are reset, as the emulator does |
+| 30 | to the gate of an IRLML6344 (10K to ground) that pulls the bus's shared /IRQ low: high = asserted | 31 | the level shifters' OE (10K to ground: off until the firmware is ready) |
 | 12-19 | DVI: D2+ D2- CK+ CK- D1+ D1- D0+ D0- (220 ohm each) | 25 | the board's LED: lit while the SD card is ready, dark while it's busy |
 | 8 | the PSRAM's chip select (on the board) | 9-11, 24 | the microSD, SPI1: CS, SCK, MOSI, MISO (on the board) |
 | 0-1 | UART0 (the UEXT connector): the firmware's messages, 115200 baud | | |
 
-- **The GAL** (ATF16V8B) makes two outputs: **/CS**, low for either `$FF80-$FF9F` or
-  `$FFD8-$FFDB`, and **SD-select**, high only for `$FFD8-$FFDB`. The card reads A0-A4 and
-  SD-select as one 6-bit register number: 0-31 are the video card's registers, and the SD card's
-  four land at 56-59 (A0-A4 = `$18-$1B`, plus 32).
+- **The GAL** (ATF16V8B; its equations are `hardware/VIDCARD.PLD`, from /IO, A2-A7, E and Q)
+  makes **/CS**, low for either `$FF80-$FF9F` or `$FFD8-$FFDB`, and **SD-select**, high only for
+  `$FFD8-$FFDB`. The card reads A0-A4 and SD-select as one 6-bit register number: 0-31 are the
+  video card's registers, and the SD card's four land at 56-59 (A0-A4 = `$18-$1B`, plus 32). It
+  also selects the **YMF262 (OPL3)**, which shares the card: **/OPL**, low for `$FFE0-$FFE3`
+  while E is high.
 - **/CS times every access**, so the GAL qualifies its decode with E or Q: /CS is low only while
   E or Q is high, from Q rising (the address valid) to E falling. It then goes high between bus
   cycles, even between two back-to-back accesses to the card (an `LDD`, a `TFM`). The card
@@ -339,10 +342,12 @@ GPIO):
   takes it when the address changes, at the start of the next cycle. They'd be true strobes if
   the GAL gated them with E (low only while E is high): worth doing the next time it's
   reprogrammed. This card doesn't depend on it either way.
-- HDMI connector pin 18 wants +5V (from VCC, through a small resistor or polyfuse): displays use
-  it to see that a source is there.
-- VSYS from the bus's VCC through a Schottky diode, so the card runs from the bus and USB can
-  stay plugged in.
+- HDMI connector pin 18 wants +5V (from VCC): displays use it to see that a source is there, and
+  without it some show the picture but keep flashing "check signal" over it.
+- VSYS from the bus's VCC through a Schottky diode (the board has its own from USB's VBUS), so
+  the card runs from the bus and USB can stay plugged in. The level shifters' 5V side is VCC
+  itself, not VSYS: with the Pugputer off and the card on USB, they're unpowered on that side
+  and keep out of the bus.
 
 **Serving the bus.** One PIO block (its GPIO window set to 16-47) with two state machines
 (`firmware/src/bus.pio`):

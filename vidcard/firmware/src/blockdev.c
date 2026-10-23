@@ -64,6 +64,14 @@ void blockdev_start(void) {
     gpio_put(PIN_LED, ok);
 }
 
+void blockdev_reset(void) {
+    uint32_t s = copy_lock();
+    lba = lba_hi = cursor = 0;
+    memset(buf, 0, sizeof buf);
+    blockdev_refresh();
+    copy_unlock(s);
+}
+
 /* A command from the CPU (in the bus interrupt, with the copy locked). */
 static void command(uint8_t cmd) {
     error = false;
