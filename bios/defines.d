@@ -23,6 +23,9 @@ SD_BASE     equ  $FFD8      ; ffd8 - ffdb: SD/block storage (Built-in; see
 VIA_BASE    equ  $FFB0      ; ffb0 - ffbf: W65C22 VIA (optional card)
 VCARD_BASE  equ  $FF80      ; ff80 - ff9f: the video card (optional; its registers
                              ;              are in vidcard/vidcard.d)
+VC_ID_REG   equ  $1E        ; the card's ID register: reads 'V'
+VC_VER_REG  equ  $1F        ; its version (major*16 + minor): $11 or later
+VC_VERSION_MIN equ $11      ; (the BIOS looks for these at boot: see F_VDP)
 
 ; Memory bank registers 0..3 (write-only; readable copies kept in
 ; SBANK_1...SBANK_3 -- see main.asm)
@@ -96,7 +99,9 @@ F_STDOUT    equ  $01        ; Aliased to the console device at BIOS init
 F_STDIN     equ  $02
 F_STDERR    equ  $03        ; (reserved numbering: 4-7 unused for now)
 F_UART      equ  $08        ; Direct access to the UART, bypassing stdio
-F_VDP       equ  $09        ; reserved for a future video card driver
+F_VDP       equ  $09        ; the video card: registered at boot when the card is
+                             ; there (so B_DQUERY's bit 9 says so); no character
+                             ; driver yet (reads give nothing, writes are dropped)
 F_VIA_KB    equ  $0A        ; reserved for a future VIA/keyboard driver
 NUM_DEVICES equ  $0C        ; size of the device driver table (0..$0B)
 

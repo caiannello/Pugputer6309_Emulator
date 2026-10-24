@@ -57,9 +57,9 @@ struct Demo {
         img = build_image((name + ".img").c_str(), 32768, 4,
                           {disk_file(file.c_str(), src), disk_file("VIDLIB.ASM", lib), disk_file("VIDCARD.D", inc),
                            disk_file("ASM.COM", asm_com)});
-        CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
         v.set_draw_all(true);
-        s.bus.map_device("video", VideoDevice::kBase, VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+        s.attach_video(&v);
+        CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
         type("ASM -f com " + name + ".ASM");
         CHECK(prompt(8000000000ull));
         CHECK(s.received.find("rror") == std::string::npos);

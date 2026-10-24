@@ -30,6 +30,15 @@ struct Basic309Session {
     pugputer::SystemBus bus;
     pugputer::UartR65C51 uart;
     std::string received;
+    // A video card to put on the bus before it boots (attach_video), so that the BIOS
+    // finds it, as on the machine, and SCREEN works. None by default.
+    pugputer::IDevice* video = nullptr;
+
+    void attach_video(pugputer::IDevice* v) { video = v; }
+
+    void map_video() {
+        if (video) bus.map_device("video", 0xFF80, 0x20, video, pugputer::IrqLine::IRQ);
+    }
 
     // Returns false (after printing why) if an image can't be loaded.
     bool boot(const char* bios_s19, const char* basic_s19) {
@@ -44,6 +53,7 @@ struct Basic309Session {
         bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
         bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
         uart.set_tx_callback([this](uint8_t b) { received += static_cast<char>(b); });
+        map_video();
 
         bus.reset();
         bus.run(500000); // BIOS cold start
@@ -69,6 +79,7 @@ struct Basic309Session {
         bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
         bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
         uart.set_tx_callback([this](uint8_t b) { received += static_cast<char>(b); });
+        map_video();
         bus.reset();
         return wait_for("> ", 20000000);
     }
@@ -88,6 +99,7 @@ struct Basic309Session {
         bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
         bus.map_bank_registers();
         uart.set_tx_callback([this](uint8_t b) { received += static_cast<char>(b); });
+        map_video();
         bus.reset();
         return wait_for(needle, budget);
     }

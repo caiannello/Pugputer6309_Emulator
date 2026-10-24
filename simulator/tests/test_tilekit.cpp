@@ -66,9 +66,9 @@ struct Kit {
         CHECK(!bin.empty());
         img = build_image("tilekit.img", 32768, 4, files);
         CHECK(!img.empty());
-        CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
         v.set_draw_all(true);
-        s.bus.map_device("video", VideoDevice::kBase, VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+        s.attach_video(&v);
+        CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
         ok = !bin.empty() && !img.empty();
     }
     void type(const std::string& cmd) {

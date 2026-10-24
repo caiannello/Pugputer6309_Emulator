@@ -154,7 +154,7 @@ do too. In the handler:
 `ERROR n` raises error `n` (so a program can test its own handler, or make its own errors).
 Numbers: 0 NF, 1 SN, 2 RG, 3 OD, 4 FC, 5 OV, 6 OM, 7 UL, 8 BS, 9 DD, 10 /0, 11 ID, 12 TM, 13 OS,
 14 LS, 15 ST, 16 CN, 17 FD, 18 AO, 19 DN, 20 IO, 21 FM, 22 NO, 23 IE, 24 DS, 25 UF, 26 NE (file
-not found), 27 FE, 28 DF, 29 ND, 30 IS, 31 DE, 32 BP, 33 RW. File and directory errors from DOS
+not found), 27 FE, 28 DF, 29 ND, 30 IS, 31 DE, 32 BP, 33 RW, 34 NV (no video card). File and directory errors from DOS
 are trappable like any other: `IF ERR=26 THEN ...` for a missing file.
 
 ```
@@ -207,7 +207,7 @@ draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on t
 
 | Statement | |
 |---|---|
-| `SCREEN n` | 0: the card as it starts (its 80x30 text screen, nothing to draw on). 1: a 320x240 bitmap in 256 colors. 2: 640x480 in 16 colors. Modes 1 and 2 put the 80x30 text screen in front of the bitmap and turn the sprites on. Every `SCREEN` resets the card. |
+| `SCREEN n` | 0: the card as it starts (its 80x30 text screen, nothing to draw on). 1: a 320x240 bitmap in 256 colors. 2: 640x480 in 16 colors. Modes 1 and 2 put the 80x30 text screen in front of the bitmap and turn the sprites on. Every `SCREEN` resets the card. Without one (the BIOS looks at boot), `?NV ERROR`. |
 | `COLOR fg[,bg]` | the pen, which everything below draws in unless given a color; `bg` is `TPRINT`'s background |
 | `GCLS [c]` | clears the bitmap to `c` (0) and empties the text screen (after `IMAGE n`, just the image) |
 | `PSET (x,y)[,c]` | a point |

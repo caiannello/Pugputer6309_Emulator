@@ -18,8 +18,19 @@ isn't obvious from there.
 | `time.asm` | the 16 Hz NMI tick |
 | `helpers.asm` | string helpers, the ring buffer |
 
-RAM below `EndOfVars` (`pugbios.map`, currently `$052F`) is the BIOS's; DOS loads at `DOS_LOAD`
-(`$0600`). About 730 bytes of the ROM code area are free.
+RAM below `EndOfVars` (`pugbios.map`, currently `$05AE`) is the BIOS's; DOS loads at `DOS_LOAD`
+(`$0600`). About 720 bytes of the ROM code area are free.
+
+## Which devices are there
+
+`B_DQUERY` returns a bitmap of the devices registered (bit n: device n): the null device, the
+console's three aliases and the UART always (`$010F`), and the video card (`F_VDP`, bit 9:
+`$030F`) when the BIOS found it at boot. It looks for the card with reads only, of its last two
+registers: `ID` (`$FF9E`) must read `'V'` and `VERSION` (`$FF9F`) `$11` or later. A write would
+wake the emulator's video window. With no card there, a read gets whatever the bus floats at on
+the machine, or the RAM underneath in the emulator, not that pair. The card has no character
+driver yet: its device takes the null device's routines (nothing to read, writes dropped).
+BASIC's `SCREEN` asks `B_DQUERY` and stops with `?NV ERROR` (34) when the card isn't there.
 
 ## What the BIOS does when things go wrong
 

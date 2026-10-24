@@ -20,6 +20,7 @@
 ;------------------------------------------------------------------------------
 DEV_INIT        EXPORT
 DEV_STDIO_ALIAS EXPORT
+DEV_VC_DETECT   EXPORT
 DEV_REGISTER    EXPORT       ; B=devref,X=read,Y=write,U=ioctl -> A=status,C
 DEV_DEREGISTER  EXPORT       ; B=devref -> A=status, carry
 BIOS_DQUERY     EXPORT
@@ -96,6 +97,33 @@ NUL_READ    LDY  #0          ; never anything to read
             RTS
 NUL_WRITE   RTS              ; discard silently, "accept" instantly
 ;------------------------------------------------------------------------------
+; Is the video card on the bus? If so it is registered as F_VDP, so B_DQUERY
+; reports it (bit 9). It has no character driver (yet): its slot takes the null
+; device's routines, so reads give nothing and writes are discarded. Called once
+; at boot.
+;
+; Its last two registers identify it: ID reads 'V', VERSION $11 (or later). Only
+; reads: a write would wake the emulator's video window. With no card there, a
+; read gets what the bus floats at (on the machine, most likely the address's
+; low byte, the instruction's last) or, in the emulator, the RAM underneath --
+; not that pair.
+;------------------------------------------------------------------------------
+DEV_VC_DETECT
+            LDA  VCARD_BASE+VC_ID_REG
+            CMPA #'V
+            BNE  VD_NONE
+            LDA  VCARD_BASE+VC_VER_REG
+            CMPA #VC_VERSION_MIN
+            BLO  VD_NONE
+            CMPA #$7F        ; (a version, not the bus floating high)
+            BHI  VD_NONE
+            LDB  #F_VDP
+            LDX  #NUL_READ
+            LDY  #NUL_WRITE
+            LDU  #0
+            JSR  DEV_REGISTER
+VD_NONE     RTS
+;------------------------------------------------------------------------------
 ; Copy the UART's driver entry (F_UART, already registered by serio.asm's
 ; UT_INIT) into the stdio aliases. Called once at boot, after UT_INIT.
 ;------------------------------------------------------------------------------
@@ -171,22 +199,29 @@ BIO_BADDEV  LDA  #ERR_BADDEV
             JMP  BC_ERR
 ;------------------------------------------------------------------------------
 ; Returns a bitmap of present devices in D (bit N = devref N registered).
-; Built by walking the table backwards so devref 0 ends up as bit 0.
+; Built by walking the table backwards so devref 0 ends up as bit 0: D moves up
+; a bit for each device, and gets its bit in bit 0.
+; NOTE (fixed): this used to load each slot's flags into A -- the top half of
+; the D it was building -- so devices 9-11 never showed (8 did, by luck: its bit
+; was the last one shifted out of B into A). It also began with PSHS X, which
+; put every SWI2_* offset after it 2 off: the result went over the saved
+; registers and its PULS X,PC jumped to nowhere. (Nothing called it until the
+; video card's detection.) Like the other handlers it now leaves S alone and
+; returns with RTI.
 ;------------------------------------------------------------------------------
-BIOS_DQUERY PSHS X
-            LDD  #0
+BIOS_DQUERY LDD  #0
             LDX  #DEVTAB+(NUM_DEVICES*sizeof{devdrv})
 DQ_LOOP     CMPX #DEVTAB
             BLS  DQ_DONE
             LEAX -sizeof{devdrv},X
-            LDA  devdrv.flags,X
-            LSRA
-            ROLB
-            ROLA
+            LSLD
+            TIM  #1,devdrv.flags,X
+            BEQ  DQ_LOOP
+            ORB  #1
             BRA  DQ_LOOP
-DQ_DONE     STD  SWI2_A,S
+DQ_DONE     STD  SWI2_A,S       ; A then B, as the frame has them
             AIM  #$FE,SWI2_CC,S
-            PULS X,PC
+            RTI
 ;------------------------------------------------------------------------------
 BIOS_REG_DEV
             LDB  SWI2_B,S

@@ -89,10 +89,10 @@ TEST(demo_programs_load_and_run_and_print_what_they_should) {
 TEST(demo_program_video_draws_on_the_video_card) {
     std::string img = demo_disk();
     Basic309Session s;
-    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     pugputer::VideoDevice v;
     v.set_draw_all(true);
-    s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+    s.attach_video(&v);
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     CHECK(s.run_line("LOAD \"VIDEO\"").empty());
     s.received.clear();
     s.type("RUN");
@@ -141,10 +141,10 @@ TEST(demo_program_mandelgr_draws_the_set) {
     }
     std::string img = demo_disk();
     Basic309Session s;
-    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     pugputer::VideoDevice v;
     v.set_draw_all(true);
-    s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+    s.attach_video(&v);
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     CHECK(s.run_line("LOAD \"MANDELGR\"").empty());
     s.run_line("120 FOR Y=96 TO 119:D=(Y-119.5)*K:E=D*D:G=E/4:W=239-Y:C=L-H");
     s.received.clear();
@@ -194,10 +194,10 @@ TEST(demo_program_mandelgr_draws_the_set) {
 static void check_triangle_picture(const char* name, int w, int shown_colors, uint64_t budget) {
     std::string img = demo_disk();
     Basic309Session s;
-    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     pugputer::VideoDevice v;
     v.set_draw_all(true);
-    s.bus.map_device("video", pugputer::VideoDevice::kBase, pugputer::VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
+    s.attach_video(&v);
+    CHECK(s.boot_disk(PUGBIOS_S19_PATH, img.c_str()));
     CHECK(s.run_line(std::string("LOAD \"") + name + "\"").empty());
     s.received.clear();
     s.type("RUN");

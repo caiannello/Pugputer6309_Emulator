@@ -6,6 +6,8 @@ F_STDOUT    equ  $01           ; BIOS fileref: console output (aliased to the UA
 F_STDIN     equ  $02           ; BIOS fileref: console input
 B_PUTC      equ  $09           ; BIOS call: B=fileref, E=char -> blocks if buf full
 B_GETC      equ  $0C           ; BIOS call: B=fileref -> A=char, carry set if none
+B_DQUERY    equ  $00           ; BIOS call: -> D=the devices present (bit n: device n)
+F_VDP       equ  $09           ; BIOS device: the video card (SCREEN checks for it)
 ; LOAD/SAVE and the file statements: the resident DOS calls (bios/defines.d,
 ; dos/dos.asm). Names are NUL-terminated paths ("/" separators); handles are DOS
 ; file handles.
@@ -476,6 +478,13 @@ SCREEN    JSR  LB70B          THE MODE
           CMPB #2
           LBHI LB44A          'FC' ERROR IF > 2
           STB  VMODE
+          LDA  #B_DQUERY      IS THERE A VIDEO CARD? (THE BIOS LOOKED AT START-UP:
+          SWI2                ITS DEVICE, F_VDP, IS BIT 9 OF THE PRESENT ONES)
+          BITA #$02           (F_VDP IS $09: BIT 1 OF A, THE HIGH BYTE)
+          BNE  SCREENOK
+          LDB  #34*2          'NV' ERROR: NO VIDEO CARD
+          JMP  LAC46
+SCREENOK  LDB  VMODE
           LDA  #$80
           STA  VCCTRL         THE CARD AS AT RESET
           LDA  #15
@@ -1794,7 +1803,8 @@ LERRFE    FCC  "FE"           27 FILE ALREADY EXISTS (basic309: NAME's target co
           FCC  "DE"           31 DIRECTORY NOT EMPTY
           FCC  "BP"           32 BAD PATH OR NAME
           FCC  "RW"           33 RESUME WITHOUT ERROR
-NUMERRS   EQU  34
+          FCC  "NV"           34 NO VIDEO CARD (basic309: SCREEN, when the BIOS found none)
+NUMERRS   EQU  35
 
 LABE1     FCC  " ERROR"
           FCB  $00             

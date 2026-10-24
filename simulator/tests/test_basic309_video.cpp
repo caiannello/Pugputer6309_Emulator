@@ -19,8 +19,8 @@ struct Machine {
     VideoDevice v;
     bool ok = false;
     Machine() {
+        s.attach_video(&v); // (before it boots, so the BIOS finds it)
         ok = s.boot(PUGBIOS_S19_PATH, EXBASROM309_S19_PATH);
-        s.bus.map_device("video", VideoDevice::kBase, VideoDevice::kSize, &v, pugputer::IrqLine::IRQ);
     }
     std::string run(const std::string& line) { return s.run_line(line); }
     const vc_card& c() { return v.card(); }
@@ -184,4 +184,50 @@ TEST(basic309_video_statements_list_as_typed) {
     CHECK(got == want);
     // The words around them still work.
     CHECK(m.run("PRINT LEN(\"ABC\");INSTR(\"ABC\",\"C\")") == " 3  3 \r\n");
+}
+
+// B_DQUERY (the BIOS call), from the BIOS as it left things after booting: a stub
+// (SWI2; BRA *) at $9F00, run until it gets back. D = the devices present; -1 if the call
+// never came back.
+static int dquery(Basic309Session& s) {
+    uint8_t* ram = s.bus.ram();
+    const uint16_t stub = 0x9F00;
+    ram[stub] = 0x10; // SWI2
+    ram[stub + 1] = 0x3F;
+    ram[stub + 2] = 0x20; // BRA *
+    ram[stub + 3] = 0xFE;
+    hd6309_regs_t r{};
+    hd6309_get_regs(s.bus.cpu(), &r);
+    r.a = 0x00; // B_DQUERY
+    r.pc = stub;
+    hd6309_set_regs(s.bus.cpu(), &r);
+    for (int i = 0; i < 100000 && r.pc != stub + 2; ++i) {
+        s.bus.step();
+        hd6309_get_regs(s.bus.cpu(), &r);
+    }
+    if (r.pc != stub + 2 || (r.cc & 0x01)) return -1;
+    return r.a << 8 | r.b;
+}
+
+// The BIOS looks for the card at boot (its ID and version registers) and registers it as
+// F_VDP ($09), so B_DQUERY says so. Present: the null device, the console's three aliases,
+// the UART, and the card.
+TEST(basic309_video_the_bios_finds_the_card_at_boot) {
+    Machine m;
+    CHECK(m.ok);
+    CHECK(dquery(m.s) == 0x030F);
+    CHECK(!m.v.active()); // (it only read the card: the emulator's window stays shut)
+}
+
+// Without the card: B_DQUERY leaves it out, and SCREEN stops with ?NV ERROR (34) before it
+// writes anything to where the card would be (in the emulator, the RAM underneath).
+TEST(basic309_video_screen_without_the_card_is_an_nv_error) {
+    Basic309Session s;
+    CHECK(s.boot(PUGBIOS_S19_PATH, EXBASROM309_S19_PATH));
+    CHECK(s.run_line("SCREEN 1").find("?NV ERROR") != std::string::npos);
+    for (uint32_t a = 0xFF80; a < 0xFFA0; ++a) CHECK(s.bus.ram()[a] == 0);
+    std::string out = s.run_program(
+        {"10 ON ERROR GOTO 100", "20 SCREEN 0", "30 PRINT \"DONE\":END", "100 PRINT \"ERROR\";ERR:RESUME 30", "RUN"});
+    CHECK(out.find("ERROR 34") != std::string::npos && out.find("DONE") != std::string::npos);
+    CHECK(dquery(s) == 0x010F);
 }

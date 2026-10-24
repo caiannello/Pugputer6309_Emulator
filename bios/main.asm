@@ -19,6 +19,7 @@ S_HEXA          EXTERN      ; helpers.asm
 S_EOL           EXTERN
 DEV_INIT        EXTERN      ; devio.asm
 DEV_STDIO_ALIAS EXTERN
+DEV_VC_DETECT   EXTERN
 BIOS_DQUERY     EXTERN
 BIOS_REG_DEV    EXTERN
 BIOS_DEREG_DEV  EXTERN
@@ -341,6 +342,7 @@ DJ_FILL     LDD  #DOS_NOTPRESENT
             JSR  DEV_INIT       ; devio.asm: clear device table, add F_NULL
             JSR  UT_INIT        ; serio.asm: UART + adds F_UART
             JSR  DEV_STDIO_ALIAS
+            JSR  DEV_VC_DETECT  ; devio.asm: the video card, as F_VDP, if it's there
             ANDCC #$AF          ; Enable IRQ and FIRQ interrupts
             LDY  #MSG_HELLO
             JSR  UT_PUTS
