@@ -19,7 +19,7 @@ isn't obvious from there.
 | `helpers.asm` | string helpers, the ring buffer |
 
 RAM below `EndOfVars` (`pugbios.map`, currently `$05AE`) is the BIOS's; DOS loads at `DOS_LOAD`
-(`$0600`). About 720 bytes of the ROM code area are free.
+(`$0600`). About 650 bytes of the ROM code area are free.
 
 ## Which devices are there
 
@@ -31,6 +31,23 @@ wake the emulator's video window. With no card there, a read gets whatever the b
 the machine, or the RAM underneath in the emulator, not that pair. The card has no character
 driver yet: its device takes the null device's routines (nothing to read, writes dropped).
 BASIC's `SCREEN` asks `B_DQUERY` and stops with `?NV ERROR` (34) when the card isn't there.
+
+## At power-on
+
+The video card's RP2350 starts when the CPU does, so the BIOS gives it time:
+
+- `DEV_VC_DETECT` reads the card's ID again and again for about half a second (`VC_WAKE`) before
+  deciding there's no card: the card keeps its level shifters off the bus until its firmware is
+  running, some tens of ms. A boot without a card is half a second slower for it.
+- `SD_BOOT_TRY` gives the SD card about 3 seconds (`SD_WAKE`) to stop saying BUSY before it reads
+  the boot sector: the card's firmware is on the bus before it has woken the microSD card. If the
+  status reads with any of bits 3-7 set (they're always 0), nothing's there and it doesn't wait.
+- `SD_WRITE_BLOCK` waits for BUSY to clear before it looks at CARD.
+
+`test_basic309_video.cpp` boots with both coming up late (the devices' `set_wake_cycles()`).
+
+The 16 Hz NMI tick (`time.asm`) is the CPU card's; the emulator doesn't make it yet, so on the
+machine it's the one BIOS code path the tests haven't run.
 
 ## What the BIOS does when things go wrong
 
