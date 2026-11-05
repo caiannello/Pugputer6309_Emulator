@@ -56,10 +56,16 @@ struct Basic309Session {
         map_video();
 
         bus.reset();
-        bus.run(500000); // BIOS cold start
+        // BIOS cold start: run until its banner (printed once it's set up, after ~0.55s
+        // looking for a video card if there isn't one), and a little more to finish it.
+        for (int i = 0; i < 200 && received.find("6309 BIOS") == std::string::npos; ++i) bus.run(50000);
+        bus.run(100000);
         hd6309_regs_t regs{};
         hd6309_get_regs(bus.cpu(), &regs);
         regs.pc = kBasicEntry;
+        // Interrupts on, as a loader would leave them: the BIOS may have been caught in
+        // the S-record loader's UT_GETC, which masks them for a moment.
+        regs.cc = static_cast<uint8_t>(regs.cc & ~0x50);
         hd6309_set_regs(bus.cpu(), &regs);
         return run_until_ok(20000000);
     }

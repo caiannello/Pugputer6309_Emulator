@@ -178,3 +178,30 @@ TEST(sdcard_high_lba_word_is_latched_by_sethi_and_survives_until_changed) {
     dev.write(kRegCmdSta, kCmdRead);
     CHECK((dev.read(kRegCmdSta) & 0x04) != 0);
 }
+
+// At power-on the video card's SD card says BUSY (CARD clear) until the RP2350 has woken it;
+// a READ sent meanwhile is done once it has (vidcard/firmware/src/blockdev.c).
+TEST(sdcard_waking_up_reads_busy_and_holds_a_read_until_awake) {
+    std::string path = make_blank_image("wake.img", 4);
+    {
+        SdCardDevice w;
+        CHECK(w.open(path));
+        set_lba(w, 2);
+        for (int i = 0; i < 512; ++i) w.write(kRegData, static_cast<uint8_t>(0x5A));
+        w.write(kRegCmdSta, kCmdWrite);
+    }
+    SdCardDevice dev;
+    CHECK(dev.open(path));
+    dev.set_wake_cycles(1000);
+    CHECK(dev.read(kRegCmdSta) == 0x01); // BUSY, and no CARD yet
+    set_lba(dev, 2);
+    dev.write(kRegCmdSta, kCmdRead);
+    dev.tick(600);
+    CHECK(dev.read(kRegCmdSta) == 0x01);
+    dev.reset(); // (/RES doesn't restart the firmware: still waking)
+    set_lba(dev, 2);
+    dev.write(kRegCmdSta, kCmdRead);
+    dev.tick(600);
+    CHECK(dev.read(kRegCmdSta) == kStaCard);
+    CHECK(dev.read(kRegData) == 0x5A);
+}

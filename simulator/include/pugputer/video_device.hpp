@@ -44,6 +44,10 @@ public:
     void set_sink(VideoSink* sink) { sink_ = sink; }
     // Draw every frame whether or not a sink wants it (tests).
     void set_draw_all(bool on) { draw_all_ = on; }
+    // Test hook: the card is off the bus for the next `cycles` CPU cycles, as at power-on,
+    // until the RP2350's firmware turns its level shifters on: reads float ($FF) and
+    // writes are lost. Not undone by reset() (/RES doesn't restart the firmware).
+    void set_wake_cycles(uint64_t cycles) { wake_ = cycles; }
 
     uint8_t read(uint16_t offset) override;
     void write(uint16_t offset, uint8_t value) override;
@@ -86,6 +90,7 @@ private:
     bool drawing_ = false;    // this frame is being drawn
     bool draw_all_ = false;
     uint64_t frames_drawn_ = 0;
+    uint64_t wake_ = 0; // cycles until the card answers (set_wake_cycles)
 };
 
 } // namespace pugputer

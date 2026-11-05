@@ -28,6 +28,7 @@ uint8_t SdCardDevice::read(uint16_t offset) {
             return b;
         }
         case 3: {
+            if (wake_) return kStaBusy; // (still waking up)
             uint8_t status = 0; // BUSY always clear -- synchronous model (unless stuck)
             if (stuck_busy_) status |= kStaBusy;
             if (is_open() && card_present_) status |= kStaCard;
@@ -65,6 +66,11 @@ void SdCardDevice::do_command(uint8_t cmd) {
     last_error_ = false;
     if (cmd == kCmdSetHi) {
         lba_hi_ = lba_;
+        cursor_ = 0;
+        return;
+    }
+    if (wake_) { // done once the card is awake (tick)
+        if (cmd == kCmdRead || cmd == kCmdWrite) wake_cmd_ = cmd;
         cursor_ = 0;
         return;
     }
@@ -116,6 +122,16 @@ void SdCardDevice::do_command(uint8_t cmd) {
     // that consumption, not merely on the next LBA write (which wouldn't
     // occur until well after those reads).
     cursor_ = 0;
+}
+
+void SdCardDevice::tick(uint32_t cpu_cycles) {
+    if (!wake_) return;
+    wake_ = wake_ > cpu_cycles ? wake_ - cpu_cycles : 0;
+    if (!wake_ && wake_cmd_) {
+        uint8_t cmd = wake_cmd_;
+        wake_cmd_ = 0;
+        do_command(cmd);
+    }
 }
 
 void SdCardDevice::reset() {

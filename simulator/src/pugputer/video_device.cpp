@@ -21,9 +21,13 @@ VideoDevice::VideoDevice(double cpu_clock_hz)
 
 VideoDevice::~VideoDevice() = default;
 
-uint8_t VideoDevice::read(uint16_t offset) { return vc_read(card_.get(), static_cast<uint8_t>(offset)); }
+uint8_t VideoDevice::read(uint16_t offset) {
+    if (wake_) return 0xFF; // (not answering yet: the bus floats)
+    return vc_read(card_.get(), static_cast<uint8_t>(offset));
+}
 
 void VideoDevice::write(uint16_t offset, uint8_t value) {
+    if (wake_) return;
     active_ = true;
     vc_write(card_.get(), static_cast<uint8_t>(offset), value);
 }
@@ -51,6 +55,7 @@ uint8_t VideoDevice::input_ctrl() const { return card_->in_ctrl; }
 bool VideoDevice::irq_asserted() const { return vc_irq(card_.get()) != 0; }
 
 void VideoDevice::tick(uint32_t cpu_cycles) {
+    wake_ = wake_ > cpu_cycles ? wake_ - cpu_cycles : 0;
     cycles_ += cpu_cycles;
     while (cycles_ >= next_line_at_) {
         begin_line(static_cast<uint16_t>(lines_ % VC_LINES));

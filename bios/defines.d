@@ -26,6 +26,8 @@ VCARD_BASE  equ  $FF80      ; ff80 - ff9f: the video card (optional; its registe
 VC_ID_REG   equ  $1E        ; the card's ID register: reads 'V'
 VC_VER_REG  equ  $1F        ; its version (major*16 + minor): $11 or later
 VC_VERSION_MIN equ $11      ; (the BIOS looks for these at boot: see F_VDP)
+VC_WAKE     equ  2          ; spells of $FFFF polls (~0.27s each) the BIOS gives the
+                             ; card to start answering at boot (DEV_VC_DETECT)
 
 ; Memory bank registers 0..3 (write-only; readable copies kept in
 ; SBANK_1...SBANK_3 -- see main.asm)
@@ -78,6 +80,9 @@ SD_CMD_READ  equ  1
 SD_CMD_WRITE equ  2
 SD_TRIES    equ  3           ; attempts at a block command the card reports as failed
 SD_TIMEOUT  equ  $FFFF       ; polls of BUSY before a command is declared timed out
+                             ; (~15 cycles each: about 0.27s at 3.58MHz)
+SD_WAKE     equ  12          ; spells of SD_TIMEOUT polls (about 3.3s) SD_BOOT_TRY
+                             ; gives the card to wake up at power-on (BUSY until then)
 SD_CMD_SETHI equ  3          ; latch SD_LBA's current value as block-number
                              ; bits 31..16 (see above)
 SD_STA_BUSY  equ  %00000001

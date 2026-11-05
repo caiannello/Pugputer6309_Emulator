@@ -231,3 +231,18 @@ TEST(basic309_video_screen_without_the_card_is_an_nv_error) {
     CHECK(out.find("ERROR 34") != std::string::npos && out.find("DONE") != std::string::npos);
     CHECK(dquery(s) == 0x010F);
 }
+
+// At power-on the card's RP2350 starts with the CPU: its level shifters stay off the bus
+// until the firmware is running, and the SD card says BUSY until it's been woken up. The
+// BIOS waits for both (DEV_VC_DETECT, SD_BOOT_TRY), so it still finds the card and boots
+// from the disk -- here with the card off the bus for 0.2s and the SD card waking at 1.5s,
+// longer than one SD_TIMEOUT.
+TEST(basic309_video_the_bios_waits_for_a_card_that_wakes_up_late) {
+    Basic309Session s;
+    VideoDevice v;
+    v.set_wake_cycles(716000);    // 0.2s at 3.58MHz
+    s.sd.set_wake_cycles(5370000); // 1.5s
+    s.attach_video(&v);
+    CHECK(s.boot_shell(PUGBIOS_S19_PATH, DISK_IMG_PATH));
+    CHECK(dquery(s) == 0x030F);
+}

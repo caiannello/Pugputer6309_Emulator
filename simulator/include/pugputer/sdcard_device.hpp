@@ -71,12 +71,21 @@ public:
     void fail_reads_after(int64_t n) { fail_reads_after_ = n; }
     uint64_t commands_issued() const { return commands_; }
 
+    // Test hook: the card is still waking up for the next `cycles` CPU cycles, as on the
+    // video card at power-on (vidcard/firmware/src/blockdev.c) -- the status reads BUSY
+    // (CARD clear) meanwhile, and a READ or WRITE sent then is done once it's awake.
+    // Not undone by reset() (/RES doesn't restart the firmware).
+    void set_wake_cycles(uint64_t cycles) { wake_ = cycles; }
+
     // IDevice
     uint8_t read(uint16_t offset) override;
     void write(uint16_t offset, uint8_t value) override;
     void reset() override;
+    void tick(uint32_t cpu_cycles) override;
 
 private:
+    uint64_t wake_ = 0;      // cycles until the card is awake (set_wake_cycles)
+    uint8_t wake_cmd_ = 0;   // a READ/WRITE sent while it was waking (0: none)
     std::fstream file_;
     uint16_t lba_ = 0;    // SD_LBA: the low word
     uint16_t lba_hi_ = 0; // latched by the SETHI command: the high word

@@ -105,7 +105,9 @@ SD_WRITE_BLOCK
             LDW  #0
 SD_WRITE_BLOCK32
             PSHS Y
-            LDA  SD_CMDSTA
+            LDB  #1              ; CARD means nothing while BUSY says so
+            BSR  SD_WAIT_READY
+            BCS  SDWR_FAIL
             BITA #SD_STA_CARD
             BNE  SDWR_CARD
             LDA  #ERR_NOCARD
@@ -141,6 +143,28 @@ SDWR_OK     ANDCC #$FE
             PULS Y,PC
 SDWR_FAIL   ORCC #$01
             PULS Y,PC
+;------------------------------------------------------------------------------
+; Waits up to B spells of SD_TIMEOUT polls for BUSY to clear. OUT: A = the
+; status, carry clear -- or, still BUSY, A = ERR_TIMEOUT and carry set. Trashes
+; B; keeps W (SD_WRITE_BLOCK32's LBA high word).
+;------------------------------------------------------------------------------
+SD_WAIT_READY
+            PSHSW
+SDW_SPELL   LDW  #SD_TIMEOUT
+SDW_POLL    LDA  SD_CMDSTA
+            BITA #SD_STA_BUSY
+            BEQ  SDW_READY
+            DECW
+            BNE  SDW_POLL
+            DECB
+            BNE  SDW_SPELL
+            PULSW
+            LDA  #ERR_TIMEOUT
+            ORCC #$01
+            RTS
+SDW_READY   PULSW
+            ANDCC #$FE
+            RTS
 ;------------------------------------------------------------------------------
 ; IN: Y = a block buffer. OUT: carry clear if all 512 bytes lie below the ROM
 ; ($F000) -- a block transfer into the ROM/IO area would scribble over the
@@ -284,7 +308,13 @@ DOS_OUTMASK_END
 ; See file header. Called from V_RESET, right before its existing
 ; JMP LOADER_START.
 ;------------------------------------------------------------------------------
-SD_BOOT_TRY LDX  #0             ; LBA 0: the boot sector
+SD_BOOT_TRY LDA  SD_CMDSTA      ; status bits 3-7 are always 0: if any is
+            BITA #$F8           ; set, nothing's answering (the bus floats
+            LBNE SDBOOT_NONE    ; high), so don't wait for it
+            LDB  #SD_WAKE       ; at power-on the card says BUSY until it's
+            JSR  SD_WAIT_READY  ; awake (the video card's RP2350 starting it
+            LBCS SDBOOT_NONE    ; up): give it a few seconds
+            LDX  #0             ; LBA 0: the boot sector
             LDY  <USER_RAM
             JSR  SD_READ_BLOCK
             BCS  SDBOOT_NONE    ; no card / unreadable -- bail out

@@ -107,12 +107,25 @@ NUL_WRITE   RTS              ; discard silently, "accept" instantly
 ; read gets what the bus floats at (on the machine, most likely the address's
 ; low byte, the instruction's last) or, in the emulator, the RAM underneath --
 ; not that pair.
+;
+; The card may not be answering yet: at power-on its RP2350 starts with the CPU,
+; and keeps its level shifters off the bus until its firmware is running (some
+; tens of ms). So the ID is looked for again and again, for about half a second
+; (VC_WAKE spells of $FFFF polls, ~15 cycles each at 3.58MHz), before deciding
+; there's no card -- a boot without one is that much slower.
 ;------------------------------------------------------------------------------
 DEV_VC_DETECT
-            LDA  VCARD_BASE+VC_ID_REG
+            LDB  #VC_WAKE
+VD_SPELL    LDW  #$FFFF
+VD_POLL     LDA  VCARD_BASE+VC_ID_REG
             CMPA #'V
-            BNE  VD_NONE
-            LDA  VCARD_BASE+VC_VER_REG
+            BEQ  VD_ID
+            DECW
+            BNE  VD_POLL
+            DECB
+            BNE  VD_SPELL
+            RTS              ; no card
+VD_ID       LDA  VCARD_BASE+VC_VER_REG
             CMPA #VC_VERSION_MIN
             BLO  VD_NONE
             CMPA #$7F        ; (a version, not the bus floating high)

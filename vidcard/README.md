@@ -328,6 +328,12 @@ GPIO):
   video card's registers, and the SD card's four land at 56-59 (A0-A4 = `$18-$1B`, plus 32). It
   also selects the **YMF262 (OPL3)**, which shares the card: **/OPL**, low for `$FFE0-$FFE3`
   while E is high.
+- **The OPL3 module's /IRQ reaches the bus only through a jumper, left open.** The YMF262
+  pulls it low while a timer's flag is set (unless register 4 masks that timer), and nothing in
+  the BIOS's IRQ chain clears those flags: wired straight to the shared, level-sensitive /IRQ,
+  a program that runs a timer and polls its flag (as VGMPLAY does with Timer 1) would leave
+  /IRQ low and the CPU taking the interrupt for ever. The emulator's OPL3 keeps the timers'
+  flags but drives no interrupt, as with the jumper open.
 - **/CS times every access**, so the GAL qualifies its decode with E or Q: /CS is low only while
   E or Q is high, from Q rising (the address valid) to E falling. It then goes high between bus
   cycles, even between two back-to-back accesses to the card (an `LDD`, a `TFM`). The card
@@ -378,6 +384,13 @@ written while the CPU gets on (SD cards may take up to 250ms over a write, about
 BIOS waits): another write or a read waits for it, and if it can't be written, the next command
 fails once with `ERROR`. Until the card has woken up at power-on, the status says `BUSY`. The
 board's card-detect switch isn't wired to a GPIO, so `CARD` means "the card answered".
+
+**At power-on** the RP2350 starts with the CPU, so the BIOS waits for it: `DEV_VC_DETECT` looks
+for the card's ID for about half a second (the level shifters stay off the bus until the
+firmware is running, some tens of ms), and `SD_BOOT_TRY` gives `BUSY` about 3 seconds to clear
+before it reads the boot sector (`VC_WAKE` and `SD_WAKE` in `../bios/defines.d`). A boot with no
+video card is half a second slower for it. The emulator's devices can be made to wake up late
+too (`set_wake_cycles()`, a test hook), and `test_basic309_video.cpp` boots with both.
 
 **Mouse and keyboard.** The RP2350's USB port as a host (TinyUSB's HID host, through a small
 hub for a keyboard and a mouse, whose 5V then comes from the bus, not from the board's VBUS

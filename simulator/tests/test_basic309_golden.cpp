@@ -61,13 +61,19 @@ TEST(basic309_boots_after_bios_and_prints_its_banner_via_bios_console_calls) {
     uart.set_tx_callback([&](uint8_t b) { received += static_cast<char>(b); });
 
     bus.reset(); // PC comes from the real BIOS $FFFE vector this time
-    bus.run(500000); // BIOS cold-start (RAM zero, bank setup, UART init, its own banner)
+    // BIOS cold-start (RAM zero, bank setup, UART init, ~0.55s looking for a video card,
+    // its own banner): run until the banner, and a little more to finish it.
+    for (int i = 0; i < 200 && received.find("6309 BIOS") == std::string::npos; ++i) bus.run(50000);
+    bus.run(100000);
 
     // Hand off to basic309's entry point, standing in for a future loader
     // integration (see simulator/README.md / the plan this implements).
     hd6309_regs_t regs{};
     hd6309_get_regs(bus.cpu(), &regs);
     regs.pc = kBasic309Entry;
+    // Interrupts on, as a loader would leave them: the BIOS may have been caught in the
+    // S-record loader's UT_GETC, which masks them for a moment.
+    regs.cc = static_cast<uint8_t>(regs.cc & ~0x50);
     hd6309_set_regs(bus.cpu(), &regs);
 
     bus.run(4000000); // basic309's own cold-start + banner + idle input loop
