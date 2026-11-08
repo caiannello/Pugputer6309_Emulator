@@ -387,6 +387,42 @@ TEST(vidcard_demo_vidmouse_draws_with_the_mouse_and_takes_the_keys) {
     CHECK(d.c().in_ctrl == 0 && d.cfg(VC_DC_CTRL)[0] == 0x01);
 }
 
+TEST(vidcard_demo_vidpad_shows_the_gamepads) {
+    Demo d("VIDPAD");
+    if (!d.built) return;
+    auto row = [&](int r) { // a row of the text screen
+        std::string t;
+        for (int col = 0; col < 80; ++col) t += static_cast<char>(d.cell(VC_RESET_TEXT_MAP, col, r)[0]);
+        return t;
+    };
+    d.type("VIDPAD");
+    d.run(1.0);
+    CHECK(row(2).find(" PAD 0: NOT CONNECTED") == 0);
+    CHECK(row(8).find(" PAD 3: NOT CONNECTED") == 0);
+    // Pad 0: up and right on the d-pad, buttons 1 and 16, the sticks.
+    const uint8_t s[8] = {0, VC_PAD_UP | VC_PAD_RIGHT, 0x01, 0x80, 127, 0x81, 1, 0};
+    d.v.pad(0, s);
+    d.run(0.1);
+    CHECK(row(2).find(" PAD 0: U..R BTN 1..............F LX +127 LY -127 RX +001 RY +000") == 0);
+    CHECK(row(4).find(" PAD 1: NOT CONNECTED") == 0);
+    // Buttons 10 and 11 (the labels go 1-9, 0, A-F), left and down, on pad 2.
+    const uint8_t s2[8] = {0, VC_PAD_DOWN | VC_PAD_LEFT, 0, 0x06, 0, 0, 0, 0};
+    d.v.pad(2, s2);
+    d.run(0.1);
+    CHECK(row(6).find(" PAD 2: .DL. BTN .........0A..... LX +000 LY +000 RX +000 RY +000") == 0);
+    // Unplugged: the whole line goes back.
+    d.v.pad(0, nullptr);
+    d.run(0.1);
+    CHECK(row(2).find(" PAD 0: NOT CONNECTED") == 0);
+    CHECK(row(2).find("BTN") == std::string::npos && row(2).find("RY") == std::string::npos);
+    // Esc goes back to the shell, and the keys to the UART.
+    d.v.key(0x29, true);
+    d.v.key(0x29, false);
+    d.run(0.1);
+    CHECK(d.prompt(100000000));
+    CHECK(d.c().in_ctrl == 0);
+}
+
 // MANDEL: the MC6839 floating-point ROM sets up each pixel, 8.8 fixed point iterates. ASM
 // always builds it; drawing the picture takes about five minutes of CPU time (20 s here),
 // so that runs only when PUGPUTER_SLOW_TESTS is set.

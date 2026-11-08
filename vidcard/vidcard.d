@@ -51,7 +51,7 @@ VC_S_KEY    equ  $10        ; a key event is waiting in VC_KEY
 VC_I_VSYNC  equ  $01        ; vertical blank begins (line 480)
 VC_I_LINE   equ  $02        ; the line in VC_LINE begins
 VC_I_CMD    equ  $04        ; the command queue has emptied
-VC_I_INPUT  equ  $08        ; a key event queued, or the mouse moved or clicked
+VC_I_INPUT  equ  $08        ; a key event queued, the mouse moved or clicked, or a pad changed
 
 ; VC_INCTRL
 VC_IN_PTR   equ  $01        ; sprite 0's X, Y set to the mouse's at each vertical blank
@@ -103,11 +103,27 @@ K_RALT      equ  $E6
 ; The card's address space.
 VC_VRAM     equ  $000000    ; $000000-$03FFFF video memory (256KB)
 VC_CFG      equ  $040000    ; the display settings (below)
+VC_PAD      equ  $040040    ; $040040-$04005F four gamepads, 8 bytes each (read only)
 VC_PAL      equ  $040200    ; 256 colors, RGB565, 2 bytes each (high first)
 VC_PSRAM    equ  $800000    ; $800000-$FFFFFF the 8MB PSRAM
 
+; A gamepad's 8 bytes, at VC_PAD + 8 * its number (0-3): read them through a data port.
+PD_FLAGS    equ  0          ; bit 7: connected (all 8 bytes read 0 if not)
+PD_DPAD     equ  1          ; PD_UP, PD_DOWN, PD_LEFT, PD_RIGHT
+PD_BTN1     equ  2          ; buttons 1-8 (bit 0 is button 1)
+PD_BTN2     equ  3          ; buttons 9-16
+PD_LX       equ  4          ; the sticks, signed, -127 to 127, 0 in the middle: + is right
+PD_LY       equ  5          ; + is down
+PD_RX       equ  6
+PD_RY       equ  7
+PD_CONN     equ  $80
+PD_UP       equ  $01
+PD_DOWN     equ  $02
+PD_LEFT     equ  $04
+PD_RIGHT    equ  $08
+
 ; The display settings, at VC_CFG + these.
-DC_CTRL     equ  $00        ; bits 0-2 layers 0-2 on, bit 3 sprites on
+DC_CTRL     equ  $00       ; bits 0-2 layers 0-2 on, bit 3 sprites on
 DC_BACK     equ  $01        ; backdrop color
 SPR_CTRL    equ  $02        ; bit 0: sprite coordinates in 640x480 (else 320x240)
 SPR_COUNT   equ  $03        ; sprite table entries in use (0-128)

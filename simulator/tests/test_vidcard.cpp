@@ -419,6 +419,52 @@ TEST(vidcard_key_queue_gives_usage_codes_and_the_characters_they_type) {
     CHECK(n == VC_KEY_QUEUE);
 }
 
+TEST(vidcard_gamepads_are_read_only_bytes_in_the_address_space) {
+    Card k;
+    auto port_to = [&](uint32_t a) {
+        vc_write(k.c, VC_ADDR0_H, static_cast<uint8_t>(a >> 16));
+        vc_write(k.c, VC_ADDR0_M, static_cast<uint8_t>(a >> 8));
+        vc_write(k.c, VC_ADDR0_L, static_cast<uint8_t>(a));
+    };
+    port_to(VC_PAD_BASE); // none connected
+    for (int i = 0; i < VC_PADS * VC_PAD_SIZE; ++i) CHECK(vc_read(k.c, VC_DATA0) == 0);
+    // Pad 1, through a data port: the connected bit is the card's to set.
+    const uint8_t s[VC_PAD_SIZE] = {0, 5, 0x81, 0x02, 0x10, 0xF0, 1, 0x7F};
+    vc_write(k.c, VC_ISR, 0xFF);
+    vc_pad(k.c, 1, s);
+    CHECK(k->isr & VC_IRQ_INPUT);
+    port_to(VC_PAD_BASE + VC_PAD_SIZE);
+    CHECK(vc_read(k.c, VC_DATA0) == VC_PAD_CONNECTED);
+    for (int i = 1; i < VC_PAD_SIZE; ++i) CHECK(vc_read(k.c, VC_DATA0) == s[i]);
+    CHECK(vc_read(k.c, VC_DATA0) == 0); // (pad 2)
+    // Nothing new, no interrupt.
+    vc_write(k.c, VC_ISR, 0xFF);
+    vc_pad(k.c, 1, s);
+    CHECK(!(k->isr & VC_IRQ_INPUT));
+    // Writes do nothing (but the port still steps).
+    port_to(VC_PAD_BASE + VC_PAD_SIZE + 2);
+    vc_write(k.c, VC_DATA0, 0xEE);
+    CHECK(vc_peek(k.c, VC_PAD_BASE + VC_PAD_SIZE + 2) == 0x81);
+    CHECK(k->addr[0] == VC_PAD_BASE + VC_PAD_SIZE + 3);
+    // The settings on either side are still ordinary memory.
+    vc_poke(k.c, VC_CFG_BASE + 0x3F, 0x5A);
+    vc_poke(k.c, VC_CFG_BASE + 0x60, 0xA5);
+    CHECK(vc_peek(k.c, VC_CFG_BASE + 0x3F) == 0x5A && vc_peek(k.c, VC_CFG_BASE + 0x60) == 0xA5);
+    // A reset leaves them: they are the hardware's.
+    vc_write(k.c, VC_CTRL, 0x80);
+    CHECK(vc_peek(k.c, VC_PAD_BASE + VC_PAD_SIZE) == VC_PAD_CONNECTED);
+    CHECK(vc_peek(k.c, VC_PAD_BASE + VC_PAD_SIZE + 7) == 0x7F);
+    // Unplugged, all 8 bytes read 0.
+    vc_write(k.c, VC_ISR, 0xFF);
+    vc_pad(k.c, 1, nullptr);
+    CHECK(k->isr & VC_IRQ_INPUT);
+    for (int i = 0; i < VC_PAD_SIZE; ++i) CHECK(vc_peek(k.c, VC_PAD_BASE + VC_PAD_SIZE + i) == 0);
+    // A pad that doesn't exist changes nothing.
+    vc_pad(k.c, VC_PADS, s);
+    vc_pad(k.c, -1, s);
+    for (int i = 0; i < VC_PADS * VC_PAD_SIZE; ++i) CHECK(vc_peek(k.c, VC_PAD_BASE + i) == 0);
+}
+
 TEST(vidcard_pointer_puts_sprite_0_where_the_mouse_is_each_frame) {
     Card k;
     uint32_t s0 = VC_RESET_SPR_BASE;

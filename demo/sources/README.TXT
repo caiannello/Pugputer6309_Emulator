@@ -24,6 +24,7 @@ Pugputer, byte for byte as they were built.
                  ASM -f com vidtiles.asm   then VIDTILES  (tiles and sprites)
                  ASM -f com vidgfx.asm     then VIDGFX    (bitmaps, commands, interrupts)
                  ASM -f com vidmouse.asm   then VIDMOUSE  (the mouse and keyboard)
+                 ASM -f com vidpad.asm     then VIDPAD    (the gamepads)
                  ASM -f com mandel.asm     then MANDEL    (the Mandelbrot set, with
                                                           the MC6839 floating-point ROM)
 

@@ -486,6 +486,7 @@ int main(int argc, char** argv) {
                 break;
             case VideoOut::Input::Mouse: vcard.mouse_to(in.x, in.y, in.buttons); break;
             case VideoOut::Input::Wheel: vcard.mouse_wheel(in.clicks); break;
+            case VideoOut::Input::Pad: vcard.pad(in.pad, in.present ? in.state : nullptr); break;
             }
         }
         screen.set_pointer_hidden((vcard.input_ctrl() & 0x01) != 0);
