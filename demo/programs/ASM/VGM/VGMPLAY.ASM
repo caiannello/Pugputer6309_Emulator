@@ -125,9 +125,11 @@ VP_HDR      CMPX #$60
             EXG  A,B
             CMPD #$0151
             LBLO NOTOPL
-            LDQ  BUF+$5C    ; the YMF262's clock
+            LDD  BUF+$5C    ; the YMF262's clock (not LDQ's Z: a real
+            ORD  BUF+$5E    ; 6309 sets it from bits 31-16 only)
             BNE  VP_DATA
-            LDQ  BUF+$50    ; or the YM3812's
+            LDD  BUF+$50    ; or the YM3812's
+            ORD  BUF+$52
             LBEQ NOTOPL
 VP_DATA     LDD  BUF+$36    ; where the commands start: $34 + the offset at $34
             LBNE NOTVGM     ; (the offset is 32 bits; any real one is small)
@@ -309,7 +311,8 @@ PL_BLOCK    JSR  GETB       ; ($66)
             STA  SKIP+1
             JSR  GETB
             STA  SKIP
-PB_LOOP     LDQ  SKIP
+PB_LOOP     LDD  SKIP
+            ORD  SKIP+2
             LBEQ PLAY
             LDD  SKIP+2
             SUBD #1

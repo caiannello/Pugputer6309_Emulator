@@ -1952,12 +1952,14 @@ AP_MINUS    LDQ  <MA
 AP_TIMES    JSR  MUL32
             ANDCC #$FE
             RTS
-AP_DIV      LDQ  <MB
+AP_DIV      LDD  <MB                   ; (not LDQ's Z: a real 6309 sets it from
+            ORD  <MB+2                 ; bits 31-16 only)
             BEQ  AP_FAIL
             JSR  DIV32
             ANDCC #$FE
             RTS
-AP_MOD      LDQ  <MB
+AP_MOD      LDD  <MB
+            ORD  <MB+2
             BEQ  AP_FAIL
             JSR  DIV32
             LDQ  <MB                   ; (the remainder)
@@ -2003,11 +2005,13 @@ AP_BOOL     CLR  <MA
             RTS
 ; -> A = (MA != 0), TMPB = (MB != 0)
 AP_TRUTH    CLR  <TMPB
-            LDQ  <MB
+            LDD  <MB
+            ORD  <MB+2
             BEQ  AT_B0
             INC  <TMPB
 AT_B0       CLRA
-            LDQ  <MA
+            LDD  <MA
+            ORD  <MA+2
             BEQ  AT_A0
             LDA  #1
             RTS

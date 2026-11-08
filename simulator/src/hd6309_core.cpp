@@ -552,7 +552,7 @@ void CPU::do_muld(uint16_t multiplier) {
     int32_t result = a * b;
     r_.set_q(static_cast<uint32_t>(result));
     set_flag(CC_N, result < 0);
-    set_flag(CC_Z, result == 0);
+    set_flag(CC_Z, (static_cast<uint32_t>(result) >> 16) == 0); // (a real 6309's: bits 31-16 only)
     set_flag(CC_V, false);
     set_flag(CC_C, false);
 }

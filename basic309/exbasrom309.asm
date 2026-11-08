@@ -467,6 +467,7 @@ VCADDRM   EQU  $FF81
 VCINC     EQU  $FF83          its step
 VCDATA    EQU  $FF85          its data
 VCCTRL    EQU  $FF8C          $80: reset
+VCSTAT    EQU  $FF8D          status (bit 6: drawing commands queued or running)
 VCISR     EQU  $FF8F          interrupt flags (bit 0: vertical blank)
 VCCMD     EQU  $FF92          drawing commands
 ; Where BASIC keeps things on the card: sprite images at $030000 (64 of 256 bytes),
@@ -946,8 +947,16 @@ GSTR      JSR  LB156
           STB  GSLEN
           RTS
 
-; Port 0 to A:X, step 1.
-VCSET     STA  VCADDR
+; Port 0 to A:X, step 1 -- once the drawing commands sent so far are done, so what the
+; port reads or writes comes after them, as the statements did (the card draws them
+; in their own time: a GCLS takes about 16ms, and a VPOKE straight after it would
+; otherwise land first and be cleared).
+VCSET     PSHS A
+VCSET1    LDA  VCSTAT
+          BITA #$40           COMMANDS STILL RUNNING?
+          BNE  VCSET1
+          PULS A
+          STA  VCADDR
           STX  VCADDRM
           LDX  #1
           STX  VCINC

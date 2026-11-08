@@ -420,8 +420,9 @@ void CPU::execute(uint8_t opcode) {
         case 0xCD: { // LDQ immediate (D:W, big-endian: A,B,E,F)
             uint32_t v = static_cast<uint32_t>(fetch16()) << 16;
             v |= fetch16();
-            set_flag(CC_V, false);
-            set_flag(CC_Z, v == 0);
+            // As a real HD6309 does (every LDQ, and MULD): Z from bits 31-16 only, the A:B
+            // half, and V left as it was. (6809Decoder wiki, "Undocumented 6309 Behaviours")
+            set_flag(CC_Z, (v >> 16) == 0);
             set_flag(CC_N, (v & 0x80000000u) != 0);
             r_.set_q(v);
             cycles_ += 5;
@@ -636,7 +637,7 @@ void CPU::execute_page10(uint8_t opcode) {
 
         // --- $10DC-$10DF: LDQ/STQ/LDS/STS direct --------------------------------
         case 0xDC: { uint16_t a = ea_direct(); uint32_t v = static_cast<uint32_t>(read16(a)) << 16 | read16(static_cast<uint16_t>(a + 2));
-            set_flag(CC_V, false); set_flag(CC_Z, v == 0); set_flag(CC_N, (v & 0x80000000u) != 0); r_.set_q(v); cycles_ += native() ? 7 : 8; break; } // LDQ
+            set_flag(CC_Z, (v >> 16) == 0); set_flag(CC_N, (v & 0x80000000u) != 0); r_.set_q(v); cycles_ += native() ? 7 : 8; break; } // LDQ
         case 0xDD: { uint16_t a = ea_direct(); uint32_t v = r_.q(); write16(a, static_cast<uint16_t>(v >> 16)); write16(static_cast<uint16_t>(a + 2), static_cast<uint16_t>(v));
             set_flag(CC_V, false); set_flag(CC_Z, v == 0); set_flag(CC_N, (v & 0x80000000u) != 0); cycles_ += native() ? 7 : 8; break; } // STQ
         LD16_DIR(0xDE, r_.s, 6, 5)                    // LDS
@@ -644,7 +645,7 @@ void CPU::execute_page10(uint8_t opcode) {
 
         // --- $10EC-$10EF: LDQ/STQ/LDS/STS indexed -------------------------------
         case 0xEC: { uint16_t a = ea_indexed(); uint32_t v = static_cast<uint32_t>(read16(a)) << 16 | read16(static_cast<uint16_t>(a + 2));
-            set_flag(CC_V, false); set_flag(CC_Z, v == 0); set_flag(CC_N, (v & 0x80000000u) != 0); r_.set_q(v); cycles_ += 8; break; } // LDQ
+            set_flag(CC_Z, (v >> 16) == 0); set_flag(CC_N, (v & 0x80000000u) != 0); r_.set_q(v); cycles_ += 8; break; } // LDQ
         case 0xED: { uint16_t a = ea_indexed(); uint32_t v = r_.q(); write16(a, static_cast<uint16_t>(v >> 16)); write16(static_cast<uint16_t>(a + 2), static_cast<uint16_t>(v));
             set_flag(CC_V, false); set_flag(CC_Z, v == 0); set_flag(CC_N, (v & 0x80000000u) != 0); cycles_ += 8; break; } // STQ
         LD16_IDX(0xEE, r_.s, 6)                       // LDS
@@ -652,7 +653,7 @@ void CPU::execute_page10(uint8_t opcode) {
 
         // --- $10FC-$10FF: LDQ/STQ/LDS/STS extended ------------------------------
         case 0xFC: { uint16_t a = ea_extended(); uint32_t v = static_cast<uint32_t>(read16(a)) << 16 | read16(static_cast<uint16_t>(a + 2));
-            set_flag(CC_V, false); set_flag(CC_Z, v == 0); set_flag(CC_N, (v & 0x80000000u) != 0); r_.set_q(v); cycles_ += native() ? 8 : 9; break; } // LDQ
+            set_flag(CC_Z, (v >> 16) == 0); set_flag(CC_N, (v & 0x80000000u) != 0); r_.set_q(v); cycles_ += native() ? 8 : 9; break; } // LDQ
         case 0xFD: { uint16_t a = ea_extended(); uint32_t v = r_.q(); write16(a, static_cast<uint16_t>(v >> 16)); write16(static_cast<uint16_t>(a + 2), static_cast<uint16_t>(v));
             set_flag(CC_V, false); set_flag(CC_Z, v == 0); set_flag(CC_N, (v & 0x80000000u) != 0); cycles_ += native() ? 8 : 9; break; } // STQ
         LD16_EXT(0xFE, r_.s, 7, 6)                    // LDS

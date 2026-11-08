@@ -324,7 +324,9 @@ GPIO):
 
 - **The GAL** (ATF16V8B; its equations are `hardware/VIDCARD.PLD`, from /IO, A2-A7, E and Q)
   makes **/CS**, low for either `$FF80-$FF9F` or `$FFD8-$FFDB`, and **SD-select**, high only for
-  `$FFD8-$FFDB`. The card reads A0-A4 and SD-select as one 6-bit register number: 0-31 are the
+  `$FFD8-$FFDB`. SD-select comes from A2-A7 alone: it only counts while /CS is low, which
+  already needs /IO. Qualified with /IO (as revision 01 did), it rose with /CS falling, and the
+  card sometimes took an SD access for a video register's. The card reads A0-A4 and SD-select as one 6-bit register number: 0-31 are the
   video card's registers, and the SD card's four land at 56-59 (A0-A4 = `$18-$1B`, plus 32). It
   also selects the **YMF262 (OPL3)**, which shares the card: **/OPL**, low for `$FFE0-$FFE3`
   while E is high.
@@ -364,16 +366,45 @@ GPIO):
   {read or write, register, data, with a write's taken as /CS rises}, by DMA into a ring of 4096,
   and an interrupt on core 0 applies them in order and brings the copy up to date
   (`DATA0`/`DATA1` hold the byte at the port's address, fetched again after every access). The
-  CPU's fastest accesses (`TFM`, one every 840ns) set how quickly that must happen.
-- Drawing commands go into a 4KB queue that core 0's main loop works through; `STATUS` says
-  busy while any are waiting, and "queue full" near its end. A reset waits for the command
-  being drawn to finish, and the accesses after it wait in the ring until it's done.
+  CPU's fastest accesses (`TFM`, one every 840ns) set how quickly that must happen. The
+  data ports take a shorter path: the CPU's next access to one can follow about 1us later.
+- **When to sample.** The address is valid only shortly before Q rises, and SDCS comes
+  through a GAL gate about 15ns behind A0-A4. Both state machines therefore take the
+  register number 44ns (11 PIO clocks) after they see /CS fall. A write's data is the last of
+  repeated samples taken while /CS is low.
+- Drawing commands go into a 64KB queue that core 0's main loop works through; `STATUS` says
+  busy while any are waiting, and "queue full" near its end. A program that sends more than
+  that at once must watch "queue full": bytes that don't fit are lost.
+- **Commands take time:** about 200ns a pixel drawn, 180ns a byte COPYed and 110ns a byte
+  FILLed, and about 0.5us for any command. So a CLEAR of a 320x240 screen takes about 16ms,
+  and of 640x480 up to 75ms. A program that reads or writes video memory a command may still
+  be reading or drawing over must first wait for `STATUS` to stop saying busy. (Measured with
+  the diag firmware, 2026-11-07.) The emulator queues the commands and times them the same
+  way (`simulator/src/pugputer/video_device.cpp`), so a program that forgets to wait goes
+  wrong there too.
+- **A reset** (`CTRL` `$80`, or /RES) sets the registers and settings at once, so the very next
+  access sees the reset card. Video memory is put back afterwards, 64 bytes at a time, by the
+  main loop. A block the CPU reaches through a data port first is put back on the spot, and
+  drawing commands wait until it's all done. (The CPU's reads during the clear, of the SD card
+  for instance, aren't held up.)
 
-**Drawing the picture.** Core 1 runs `vc_render_line()` a line ahead of the beam into one of two
-line buffers; HSTX's TMDS encoder sends it out as DVI (RGB565 in, 640x480, pixel clock 25.2MHz:
-the system clock is 252MHz, HSTX half of it). Core 0 serves the registers and runs the commands.
-Video memory and the settings are in SRAM; the PSRAM (through the XIP cache) is only read by
-`COPY`, `BLIT` and the ports. The firmware runs from SRAM too (copied from flash at start).
+**Drawing the picture.** HSTX's TMDS encoder sends lines out as DVI (RGB565 in, 640x480, pixel
+clock 25.2MHz) from 8 line buffers. Core 1 draws lines a line ahead of the beam, with
+`vc_render_line_with()` and caches of its own: the palette, 4-bit sprite pixel pairs, and the
+sprite table decoded into bands of 32 lines. `vc_card`'s `pal_gen` and `spr_gen` count changes,
+so the caches know when to rebuild. If a line of the last frame took 31us or more, core 0
+helps. Core 0 draws from a low-priority interrupt with caches of its own, and the cores take
+lines in turn up to 7 ahead. It stops helping once lines are back under 28us, and holds off
+while the SD card or a reset's clear is waiting. Core 0 also serves the registers and runs the
+commands. Video memory and the settings are in SRAM; the PSRAM (through the XIP cache) is only
+read by `COPY`, `BLIT` and the ports. The firmware runs from SRAM too (copied from flash at
+start).
+
+**Clocks.** The system clock is 336MHz at 1.25V. HSTX needs 126MHz, which 336 isn't a multiple
+of, so the USB PLL is retuned to 756MHz/6 for it. Everything else on the USB PLL moves to the
+system PLL first: USB and the ADC (336/7, 48MHz), and the peripherals (336/3, 112MHz; the UART
+and the SD card's SPI work their dividers out from it). The bus's PIO is divided back to 252MHz,
+the speed its timing was worked out at.
 
 **The SD card.** The Pugputer's SD interface (`SD_LBA`, `SD_DATA`, `SD_CMDSTA` at `$FFD8-$FFDB`:
 `../bios/defines.d`) is the board's microSD card, so the BIOS, DOS and the emulator need no
@@ -392,17 +423,19 @@ before it reads the boot sector (`VC_WAKE` and `SD_WAKE` in `../bios/defines.d`)
 video card is half a second slower for it. The emulator's devices can be made to wake up late
 too (`set_wake_cycles()`, a test hook), and `test_basic309_video.cpp` boots with both.
 
-**Mouse and keyboard.** The RP2350's USB port as a host (TinyUSB's HID host, through a small
-hub for a keyboard and a mouse, whose 5V then comes from the bus, not from the board's VBUS
-diode), in the boot protocols: a mouse reports how far it moved, which `vc_mouse_by()` adds up, and a keyboard
-reports the keys held, whose changes become `vc_key()` calls (with the repeat of a held key made
-by the firmware). If USB host turns out not to fit beside the picture, a PIO USB port on spare
-GPIOs, or a separate input card at another address with the same registers, would do instead.
-(Not in the firmware yet: it comes once the bus, the picture and the SD card work.)
+**Mouse and keyboard.** The RP2350's USB port is a host: TinyUSB's HID host, through a small
+unpowered hub for a keyboard and a mouse (`firmware/src/usbhost.c`). The hub's 5V has to come
+from the bus to the board's VBUS pin, through a Schottky diode, since the board's VBUS is
+otherwise only fed by a PC. Devices are put in their boot protocols:
+- a mouse reports how far it moved, which `vc_mouse_by()` adds up, with its wheel to
+  `vc_mouse_wheel()`;
+- a keyboard reports the keys held, and the changes become `vc_key()` calls.
 
-**Limits to confirm on the hardware.** A line takes 31.8us: about 4700 cycles at 150MHz, 8000 at
-252MHz. Three hires layers plus 32 wide sprites on one line may not fit in that. If they don't,
-the firmware will document a smaller budget (fewer hires layers, or fewer sprite pixels on a line)
-and the C here will be made to keep to it too, so the emulator shows what the card can do.
-The CPU's fastest writes (`TFM`, one every 840ns) set how quickly core 0 must take a register
-write.
+Still to come: the repeat of a held key (made by the firmware) and gamepads. USB runs in core
+0's main loop, under the bus's interrupt. (Written, not yet tried on the hardware.)
+
+**Limits, measured on the hardware.** A line takes 31.8us, about 10700 cycles at 336MHz.
+VIDTILES' page 2 (three tile layers and 128 sprites) looks right with core 0 helping. A few
+hundred lines a second still finish late, but not visibly. The CPU's fastest writes (`TFM`, one every 840ns) set how quickly core 0
+must take a register write: a `TFM` of a 2KB sprite table once kept core 0 off a line it was
+drawing for 1.8ms, hence the data ports' short path.

@@ -13,10 +13,24 @@ PORT0       STA  VC_ADDR0
             LDD  #1
             STD  VC_INC0
             RTS
-; SENDCMD: W bytes at X to the command port.
-SENDCMD     LDY  #VC_CMD
+; SENDCMD: W bytes at X to the command port, 64 at a time, each time the queue
+; isn't full (the card says full with 64 bytes or fewer left; bytes sent then
+; are lost).
+SENDCMD     PSHS A
+            LDY  #VC_CMD
+SENDC1      LDA  VC_STATUS
+            BITA #VC_S_FULL
+            BNE  SENDC1
+            CMPW #64
+            BLS  SENDC2
+            SUBW #64
+            PSHSW
+            LDW  #64
             TFM  X+,Y
-            RTS
+            PULSW
+            BRA  SENDC1
+SENDC2      TFM  X+,Y
+            PULS A,PC
 ; SENDDAT: W bytes at X to data port 0.
 SENDDAT     LDY  #VC_DATA0
             TFM  X+,Y

@@ -446,13 +446,13 @@ IFCOND      STA  <TMPB
             JMP  ERROR
 IFC_BADX    LDA  #ER_BADEXPR
             JMP  ERROR
-IFC_KNOWN   LDQ  <EVAL                 ; is the condition false?
-            PSHS CC                    ; (Z: zero, N: negative)
-            LDA  <TMPB
-            PULS CC
-            BEQ  IFC_ZERO
+IFC_KNOWN   LDA  <TMPB                 ; is the condition false? (not LDQ's Z, which
+            LDW  <EVAL                 ; a real 6309 sets from bits 31-16 only)
             BMI  IFC_NEG
-            CMPA #1                    ; a positive value: false for EQ LT LE
+            BNE  IFC_POS
+            LDW  <EVAL+2
+            BEQ  IFC_ZERO
+IFC_POS     CMPA #1                    ; a positive value: false for EQ LT LE
             BEQ  SKIPSTART
             CMPA #5
             BEQ  SKIPSTART

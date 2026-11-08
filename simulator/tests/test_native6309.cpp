@@ -242,6 +242,48 @@ TEST(ldq_immediate_and_stq_direct_round_trip) {
     CHECK_EQ_HEX(h.mem()[0x0053], 0x44);
 }
 
+// A real HD6309's LDQ and MULD set Z from bits 31-16 of Q only (the A:B half), and LDQ
+// leaves V as it was (6809Decoder wiki, "Undocumented 6309 Behaviours"). Code that tests Z
+// right after either works in an emulator that uses all 32 bits and fails on the machine:
+// ASM's "Division by zero" for any /n under $10000 was this.
+TEST(ldq_and_muld_set_z_from_the_high_word_only) {
+    Harness h;
+    h.boot_at(0x8000, {
+        0xCD, 0x00, 0x00, 0x00, 0x02,       // LDQ #2: Z set (A:B is 0)
+        0x10, 0xDC, 0x50,                    // LDQ <$50 ($00000000): Z set
+        0x10, 0xEC, 0x84,                    // LDQ ,X ($00010000): Z clear
+        0x10, 0xFC, 0x00, 0x58,              // LDQ $0058 ($00000300): Z set
+        0x11, 0x8F, 0x00, 0x03,              // MULD #3 (D = 5: Q = 15): Z set
+    });
+    hd6309_regs_t r = h.regs();
+    r.dp = 0;
+    r.x = 0x0054;
+    r.cc = CC_V; // (LDQ leaves it)
+    h.set_regs(r);
+    for (int i = 0; i < 4; ++i) h.mem()[0x50 + i] = 0;
+    const uint8_t at54[] = {0x00, 0x01, 0x00, 0x00}, at58[] = {0x00, 0x00, 0x03, 0x00};
+    for (int i = 0; i < 4; ++i) h.mem()[0x54 + i] = at54[i], h.mem()[0x58 + i] = at58[i];
+    hd6309_step(h.cpu);
+    r = h.regs();
+    CHECK(r.cc & CC_Z);
+    CHECK(r.cc & CC_V);
+    CHECK_EQ_HEX(r.f, 0x02);
+    hd6309_step(h.cpu);
+    CHECK(h.regs().cc & CC_Z);
+    hd6309_step(h.cpu);
+    CHECK(!(h.regs().cc & CC_Z));
+    hd6309_step(h.cpu);
+    r = h.regs();
+    CHECK(r.cc & CC_Z);
+    CHECK(r.cc & CC_V);
+    r.a = 0x00; r.b = 0x05;
+    h.set_regs(r);
+    hd6309_step(h.cpu);
+    r = h.regs();
+    CHECK(r.cc & CC_Z);
+    CHECK_EQ_HEX(r.f, 15);
+}
+
 TEST(ldmd_sets_native_mode) {
     Harness h;
     h.boot_at(0x8000, { 0x11, 0x3D, 0x01 }); // LDMD #1

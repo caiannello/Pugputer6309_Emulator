@@ -238,8 +238,9 @@ AO_ZERO     CLRD
             CLRW
             STQ  <EVAL
             RTS
-AO_DIVIDE   LDQ  <EVAL                 ; carry set: dividing by zero (0, and an
-            BNE  AO_DGO                ; error if both sides are known)
+AO_DIVIDE   LDD  <EVAL                 ; carry set: dividing by zero (0, and an
+            ORD  <EVAL+2               ; error if both sides are known; not LDQ's Z,
+            BNE  AO_DGO                ; which a real 6309 sets from bits 31-16 only)
             LDA  <EVFLAGS
             BITA #EF_KNOWN
             BEQ  AO_DZ
@@ -247,7 +248,8 @@ AO_DIVIDE   LDQ  <EVAL                 ; carry set: dividing by zero (0, and an
             JSR  ERROR
 AO_DZ       ORCC #1
             RTS
-AO_DGO      STQ  <MB
+AO_DGO      LDQ  <EVAL
+            STQ  <MB
             LDQ  ,X
             STQ  <MA
             JSR  DIV32
@@ -266,12 +268,14 @@ AO_BOOL     TFR  A,F                   ; the value 0 or 1
 ; -> A = right != 0, and on the stack (under the return) left != 0.
 AO_TRUTH    PULS Y                     ; (the return address)
             CLRA
-            LDQ  ,X
+            LDD  ,X                    ; (not LDQ's Z: see AO_DIVIDE)
+            ORD  2,X
             BEQ  AT_L0
             LDA  #1
 AT_L0       PSHS A
             CLRA
-            LDQ  <EVAL
+            LDD  <EVAL
+            ORD  <EVAL+2
             BEQ  AT_R0
             LDA  #1
 AT_R0       JMP  ,Y

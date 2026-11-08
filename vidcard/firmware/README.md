@@ -5,16 +5,24 @@ The Pugputer 6309 video card on an Olimex RP2350-PICO2-XXL: the card of `../core
 `$FFD8-$FFDB` on the board's microSD card. The wiring, and how it all works, is in
 `../README.md`, "On the card" and "The SD card".
 
-**Status: it builds, but hasn't been tried on the hardware yet.** Not in it yet: the mouse and
-keyboard (USB host).
+A copy of the Pugputer6309 repository's `Software/RP2350/video_misc`, where the firmware is
+worked on, on the hardware (it has `core/` beside `src/`; here it's `../core`). Keep the two in
+step.
+
+**Status (2026-11-07):**
+- **Working on the hardware:** booting DOS from the SD card, and every video demo.
+- **USB keyboards and mice** (TinyUSB host, through a hub): written, not yet tried.
+- **Not in yet:** gamepads, and the repeat of a held key.
 
 | File | |
 |---|---|
 | `src/config.h` | the pins and clocks |
 | `src/main.c` | start-up; core 0's main loop |
 | `src/bus.pio`, `src/bus.c` | the bus: reads answered by PIO and DMA from a copy of the registers; every access logged by DMA for core 0's interrupt |
-| `src/card.c` | the card between the bus, the drawing commands (a queue) and the beam; keeps the register copy up to date |
-| `src/dvi.c` | the picture: HSTX's TMDS encoder, two DMA channels, core 1 drawing a line ahead |
+| `src/card.c` | the card between the bus, the drawing commands (a 64KB queue) and the beam; keeps the register copy up to date; puts video memory back after a reset |
+| `src/dvi.c` | the picture: HSTX's TMDS encoder, two DMA channels, 8 line buffers; core 1 draws, and core 0 helps when lines run long |
+| `src/usbhost.c`, `src/tusb_config.h` | USB host (TinyUSB): boot-protocol keyboards and mice, through a hub |
+| `src/bench.c` | (diagnostic builds only, `-DVIDCARD_DIAG=1`) timings printed on the UART |
 | `src/sd.c` | the microSD card in SPI mode |
 | `src/blockdev.c` | the SD interface's registers (as the emulator's `SdCardDevice`), on `sd.c` |
 | `../core/` | the card itself: the same C the emulator runs (built here with `VC_ATOMIC_FLAGS`) |
@@ -45,7 +53,7 @@ Plug a serial adapter (3.3V) into the UEXT connector's UART (GPIO0 TX, GPIO1 RX,
 to see what it says at start:
 
 ```
-Pugputer 6309 video card: 252 MHz, PSRAM 8192 KB, SD card ready
+Pugputer 6309 video card: 336 MHz, PSRAM 8192 KB, SD card ready
 ```
 
 The same line shows at the top of the screen at power-on, until a program resets the card.

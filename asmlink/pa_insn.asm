@@ -598,7 +598,8 @@ IDXRESOLVE  LDX  <IDXEXPR
 IR_VAL      LDA  <IDXPB
             ANDA #7
             STA  <TMPB                 ; the register (0-6)
-            LDQ  <EVAL                 ; zero: no offset (X Y U S W; not after "0,")
+            LDD  <EVAL                 ; zero: no offset (X Y U S W; not after "0,")
+            ORD  <EVAL+2               ; (not LDQ's Z: bits 31-16 only, on a real 6309)
             BNE  IR_NOT0
             LDA  <TMPB
             CMPA #4

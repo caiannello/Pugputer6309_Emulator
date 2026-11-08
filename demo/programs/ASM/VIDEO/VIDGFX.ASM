@@ -28,7 +28,8 @@
 RAM_IRQV    equ  $0026      ; where the BIOS's IRQ entry jumps (see /ASM/DEFINES.D)
 
 SPINA       equ  $014000    ; page 2: the spinner's two buffers
-SPINB       equ  $014800
+SPINB       equ  $015400    ; (240 rows on: a bitmap has no height, so the rows
+                            ; under the one shown must be blank)
 FRAMES      equ  $800000    ; its 8 frames, in the PSRAM, 1280 bytes each
 ;------------------------------------------------------------------------------
             ORG  $4000

@@ -86,7 +86,12 @@ struct Kit {
         }
         return false;
     }
-    void frames(int n = 3) { s.bus.run(static_cast<uint64_t>(n) * kSecond / 60); }
+    // n frames, then as long as the card takes to finish drawing (it draws in its own time,
+    // as the card does).
+    void frames(int n = 3) {
+        s.bus.run(static_cast<uint64_t>(n) * kSecond / 60);
+        for (int i = 0; i < 1000 && (v.read(VC_STATUS) & VC_STATUS_BUSY); ++i) s.bus.run(20000);
+    }
     // The mouse to x, y (640x480) with these buttons held, for a few frames.
     void mouse(int x, int y, uint8_t buttons = 0, int n = 3) {
         v.mouse_to(x, y, buttons);

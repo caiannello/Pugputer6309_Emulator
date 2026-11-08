@@ -22,7 +22,13 @@ struct Machine {
         s.attach_video(&v); // (before it boots, so the BIOS finds it)
         ok = s.boot(PUGBIOS_S19_PATH, EXBASROM309_S19_PATH);
     }
-    std::string run(const std::string& line) { return s.run_line(line); }
+    // A line, then as long as the card takes to finish drawing what it sent (it draws in its
+    // own time, as the card does: what the screen shows a moment later).
+    std::string run(const std::string& line) {
+        std::string out = s.run_line(line);
+        for (int i = 0; i < 1000 && (v.read(VC_STATUS) & VC_STATUS_BUSY); ++i) s.bus.run(20000);
+        return out;
+    }
     const vc_card& c() { return v.card(); }
     uint8_t vram(uint32_t a) { return c().vram[a]; }
     uint8_t px8(int x, int y) { return vram(static_cast<uint32_t>(y) * 320 + x); } // SCREEN 1

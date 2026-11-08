@@ -105,7 +105,9 @@ TEST(demo_program_video_draws_on_the_video_card) {
         return vc_rgb888(static_cast<uint16_t>(p[0] << 8 | p[1]));
     };
     CHECK(v.pixel(8, 460) == shown(16));   // the ground
-    CHECK(v.pixel(320, 210) == shown(214)); // the sun (160,105)
+    // The sun (160,105): color 214 in the bitmap. (Its shade changes every frame, PALETTE 214,
+    // and a ball may be in front of it, so not the pixel shown.)
+    CHECK(c.vram[105 * 320 + 160] == 214);
     int words = 0; // "PRESS ANY KEY TO QUIT" on the text screen, row 28 (bobbing up to 4 lines)
     for (int y = 440; y < 464; ++y)
         for (int x = 29 * 8; x < 50 * 8; ++x) words += v.pixel(x, y) == shown(7);

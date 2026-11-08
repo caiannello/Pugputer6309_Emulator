@@ -165,7 +165,7 @@ for i in range(8):
 # ---------------------------------------------------------------- page 2
 TUNNEL = 0x000000    # 320x240, 8 bits a pixel
 SPINA = 0x014000     # the spinner's two buffers: 80x64, 2 bits a pixel, 20 bytes a row
-SPINB = 0x014800
+SPINB = 0x015400     # (240 rows on: a bitmap layer has no height, so what is under the buffer shown must be blank)
 WORDS = 0x018000     # 640x480, 1 bit a pixel, 80 bytes a row
 FRAMES = 0x800000    # the spinner's 8 frames, in the PSRAM (1280 bytes each)
 p2 = Cmds()

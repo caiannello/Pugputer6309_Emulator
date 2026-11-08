@@ -494,3 +494,57 @@ TEST(vidcard_device_draws_frames_only_once_a_program_has_used_it) {
     v.reset();
     CHECK(!v.active());
 }
+
+// The drawing-command queue, as on the card: commands take the time the card's firmware takes
+// (STATUS busy until then, the next command waiting, the commands-done flag at the end), the
+// queue holds 64KB and says full with 64 bytes left, bytes sent while it's full are lost, and
+// a reset drops what's queued.
+namespace {
+void send(VideoDevice& v, std::initializer_list<int> bytes) {
+    for (int b : bytes) v.write(VC_CMD, static_cast<uint8_t>(b));
+}
+} // namespace
+
+TEST(vidcard_device_commands_take_the_cards_time) {
+    VideoDevice v;
+    // TARGET: 320x240, 8 bits a pixel, at 0. Then CLEAR it in color 5.
+    send(v, {VC_C_TARGET, 0, 0, 0, 0x01, 0x40, 0x01, 0x40, 0x00, 0xF0, 8, VC_C_COLOR, 5});
+    for (int i = 0; i < 10; ++i) v.tick(1); // (TARGET and COLOR: under a microsecond each)
+    CHECK(!(v.read(VC_STATUS) & VC_STATUS_BUSY));
+    v.write(VC_ISR, 0xFF); // (the flags cleared)
+    send(v, {VC_C_CLEAR});
+    const uint64_t t = v.command_cycles(VC_C_CLEAR, 320 * 240);
+    CHECK(t > 3579545 / 100 && t < 3579545 / 10); // (10-100ms: 76800 pixels at about 240ns)
+    CHECK(v.card().vram[320 * 240 - 1] == 5);     // (its pixels: there from its start)
+    send(v, {VC_C_COLOR, 7});                      // waits behind it
+    v.tick(static_cast<uint32_t>(t / 2));
+    CHECK(v.read(VC_STATUS) & VC_STATUS_BUSY);
+    CHECK(!(v.read(VC_ISR) & VC_IRQ_CMDDONE));
+    CHECK(v.commands_waiting() == 2 && v.card().color == 5);
+    v.tick(static_cast<uint32_t>(t / 2 + 100));
+    CHECK(!(v.read(VC_STATUS) & VC_STATUS_BUSY));
+    CHECK(v.read(VC_ISR) & VC_IRQ_CMDDONE);
+    CHECK(v.commands_waiting() == 0 && v.card().color == 7);
+
+    // Instant, as before (a test hook): no time at all.
+    VideoDevice w;
+    w.set_instant_commands(true);
+    send(w, {VC_C_TARGET, 0, 0, 0, 0x01, 0x40, 0x01, 0x40, 0x00, 0xF0, 8, VC_C_CLEAR});
+    CHECK(!(w.read(VC_STATUS) & VC_STATUS_BUSY));
+}
+
+TEST(vidcard_device_command_queue_fills_loses_and_is_dropped_by_a_reset) {
+    VideoDevice v;
+    send(v, {VC_C_TARGET, 0, 0, 0, 0x01, 0x40, 0x01, 0x40, 0x00, 0xF0, 8});
+    v.tick(10);
+    send(v, {VC_C_CLEAR}); // (busy a while)
+    CHECK(v.commands_waiting() == 0 && (v.read(VC_STATUS) & VC_STATUS_BUSY));
+    for (uint32_t i = 0; i < VideoDevice::kQueueFullAt - 1; ++i) v.write(VC_CMD, VC_C_NOP);
+    CHECK(!(v.read(VC_STATUS) & VC_STATUS_FULL));
+    v.write(VC_CMD, VC_C_NOP);
+    CHECK(v.read(VC_STATUS) & VC_STATUS_FULL);
+    for (int i = 0; i < 64 + 10; ++i) v.write(VC_CMD, VC_C_NOP);
+    CHECK(v.commands_waiting() == VideoDevice::kQueueSize && v.command_bytes_lost() == 10);
+    v.write(VC_CTRL, 0x80); // a reset: the queue is dropped
+    CHECK(v.commands_waiting() == 0 && !(v.read(VC_STATUS) & (VC_STATUS_BUSY | VC_STATUS_FULL)));
+}
