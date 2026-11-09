@@ -9,10 +9,12 @@ A copy of the Pugputer6309 repository's `Software/RP2350/video_misc`, where the 
 worked on, on the hardware (it has `core/` beside `src/`; here it's `../core`). Keep the two in
 step.
 
-**Status (2026-11-07):**
+**Status (2026-11-08):**
 - **Working on the hardware:** booting DOS from the SD card, and every video demo.
-- **USB keyboards and mice** (TinyUSB host, through a hub): written, not yet tried.
-- **Not in yet:** gamepads, and the repeat of a held key.
+- **USB keyboards and mice** (TinyUSB host): working on the hardware, together through a hub,
+  wheel and key repeat included.
+- **USB gamepads:** generic HID pads (D-input), four at once. An 8BitDo SN30 Pro's reports reach
+  the card. **Not in yet:** XInput and PlayStation pads.
 
 | File | |
 |---|---|
@@ -21,7 +23,7 @@ step.
 | `src/bus.pio`, `src/bus.c` | the bus: reads answered by PIO and DMA from a copy of the registers; every access logged by DMA for core 0's interrupt |
 | `src/card.c` | the card between the bus, the drawing commands (a 64KB queue) and the beam; keeps the register copy up to date; puts video memory back after a reset |
 | `src/dvi.c` | the picture: HSTX's TMDS encoder, two DMA channels, 8 line buffers; core 1 draws, and core 0 helps when lines run long |
-| `src/usbhost.c`, `src/tusb_config.h` | USB host (TinyUSB): boot-protocol keyboards and mice, through a hub |
+| `src/usbhost.c`, `src/tusb_config.h` | USB host (TinyUSB): keyboards, mice (with report-protocol wheels) and generic HID gamepads, through a hub |
 | `src/bench.c` | (diagnostic builds only, `-DVIDCARD_DIAG=1`) timings printed on the UART |
 | `src/sd.c` | the microSD card in SPI mode |
 | `src/blockdev.c` | the SD interface's registers (as the emulator's `SdCardDevice`), on `sd.c` |

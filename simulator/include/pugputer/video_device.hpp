@@ -78,6 +78,12 @@ public:
     void mouse_to(int x, int y, uint8_t buttons);
     void mouse_wheel(int clicks);
     void key(uint8_t usage, bool down);
+    // A gamepad (0-3): its 8 bytes as a program reads them, or nullptr when it's unplugged
+    // (see vc.h, vc_pad).
+    void pad(int n, const uint8_t* state);
+    // Which pad it is, before its first pad() (USB vendor and product IDs: they pick its
+    // button map; see vc.h, vc_pad_id).
+    void pad_id(int n, uint16_t vid, uint16_t pid);
     // The program's VC_IN_CTRL: bit 0, sprite 0 is its mouse pointer; bit 1, it takes the
     // keys typed into the window (they go to the card, not the UART).
     uint8_t input_ctrl() const;

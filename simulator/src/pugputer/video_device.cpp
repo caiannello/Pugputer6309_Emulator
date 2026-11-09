@@ -138,6 +138,9 @@ void VideoDevice::mouse_wheel(int clicks) { vc_mouse_wheel(card_.get(), clicks);
 
 void VideoDevice::key(uint8_t usage, bool down) { vc_key(card_.get(), usage, down ? 1 : 0); }
 
+void VideoDevice::pad(int n, const uint8_t* state) { vc_pad(card_.get(), n, state); }
+void VideoDevice::pad_id(int n, uint16_t vid, uint16_t pid) { vc_pad_id(card_.get(), n, vid, pid); }
+
 uint8_t VideoDevice::input_ctrl() const { return card_->in_ctrl; }
 
 bool VideoDevice::irq_asserted() const { return vc_irq(card_.get()) != 0; }

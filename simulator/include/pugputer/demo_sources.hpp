@@ -75,6 +75,8 @@ inline constexpr DemoProgram kDemoPrograms[] = {
     {"demo/build/vidtiles.bin", "DEMO/VIDTILES.COM", 0x4000},
     {"demo/build/vidgfx.bin", "DEMO/VIDGFX.COM", 0x4000},
     {"demo/build/vidmouse.bin", "DEMO/VIDMOUSE.COM", 0x4000},
+    {"demo/build/vidpad.bin", "DEMO/VIDPAD.COM", 0x4000},
+    {"demo/build/padmap.bin", "CMD/PADMAP.COM", 0x4000}, // (a utility, so on the PATH with the others)
     {"demo/build/mandel.bin", "DEMO/MANDEL.COM", 0x4000},
 };
 

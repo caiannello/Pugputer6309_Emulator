@@ -1,5 +1,7 @@
 #include "video_out.hpp"
 
+#include "vc.h"
+
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -45,7 +47,14 @@ struct VideoOut::Impl {
     int scale = 1;
     uint8_t buttons = 0; // (the window's thread only)
     int mouse_x = 0, mouse_y = 0;
+    struct PadSeen { // (the window's thread only)
+        bool present = false;
+        uint8_t state[8] = {};
+        JOYCAPSA caps{};
+    } pads[4];
+    unsigned pad_ticks = 0;
 
+    void poll_pads();
     void push(const Input& in) {
         std::lock_guard<std::mutex> g(lock);
         input.push_back(in);
@@ -229,6 +238,9 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             self->push(in);
         }
         break;
+    case WM_TIMER:
+        if (self) self->poll_pads();
+        return 0;
     case WM_MOUSEWHEEL:
         if (self) {
             VideoOut::Input in;
@@ -254,6 +266,61 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 } // namespace
 
+namespace {
+// An axis as the card's sticks have it: -127 to 127, 0 at the middle of its range, and
+// values close to the middle read 0 (as the firmware's axis_value in usbhost.c).
+int8_t pad_axis(DWORD v, UINT lo, UINT hi) {
+    if (hi <= lo) return 0;
+    long n = (static_cast<long>(v - lo) * 2 - static_cast<long>(hi - lo)) * 127 / static_cast<long>(hi - lo);
+    n = n < -127 ? -127 : n > 127 ? 127 : n;
+    return static_cast<int8_t>(n > -8 && n < 8 ? 0 : n);
+}
+} // namespace
+
+// The PC's first four joysticks, as the card's gamepads, in the buttons' own order (as the
+// card has a HID pad's). The right stick is Z and R, which suits D-input pads.
+void VideoOut::Impl::poll_pads() {
+    static const uint8_t dirs[8] = {VC_PAD_UP,   VC_PAD_UP | VC_PAD_RIGHT,   VC_PAD_RIGHT, VC_PAD_DOWN | VC_PAD_RIGHT,
+                                    VC_PAD_DOWN, VC_PAD_DOWN | VC_PAD_LEFT, VC_PAD_LEFT,  VC_PAD_UP | VC_PAD_LEFT};
+    bool scan = (pad_ticks++ % 128) == 0; // (asking about an absent joystick can be slow)
+    for (UINT id = 0; id < 4; ++id) {
+        PadSeen& p = pads[id];
+        if (!p.present && !scan) continue;
+        JOYINFOEX info{};
+        info.dwSize = sizeof(info);
+        info.dwFlags = JOY_RETURNX | JOY_RETURNY | JOY_RETURNZ | JOY_RETURNR | JOY_RETURNBUTTONS | JOY_RETURNPOVCTS;
+        bool there = joyGetPosEx(id, &info) == JOYERR_NOERROR;
+        if (there && !p.present) there = joyGetDevCapsA(id, &p.caps, sizeof(p.caps)) == JOYERR_NOERROR;
+        Input in;
+        in.kind = Input::Pad;
+        in.pad = static_cast<int>(id);
+        in.present = there;
+        if (there) {
+            const JOYCAPSA& c = p.caps;
+            in.vid = c.wMid;
+            in.pid = c.wPid;
+            int8_t lx = pad_axis(info.dwXpos, c.wXmin, c.wXmax), ly = pad_axis(info.dwYpos, c.wYmin, c.wYmax);
+            in.state[VC_PAD_LX] = static_cast<uint8_t>(lx);
+            in.state[VC_PAD_LY] = static_cast<uint8_t>(ly);
+            if (c.wCaps & JOYCAPS_HASZ) in.state[VC_PAD_RX] = static_cast<uint8_t>(pad_axis(info.dwZpos, c.wZmin, c.wZmax));
+            if (c.wCaps & JOYCAPS_HASR) in.state[VC_PAD_RY] = static_cast<uint8_t>(pad_axis(info.dwRpos, c.wRmin, c.wRmax));
+            in.state[VC_PAD_BTN1] = static_cast<uint8_t>(info.dwButtons);
+            in.state[VC_PAD_BTN2] = static_cast<uint8_t>(info.dwButtons >> 8);
+            if (c.wCaps & JOYCAPS_HASPOV) {
+                if (info.dwPOV < 36000) in.state[VC_PAD_DPAD] = dirs[((info.dwPOV + 2250) / 4500) % 8];
+            } else { // (a simple pad's cross is its X and Y)
+                in.state[VC_PAD_DPAD] = static_cast<uint8_t>((ly <= -64 ? VC_PAD_UP : 0) | (ly >= 64 ? VC_PAD_DOWN : 0) |
+                                                             (lx <= -64 ? VC_PAD_LEFT : 0) | (lx >= 64 ? VC_PAD_RIGHT : 0));
+            }
+        }
+        if (there != p.present || std::memcmp(in.state, p.state, sizeof(p.state)) != 0) {
+            p.present = there;
+            std::memcpy(p.state, in.state, sizeof(p.state));
+            push(in);
+        }
+    }
+}
+
 void VideoOut::Impl::run() {
     timeBeginPeriod(1); // for pacing to 1/60 s
     WNDCLASSA wc{};
@@ -269,6 +336,7 @@ void VideoOut::Impl::run() {
     if (h) {
         hwnd = h;
         ShowWindow(h, SW_SHOWNOACTIVATE); // the typing stays where it was
+        SetTimer(h, 1, 16, nullptr);      // (the gamepads, about once a frame)
         MSG m;
         while (GetMessageA(&m, nullptr, 0, 0) > 0) {
             TranslateMessage(&m);

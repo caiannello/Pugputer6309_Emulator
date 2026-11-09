@@ -14,14 +14,17 @@ DLGVAL      equ  10         ; (where a row's answer starts in it)
 ;------------------------------------------------------------------------------
 ; A set, and the card for it.
 ;------------------------------------------------------------------------------
-; NEWPROJ: an empty set of the kind TSIZE, BPP, HIRES say: one blank tile, the
+; NEWPROJ: an empty set of the kind TSIZE, BPP, HIRES say: tile 0 (the empty cell,
+; which stays blank), and tile 1 to draw on, the
 ; card's own palette (xterm's, or TILEKIT.INI's); three layers with maps of
 ; MAPWC x MAPHC, all on this set.
 NEWPROJ     LDA  #$80
             STA  VC_CTRL        ; the card as it starts: its memory 0 (the map's
-            LDD  #1             ; cells all tile 0), its colors
+            LDD  #2             ; cells all tile 0), its colors
             STD  NTILES
             BSR  FRESH
+            LDD  #1             ; (the first to draw on)
+            STD  TILE
             JSR  SETPROJ
             JSR  APPLYPAL       ; (and TILEKIT.INI's colors for the kind of set)
             CLR  MAPNAME

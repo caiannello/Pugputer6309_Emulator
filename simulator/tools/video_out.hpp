@@ -37,12 +37,18 @@ public:
     // pressed or released (its USB HID usage code, for the card), the mouse moved or a button
     // went up or down, the wheel turned.
     struct Input {
-        enum Kind { Char, Key, Mouse, Wheel } kind = Char;
+        enum Kind { Char, Key, Mouse, Wheel, Pad } kind = Char;
         uint8_t code = 0;    // Char: the byte; Key: the usage code
         bool down = false;   // Key
         int x = 0, y = 0;    // Mouse: in the card's 640x480 pixels (may be off the picture)
         uint8_t buttons = 0; // Mouse: bit 0 left, 1 right, 2 middle
         int clicks = 0;      // Wheel: + is away from the user
+        // Pad: a PC gamepad changed (Windows only): which (0-3), whether it's there, its 8
+        // bytes as the card's pads have them.
+        int pad = 0;
+        bool present = false;
+        uint16_t vid = 0, pid = 0; // its USB IDs, which pick its button map
+        uint8_t state[8] = {};
     };
     bool poll(Input& in);
 

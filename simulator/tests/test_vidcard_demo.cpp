@@ -56,7 +56,7 @@ struct Demo {
         std::string file = name + ".ASM";
         img = build_image((name + ".img").c_str(), 32768, 4,
                           {disk_file(file.c_str(), src), disk_file("VIDLIB.ASM", lib), disk_file("VIDCARD.D", inc),
-                           disk_file("ASM.COM", asm_com)});
+                           disk_file("ASM.COM", asm_com), disk_file("CMD/KEEP.TXT", "(so that /CMD is there)")});
         v.set_draw_all(true);
         s.attach_video(&v);
         CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
@@ -385,6 +385,136 @@ TEST(vidcard_demo_vidmouse_draws_with_the_mouse_and_takes_the_keys) {
     press(0x29);
     CHECK(d.prompt(100000000));
     CHECK(d.c().in_ctrl == 0 && d.cfg(VC_DC_CTRL)[0] == 0x01);
+}
+
+TEST(vidcard_demo_vidpad_shows_the_gamepads) {
+    Demo d("VIDPAD");
+    if (!d.built) return;
+    auto row = [&](int r) { // a row of the text screen
+        std::string t;
+        for (int col = 0; col < 80; ++col) t += static_cast<char>(d.cell(VC_RESET_TEXT_MAP, col, r)[0]);
+        return t;
+    };
+    d.type("VIDPAD");
+    d.run(1.0);
+    CHECK(row(2).find(" PAD 0: NOT CONNECTED") == 0);
+    CHECK(row(8).find(" PAD 3: NOT CONNECTED") == 0);
+    // Pad 0: up and right on the d-pad, buttons 1 and 16, the sticks.
+    const uint8_t s[8] = {0, VC_PAD_UP | VC_PAD_RIGHT, 0x01, 0x80, 127, 0x81, 1, 0};
+    d.v.pad(0, s);
+    d.run(0.1);
+    CHECK(row(2).find(" PAD 0: U..R RAW 1..............F LX +127 LY -127 RX +001 RY +000") == 0);
+    CHECK(row(4).find(" PAD 1: NOT CONNECTED") == 0);
+    // Buttons 10 and 11 (the labels go 1-9, 0, A-F), left and down, on pad 2.
+    const uint8_t s2[8] = {0, VC_PAD_DOWN | VC_PAD_LEFT, 0, 0x06, 0, 0, 0, 0};
+    d.v.pad(2, s2);
+    d.run(0.1);
+    CHECK(row(6).find(" PAD 2: .DL. RAW .........0A..... LX +000 LY +000 RX +000 RY +000") == 0);
+    // A pad with a map (the card knows this one): the standard names. Its own buttons 1, 2
+    // and 11 are East, South and Select.
+    const uint8_t s3[8] = {0, 0, 0x03, 0x04, 0, 0, 0, 0};
+    d.v.pad_id(1, 0x2DC8, 0x6001);
+    d.v.pad(1, s3);
+    d.run(0.1);
+    CHECK(row(4).find(" PAD 1: .... BTN SE......-....... LX +000") == 0);
+    CHECK(row(10).find(" BTN: SEWN") == 0);
+    // Unplugged: the whole line goes back.
+    d.v.pad(0, nullptr);
+    d.run(0.1);
+    CHECK(row(2).find(" PAD 0: NOT CONNECTED") == 0);
+    CHECK(row(2).find("BTN") == std::string::npos && row(2).find("RY") == std::string::npos);
+    // Esc goes back to the shell, and the keys to the UART.
+    d.v.key(0x29, true);
+    d.v.key(0x29, false);
+    d.run(0.1);
+    CHECK(d.prompt(100000000));
+    CHECK(d.c().in_ctrl == 0);
+}
+
+TEST(vidcard_demo_padmap_sets_up_a_pad_and_saves_it) {
+    Demo d("PADMAP");
+    if (!d.built) return;
+    auto row = [&](int r) {
+        std::string t;
+        for (int col = 0; col < 80; ++col) t += static_cast<char>(d.cell(VC_RESET_TEXT_MAP, col, r)[0]);
+        return t;
+    };
+    auto press = [&](int button) { // the pad's own button (1-16), then let go
+        uint8_t s[8] = {};
+        s[button <= 8 ? VC_PAD_BTN1 : VC_PAD_BTN2] = static_cast<uint8_t>(1 << ((button - 1) & 7));
+        d.v.pad(1, s);
+        d.run(0.05);
+        const uint8_t none[8] = {};
+        d.v.pad(1, none);
+        d.run(0.05);
+    };
+    auto map_at = [&](int i) { return vc_peek(&d.c(), VC_PADMAP_BASE + i); };
+    d.v.pad_id(1, 0x1234, 0xABCD);
+    const uint8_t none[8] = {};
+    d.v.pad(1, none);
+    d.type("PADMAP");
+    d.run(1.0);
+    CHECK(row(2).find(" PRESS A BUTTON ON THE PAD") == 0);
+    press(5); // pad 1 is chosen; that press isn't a button yet
+    CHECK(row(2).find(" PAD 1  1234:ABCD") == 0);
+    CHECK(row(4).find(" PRESS SOUTH") == 0);
+    press(2); // South
+    CHECK(row(4).find(" PRESS EAST") == 0);
+    press(2); // the same button again: taken, so still East
+    CHECK(row(4).find(" PRESS EAST") == 0);
+    press(1); // East
+    CHECK(row(4).find(" PRESS WEST") == 0);
+    d.v.key(0x2C, true); // Space: no West
+    d.v.key(0x2C, false);
+    d.run(0.1);
+    CHECK(row(4).find(" PRESS NORTH") == 0);
+    press(3);  // North
+    press(4);  // L
+    press(5);  // R
+    press(6);  // L2
+    press(7);  // R2
+    press(8);  // Select
+    press(9);  // Start
+    press(10); // Home
+    press(11); // L3
+    press(16); // R3
+    d.run(0.5);
+    CHECK(row(4).find(" SAVED IN /CMD/PADMAP.INI") == 0);
+    // On the card now.
+    const uint8_t want[VC_PADMAP_SIZE] = {0x12, 0x34, 0xAB, 0xCD, VC_BTN_EAST, VC_BTN_SOUTH, VC_BTN_NORTH, VC_BTN_L, VC_BTN_R,
+                                          VC_BTN_L2, VC_BTN_R2, VC_BTN_SELECT, VC_BTN_START, VC_BTN_HOME, VC_BTN_L3, 0xFF, 0xFF,
+                                          0xFF, 0xFF, VC_BTN_R3};
+    for (int i = 0; i < VC_PADMAP_SIZE; ++i) CHECK(map_at(i) == want[i]);
+    uint8_t s[8] = {0, 0, 0x01, 0, 0, 0, 0, 0}; // its own button 1
+    d.v.pad(1, s);
+    d.run(0.05);
+    CHECK(vc_peek(&d.c(), VC_PAD_BASE + VC_PAD_SIZE + VC_PAD_FLAGS) == (VC_PAD_CONNECTED | VC_PAD_MAPPED));
+    CHECK(vc_peek(&d.c(), VC_PAD_BASE + VC_PAD_SIZE + VC_PAD_BTN1) == (1 << VC_BTN_EAST));
+    d.v.pad(1, none);
+    d.run(0.05);
+    // A key to leave; the map outlives the card's reset.
+    d.v.key(0x28, true);
+    d.v.key(0x28, false);
+    d.run(0.1);
+    CHECK(d.prompt(100000000));
+    CHECK(map_at(0) == 0x12);
+    // The file: text, a line for the pad.
+    Fat16Volume vol;
+    Fat16Volume::Entry e;
+    CHECK(vol.load(d.img.c_str()) && vol.find("/CMD/PADMAP.INI", e));
+    std::vector<uint8_t> ini = vol.read(e);
+    CHECK(std::string(ini.begin(), ini.end()).find("\r\n1234 ABCD  01 00 03 04 05 06 07 08 09 0A 0B FF FF FF FF 0C\r\n") !=
+          std::string::npos);
+    // As after a power cycle: gone from the card, back from the file by running PADMAP, Esc.
+    for (int i = 0; i < VC_PADMAP_SIZE; ++i) vc_poke(&d.v.card(), VC_PADMAP_BASE + i, 0);
+    CHECK(map_at(0) == 0);
+    d.type("PADMAP");
+    d.run(1.0);
+    for (int i = 0; i < VC_PADMAP_SIZE; ++i) CHECK(map_at(i) == want[i]);
+    d.v.key(0x29, true);
+    d.v.key(0x29, false);
+    d.run(0.1);
+    CHECK(d.prompt(100000000));
 }
 
 // MANDEL: the MC6839 floating-point ROM sets up each pixel, 8.8 fixed point iterates. ASM

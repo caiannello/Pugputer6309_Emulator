@@ -220,7 +220,7 @@ TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
     k.key(0x28); // Enter
     k.frames(30);
     CHECK(!k.shows(2, "NEW TILE SET AND MAP"));
-    CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8 16 ") && k.ram("TOOL") == 0);
+    CHECK(k.shows(29, "TILE 0001/0002") && k.shows(29, " 8x8 16 ") && k.ram("TOOL") == 0);
     CHECK(k.shows(1, "TILES (NEW)") && k.shows(27, "MAP   (NEW)") && k.shows(29, "MAP 064x064"));
     const uint8_t* l0 = k.c().cfg + VC_LAYER0;
     CHECK(l0[VC_L_MODE] == (VC_TILE | 0x10) && k.c().cfg[VC_DC_CTRL] == 0x0F); // (3 layers, sprites)
@@ -232,7 +232,7 @@ TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
     k.mouse(Kit::zx(2), Kit::zy(3));
     k.mouse(Kit::zx(2), Kit::zy(3), 1);
     k.mouse(Kit::zx(2), Kit::zy(3), 0);
-    CHECK(k.pix4(0, 2, 3) == 15 && k.pix4(0, 3, 3) == 0);
+    CHECK(k.pix4(1, 2, 3) == 15 && k.pix4(1, 3, 3) == 0);
     CHECK(k.shows(1, "TILES (NEW)*"));
     // Magnified, it is white; the tile layer on the left shows it too.
     CHECK(k.panel(24 + 2 * 16 + 4, 60 + 3 * 16 + 4) == 15);
@@ -240,11 +240,11 @@ TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
     k.mouse(Kit::zx(0), Kit::zy(6), 1);
     k.mouse(Kit::zx(7), Kit::zy(6), 1);
     k.mouse(Kit::zx(7), Kit::zy(6), 0);
-    for (int x = 0; x < 8; ++x) CHECK(k.pix4(0, x, 6) == 15);
+    for (int x = 0; x < 8; ++x) CHECK(k.pix4(1, x, 6) == 15);
     // The right button rubs out.
     k.mouse(Kit::zx(4), Kit::zy(6), 2);
     k.mouse(Kit::zx(4), Kit::zy(6), 0);
-    CHECK(k.pix4(0, 4, 6) == 0 && k.pix4(0, 3, 6) == 15);
+    CHECK(k.pix4(1, 4, 6) == 0 && k.pix4(1, 3, 6) == 15);
     // Another color (red, 9) from the palette; the line tool, a diagonal.
     k.click(kPanelX + 8 + 9 * 10 + 4, 192 + 3);
     CHECK(k.shows(29, "COLOR 009"));
@@ -254,23 +254,93 @@ TEST(tilekit_makes_a_set_and_draws_with_the_pen_line_and_fill) {
     k.mouse(Kit::zx(3), Kit::zy(2), 1);
     k.mouse(Kit::zx(5), Kit::zy(5), 1); // (the line follows the mouse until let go)
     k.mouse(Kit::zx(5), Kit::zy(5), 0);
-    CHECK(k.pix4(0, 0, 0) == 9 && k.pix4(0, 5, 5) == 9 && k.pix4(0, 3, 3) == 9);
-    CHECK(k.pix4(0, 3, 2) == 0); // (the line to 3,2 is gone)
+    CHECK(k.pix4(1, 0, 0) == 9 && k.pix4(1, 5, 5) == 9 && k.pix4(1, 3, 3) == 9);
+    CHECK(k.pix4(1, 3, 2) == 0); // (the line to 3,2 is gone)
     // Fill: everything 0 that touches 7,0 becomes 9, up to the line and the row of white.
     k.click(kPanelX + 1 + 2 * 25 + 10, 34 + 10); // the fill button
     CHECK(k.ram("TOOL") == 2);
     k.click(Kit::zx(7), Kit::zy(0));
-    CHECK(k.pix4(0, 7, 0) == 9 && k.pix4(0, 7, 5) == 9 && k.pix4(0, 0, 5) == 0 && k.pix4(0, 7, 7) == 0);
-    CHECK(k.pix4(0, 2, 3) == 15);
+    CHECK(k.pix4(1, 7, 0) == 9 && k.pix4(1, 7, 5) == 9 && k.pix4(1, 0, 5) == 0 && k.pix4(1, 7, 7) == 0);
+    CHECK(k.pix4(1, 2, 3) == 15);
     // Undo, three times: the fill, the line, the rubbing out.
     k.key(0x18); // U
-    CHECK(k.pix4(0, 7, 0) == 0 && k.pix4(0, 5, 5) == 9);
+    CHECK(k.pix4(1, 7, 0) == 0 && k.pix4(1, 5, 5) == 9);
     k.key(0x1D, false, true); // ^Z
-    CHECK(k.pix4(0, 5, 5) == 0 && k.pix4(0, 0, 0) == 0);
+    CHECK(k.pix4(1, 5, 5) == 0 && k.pix4(1, 0, 0) == 0);
     k.key(0x18);
-    CHECK(k.pix4(0, 4, 6) == 15);
+    CHECK(k.pix4(1, 4, 6) == 15);
     k.mouse(Kit::zx(6), Kit::zy(2));
     k.dump("2-drawn");
+}
+
+TEST(tilekit_keeps_tile_0_blank) {
+    Kit k;
+    if (!k.ok) return;
+    k.type("TILEKIT");
+    k.frames(60);
+    k.key(0x28);
+    k.frames(30);
+    auto tile0_blank = [&] {
+        bool blank = true;
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 8; ++x) blank = blank && k.pix4(0, x, y) == 0;
+        return blank;
+    };
+    // A new set starts on tile 1, ready to draw on.
+    CHECK(k.shows(29, "TILE 0001/0002"));
+    k.key(0x36); // , : tile 0
+    CHECK(k.shows(29, "TILE 0000/0002"));
+    // The pen, a drag, the line, the fill and clear all leave it alone, and say why.
+    k.click(Kit::zx(2), Kit::zy(3));
+    CHECK(tile0_blank() && k.shows(28, "TILE 0 STAYS BLANK"));
+    k.mouse(Kit::zx(0), Kit::zy(6), 1);
+    k.mouse(Kit::zx(7), Kit::zy(6), 1);
+    k.mouse(Kit::zx(7), Kit::zy(6), 0);
+    CHECK(tile0_blank());
+    k.key(0x0F); // L
+    k.mouse(Kit::zx(0), Kit::zy(0), 1);
+    k.mouse(Kit::zx(5), Kit::zy(5), 1);
+    k.mouse(Kit::zx(5), Kit::zy(5), 0);
+    CHECK(tile0_blank());
+    k.key(0x09); // F
+    k.click(Kit::zx(7), Kit::zy(0));
+    CHECK(tile0_blank());
+    k.key(0x06); // C
+    CHECK(tile0_blank() && k.shows(28, "TILE 0 STAYS BLANK"));
+    CHECK(k.shows(1, "TILES (NEW)") && !k.shows(1, "TILES (NEW)*"));
+    k.key(0x18); // U: and there is nothing to undo
+    CHECK(k.shows(28, "NOTHING TO UNDO"));
+    // Pick still works on it. And on the map, tile 0 is what empties a cell.
+    k.key(0x37); // . : tile 1
+    k.key(0x13); // P
+    k.click(Kit::zx(0), Kit::zy(0));
+    CHECK(k.pix4(1, 0, 0) == 15);
+    k.click(Kit::mx(1), Kit::my(1));
+    CHECK(k.cell(1, 1) == 1);
+    k.key(0x36); // , : tile 0
+    k.click(Kit::mx(1), Kit::my(1));
+    CHECK(k.cell(1, 1) == 0 && tile0_blank());
+}
+
+TEST(tilekit_keeps_pixels_an_older_set_has_in_tile_0) {
+    std::string set("PTS1", 4);
+    set += static_cast<char>(8);
+    set += static_cast<char>(4);
+    set.append(2, '\0');
+    set += static_cast<char>(0);
+    set += static_cast<char>(2); // 2 tiles
+    set.append(6, '\0');
+    set.append(512, '\0'); // the palette
+    set.append(2 * 32, '\0');
+    set[16 + 512] = static_cast<char>(0xF0); // tile 0: a pixel at 0,0
+    Kit k({disk_file("OLD.TLS", set)});
+    if (!k.ok) return;
+    k.type("TILEKIT OLD.TLS");
+    k.frames(90);
+    CHECK(k.shows(28, "OPENED") && k.shows(29, "TILE 0000/0002"));
+    CHECK(k.pix4(0, 0, 0) == 15);
+    k.click(Kit::zx(1), Kit::zy(1));
+    CHECK(k.pix4(0, 0, 0) == 15 && k.pix4(0, 1, 1) == 0 && k.shows(28, "TILE 0 STAYS BLANK"));
 }
 
 TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
@@ -284,24 +354,24 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     k.key(0x28);
     k.frames(30);
     CHECK(k.shows(29, " 16x16 256"));
-    // 16x16 tiles: 8 screen pixels a pixel. Color 196 (red), a dot at 15,15.
+    // 16x16 tiles: 8 screen pixels a pixel. Color 196 (red), a dot at 15,15 of tile 1.
     k.click(kPanelX + 8 + 4 * 10 + 4, 192 + 12 * 8 + 3);
     CHECK(k.shows(29, "COLOR 196"));
     auto zx = [](int x) { return kPanelX + 24 + x * 8 + 4; };
     auto zy = [](int y) { return 60 + y * 8 + 4; };
     k.click(zx(15), zy(15));
-    CHECK(k.vram(k.var24("TBASE") + 255) == 196);
-    // NEW (the button), then D (a copy of it): three tiles, the third like the second.
+    CHECK(k.vram(k.var24("TBASE") + 511) == 196);
+    // NEW (the button), then D (a copy of it): four tiles, the last like the one before.
     k.click(70 * 8 + 4, 21 * 16 + 8);
-    CHECK(k.shows(29, "TILE 0001/0002") && k.shows(21, "0002 TILES"));
+    CHECK(k.shows(29, "TILE 0002/0003") && k.shows(21, "0003 TILES"));
     k.click(zx(0), zy(0));
     k.key(0x07); // D
     k.frames(10);
-    CHECK(k.shows(29, "TILE 0002/0003"));
-    CHECK(k.vram(k.var24("TBASE") + 256) == 196 && k.vram(k.var24("TBASE") + 512) == 196 && k.vram(k.var24("TBASE") + 511) == 0);
+    CHECK(k.shows(29, "TILE 0003/0004"));
+    CHECK(k.vram(k.var24("TBASE") + 512) == 196 && k.vram(k.var24("TBASE") + 768) == 196 && k.vram(k.var24("TBASE") + 767) == 0);
     // The set: click the first tile.
     k.click(kPanelX + 3 + 8, 352 + 8);
-    CHECK(k.shows(29, "TILE 0000/0003"));
+    CHECK(k.shows(29, "TILE 0000/0004"));
     // Changing a color: green all the way up on color 196.
     k.mouse(kPanelX + 48 + 10, 322 + 5, 1);
     k.mouse(kPanelX + 48 + 200, 322 + 5, 1);
@@ -320,12 +390,12 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     k.key(0x29);
     CHECK(k.shows(1, "SET1.TLS ") && !k.shows(1, "SET1.TLS*"));
     std::vector<uint8_t> f = k.disk("/SET1.TLS");
-    CHECK(f.size() == 16 + 512 + 3 * 256);
-    if (f.size() == 16 + 512 + 3 * 256) {
+    CHECK(f.size() == 16 + 512 + 4 * 256);
+    if (f.size() == 16 + 512 + 4 * 256) {
         CHECK(std::string(f.begin(), f.begin() + 4) == "PTS1" && f[4] == 16 && f[5] == 8 && f[6] == 0);
-        CHECK(f[8] == 0 && f[9] == 3);
+        CHECK(f[8] == 0 && f[9] == 4);
         CHECK(f[16 + 2 * 196] == 0xFF && f[17 + 2 * 196] == 0xE0 && f[16 + 2 * 15] == 0xFF);
-        CHECK(f[528 + 255] == 196 && f[528 + 256] == 196 && f[528 + 511] == 0);
+        CHECK(f[528 + 511] == 196 && f[528 + 512] == 196 && f[528 + 767] == 0);
     }
     // ^N, a new 8x8 set; then ^O opens the saved one again.
     k.key(0x11, false, true);
@@ -333,22 +403,23 @@ TEST(tilekit_adds_tiles_saves_and_opens_a_set) {
     k.key(0x17); // T: back to 8x8
     k.key(0x28);
     k.frames(30);
-    CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8") && k.shows(1, "(NEW)"));
+    CHECK(k.shows(29, "TILE 0001/0002") && k.shows(29, " 8x8") && k.shows(1, "(NEW)"));
     k.key(0x12, false, true); // ^O
     CHECK(k.shows(28, "OPEN: _"));
     k.text("SET1");
     k.key(0x28);
     k.frames(60);
-    CHECK(k.shows(28, "OPENED") && k.shows(29, "0000/0003") && k.shows(29, " 16x16 256"));
+    CHECK(k.shows(28, "OPENED") && k.shows(29, "0000/0004") && k.shows(29, " 16x16 256"));
     k.dump("3-opened");
-    CHECK(k.vram(k.var24("TBASE") + 255) == 196 && k.c().cfg[0x200 + 2 * 196] == 0xFF && k.c().cfg[0x201 + 2 * 196] == 0xE0);
+    CHECK(k.vram(k.var24("TBASE") + 511) == 196 && k.c().cfg[0x200 + 2 * 196] == 0xFF && k.c().cfg[0x201 + 2 * 196] == 0xE0);
     // A file that isn't there: said so, and the set stays.
     k.key(0x12, false, true);
     for (int i = 0; i < 8; ++i) k.key(0x2A); // (backspace the name away)
     k.text("NOPE");
     k.key(0x28);
     CHECK(k.shows(28, "NO SUCH FILE") && k.shows(1, "SET1.TLS"));
-    // A change, then Esc: asked first; N stays, Y goes back to the shell.
+    // A change (to tile 1: it opened on tile 0), then Esc: asked first; N stays, Y goes back to the shell.
+    k.key(0x37); // .
     k.click(zx(1), zy(1));
     k.key(0x29);
     CHECK(k.shows(28, "AREN'T SAVED"));
@@ -376,12 +447,12 @@ TEST(tilekit_opens_the_file_it_is_given_or_makes_it) {
     k.frames(30);
     k.key(0x29); // (not the map)
     CHECK(k.shows(1, "NEWONE.TLS "));
-    CHECK(k.disk("/NEWONE.TLS").size() == 16 + 512 + 32 + 1); // (+ the tile's row)
+    CHECK(k.disk("/NEWONE.TLS").size() == 16 + 512 + 2 * 32 + 2); // (tiles 0 and 1, + their rows)
     k.key(0x29);
     CHECK(k.prompt(200000000));
     k.type("TILEKIT NEWONE.TLS");
     k.frames(90);
-    CHECK(k.shows(28, "OPENED") && k.shows(29, "0000/0001"));
+    CHECK(k.shows(28, "OPENED") && k.shows(29, "0000/0002"));
 }
 
 TEST(tilekit_picks_clears_moves_between_tiles_and_scrolls_the_set) {
@@ -397,7 +468,7 @@ TEST(tilekit_picks_clears_moves_between_tiles_and_scrolls_the_set) {
     // A green dot (color 2, row 0) at 1,1; then pick it back up after choosing another color.
     k.click(kPanelX + 8 + 2 * 10 + 4, 192 + 3);
     k.click(Kit::zx(1), Kit::zy(1));
-    CHECK(k.pix4(0, 1, 1) == 2);
+    CHECK(k.pix4(1, 1, 1) == 2);
     k.key(0x2E); // = : the next color
     CHECK(k.shows(29, "COLOR 003"));
     k.key(0x0E); // K: pick
@@ -408,11 +479,11 @@ TEST(tilekit_picks_clears_moves_between_tiles_and_scrolls_the_set) {
     CHECK(k.shows(29, "COLOR 018"));
     // The clear button empties the tile; undo brings it back.
     k.click(kPanelX + 1 + 5 * 25 + 10, 34 + 10);
-    CHECK(k.pix4(0, 1, 1) == 0);
+    CHECK(k.pix4(1, 1, 1) == 0);
     k.click(kPanelX + 1 + 6 * 25 + 10, 34 + 10);
-    CHECK(k.pix4(0, 1, 1) == 2);
+    CHECK(k.pix4(1, 1, 1) == 2);
     // 70 tiles (N), the set scrolled to the end to show the newest; the arrows move about.
-    for (int i = 0; i < 69; ++i) {
+    for (int i = 0; i < 68; ++i) {
         k.v.key(0x11, true);
         k.v.key(0x11, false);
         k.frames(2);
@@ -452,7 +523,6 @@ TEST(tilekit_puts_tiles_on_the_map_with_every_tool_and_undoes_them) {
     k.frames(30);
     CHECK(k.c().cfg[VC_LAYER0 + VC_L_MAP] == 0x05 && k.c().cfg[VC_SPR_COUNT] == 42); // 64x64; 2 + 40 for the surfaces
     // Tile 1: a dot. The map is all tile 0 to start with.
-    k.key(0x11); // N
     k.click(Kit::zx(0), Kit::zy(0));
     CHECK(k.pix4(1, 0, 0) == 15 && k.cell(3, 2) == 0);
     // The cell under the mouse: framed by sprite 1, and in the status line.
@@ -561,9 +631,11 @@ TEST(tilekit_scrolls_the_map_and_covers_what_is_past_its_end) {
     k.mouse(200, 260, 0);
     CHECK(hs() == 8 + 50 && vs() == 16 + 20);
     // A cell clicked on is the one shown there, scrolled.
+    k.key(0x36); // , : tile 0
     k.click(Kit::mx(1), Kit::my(1));
     CHECK(k.cell(1 + (58 + 8) / 8, 1 + (36 + 8) / 8, 128) == 0); // (pen with tile 0 = nothing; see below)
-    k.key(0x11); // N: tile 1
+    k.key(0x37); // . : tile 1, with a dot on it
+    k.click(Kit::zx(0), Kit::zy(0));
     k.click(16 * 3 + 2, 16 * 3 + 2); // screen 50,50: layer 25+58, 25+36 -> cell 10, 7
     CHECK(k.cell(10, 7, 128) == 1);
     // ^N: a smaller map, 32x32 -- smaller than the view, so what is past it is covered.
@@ -583,7 +655,7 @@ TEST(tilekit_scrolls_the_map_and_covers_what_is_past_its_end) {
     CHECK(k.c().cfg[VC_LAYER0 + VC_L_MAP] == 0x00 && k.shows(29, "TILE 0001/0002") && k.cell(10, 7, 32) == 0);
     // At 640x480 a 32x32 map of 8x8 tiles is 256 pixels: past it, a click does nothing.
     k.key(0x11, false, true);
-    CHECK(k.shows(28, "AREN'T SAVED")); // (the tile set: tile 1 is new)
+    CHECK(k.shows(28, "AREN'T SAVED")); // (the tile set: tile 1 has changed)
     k.key(0x1C); // Y
     k.key(0x15); // R: 640x480
     k.key(0x28);
@@ -599,7 +671,7 @@ TEST(tilekit_saves_maps_that_share_a_tile_set_and_opens_them_again) {
     k.frames(60);
     k.key(0x28);
     k.frames(30);
-    k.key(0x11); // N: tile 1, a dot
+    // Tile 1, a dot.
     k.click(Kit::zx(2), Kit::zy(2));
     k.click(Kit::mx(1), Kit::my(1));
     CHECK(k.cell(1, 1) == 1);
@@ -685,7 +757,6 @@ TEST(tilekit_exports_the_project_as_assembly_source_that_a_game_includes) {
     k.frames(30);
     // Layer 1: tile 1 (a dot at 1,0) at 1,1. Layer 2: a set of its own, tile 1 (a dot at
     // 2,2) at 3,3, flipped across. Layer 3: hidden.
-    k.key(0x11);
     k.click(Kit::zx(1), Kit::zy(0));
     k.click(Kit::mx(1), Kit::my(1));
     k.key(0x1F);
@@ -693,7 +764,6 @@ TEST(tilekit_exports_the_project_as_assembly_source_that_a_game_includes) {
     k.key(0x16);
     k.key(0x28);
     k.frames(30);
-    k.key(0x11);
     k.click(Kit::zx(2), Kit::zy(2));
     k.key(0x0B); // H
     k.click(Kit::mx(3), Kit::my(3));
@@ -786,34 +856,34 @@ TEST(tilekit_shows_each_tile_in_its_own_row_and_keeps_them) {
     k.frames(60);
     k.key(0x28);
     k.frames(30);
-    // Tile 0: a dot in color 2 of row 2 (34).
+    // Tile 1: a dot in color 2 of row 2 (34).
     k.click(kPanelX + 8 + 2 * 10 + 4, 192 + 2 * 8 + 3);
     CHECK(k.shows(29, "COLOR 034"));
     k.click(Kit::zx(0), Kit::zy(0));
     auto thumb = [&](int t, int x, int y) { return k.panel(3 + (t % 10) * 17 + 2 * x, 352 + (t / 10) * 17 + 2 * y); };
-    CHECK(k.pix4(0, 0, 0) == 2 && thumb(0, 0, 0) == 34);
-    // Tile 1, drawn in row 5: tile 0 stays in row 2 in the set.
+    CHECK(k.pix4(1, 0, 0) == 2 && thumb(1, 0, 0) == 34);
+    // Tile 2, drawn in row 5: tile 1 stays in row 2 in the set.
     k.key(0x11); // N
     k.click(kPanelX + 8 + 2 * 10 + 4, 192 + 5 * 8 + 3); // color 82
     k.click(Kit::zx(1), Kit::zy(1));
-    CHECK(thumb(1, 1, 1) == 82 && thumb(0, 0, 0) == 34);
+    CHECK(thumb(2, 1, 1) == 82 && thumb(1, 0, 0) == 34);
     // Another row picked: the tile being edited is shown in it; the others not.
     k.key(0x4E); // PgDn: row 6
-    CHECK(thumb(1, 1, 1) == 98 && thumb(0, 0, 0) == 34);
-    // Selecting tile 0: its row (2) is picked again, the same place in it.
-    k.click(kPanelX + 3 + 8, 352 + 8);
-    CHECK(k.shows(29, "TILE 0000/0002") && k.shows(29, "COLOR 034"));
-    CHECK(thumb(1, 1, 1) == 82); // (tile 1: drawn in row 5, only looked at in 6)
-    // Put on the map in row 7: that is tile 0's row now.
+    CHECK(thumb(2, 1, 1) == 98 && thumb(1, 0, 0) == 34);
+    // Selecting tile 1: its row (2) is picked again, the same place in it.
+    k.click(kPanelX + 3 + 17 + 8, 352 + 8);
+    CHECK(k.shows(29, "TILE 0001/0003") && k.shows(29, "COLOR 034"));
+    CHECK(thumb(2, 1, 1) == 82); // (tile 2: drawn in row 5, only looked at in 6)
+    // Put on the map in row 7: that is tile 1's row now.
     k.key(0x4E);
     k.key(0x4E);
     k.key(0x4E);
     k.key(0x4E);
     k.key(0x4E); // row 7
     k.click(Kit::mx(1), Kit::my(1));
-    CHECK(k.cell(1, 1) == 0x7000);
-    k.key(0x37); // . : tile 1 (row 5 again)
-    CHECK(k.shows(29, "COLOR 082") && thumb(0, 0, 0) == 114);
+    CHECK(k.cell(1, 1) == 0x7001);
+    k.key(0x37); // . : tile 2 (row 5 again)
+    CHECK(k.shows(29, "COLOR 082") && thumb(1, 0, 0) == 114);
     // Saved with the set, and back when it is opened.
     k.key(0x1A, false, true);
     k.text("ROWS");
@@ -821,8 +891,8 @@ TEST(tilekit_shows_each_tile_in_its_own_row_and_keeps_them) {
     k.frames(20);
     k.key(0x29); // (not the map)
     std::vector<uint8_t> f = k.disk("/ROWS.TLS");
-    CHECK(f.size() == 16 + 512 + 2 * 32 + 2 && f.size() > 7 && (f[6] & 2));
-    if (f.size() == 16 + 512 + 2 * 32 + 2) CHECK(f[16 + 512 + 64] == 7 && f[16 + 512 + 65] == 5);
+    CHECK(f.size() == 16 + 512 + 3 * 32 + 3 && f.size() > 7 && (f[6] & 2));
+    if (f.size() == 16 + 512 + 3 * 32 + 3) CHECK(f[16 + 512 + 96 + 1] == 7 && f[16 + 512 + 96 + 2] == 5);
     k.key(0x11, false, true); // ^N (asks: the map isn't saved)
     k.key(0x1C);
     k.key(0x28);
@@ -832,7 +902,7 @@ TEST(tilekit_shows_each_tile_in_its_own_row_and_keeps_them) {
     k.text("ROWS");
     k.key(0x28);
     k.frames(60);
-    CHECK(k.shows(28, "OPENED") && thumb(1, 1, 1) == 82 && thumb(0, 0, 0) == 114); // (row 7: tile 0, being edited, in its own row)
+    CHECK(k.shows(28, "OPENED") && thumb(2, 1, 1) == 82 && thumb(1, 0, 0) == 114); // (each in its own row)
 }
 
 TEST(tilekit_edits_three_layers_shown_hidden_and_reordered) {
@@ -850,7 +920,6 @@ TEST(tilekit_edits_three_layers_shown_hidden_and_reordered) {
           base(hw(2), VC_L_MAPBASE) == 0x022000);
     CHECK(base(hw(0), VC_L_TILEBASE) == 0 && base(hw(1), VC_L_TILEBASE) == 0 && base(hw(2), VC_L_TILEBASE) == 0);
     // Tile 1, put on layer 1's map; then layer 2 (key 2), the same tile on its map.
-    k.key(0x11); // N
     k.click(Kit::zx(0), Kit::zy(0));
     k.click(Kit::mx(1), Kit::my(1));
     CHECK(k.cell(1, 1, 64, 0x00A000) == 1);
@@ -922,7 +991,6 @@ TEST(tilekit_changes_a_layer_keeping_what_converts) {
     auto hw = [&](int n) { return k.c().cfg + VC_LAYER0 + VC_LAYER_SIZE * n; };
     auto base = [&](const uint8_t* l, int at) { return static_cast<uint32_t>(l[at] << 16 | l[at + 1] << 8 | l[at + 2]); };
     // Tile 1: a dot at 0,0 in color 15 of row 2 (47); on the map at 1,1 and 60,60.
-    k.key(0x11);
     k.click(kPanelX + 8 + 15 * 10 + 4, 192 + 2 * 8 + 3);
     k.click(Kit::zx(0), Kit::zy(0));
     k.click(Kit::mx(1), Kit::my(1));
@@ -966,7 +1034,7 @@ TEST(tilekit_changes_a_layer_keeping_what_converts) {
     k.key(0x28);
     k.key(0x1C); // Y
     k.frames(20);
-    CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 16x16 256"));
+    CHECK(k.shows(29, "TILE 0001/0002") && k.shows(29, " 16x16 256"));
     // Layer 2: a tile set of its own (S), 640x480 (R).
     k.key(0x1F); // 2
     k.key(0x0F, false, true);
@@ -977,7 +1045,7 @@ TEST(tilekit_changes_a_layer_keeping_what_converts) {
     k.key(0x28);
     k.frames(30);
     CHECK(k.ram("CURSET") == 1 && base(hw(1), VC_L_TILEBASE) == 0x00C000 && base(hw(0), VC_L_TILEBASE) == 0);
-    CHECK(k.shows(29, "TILE 0000/0001") && k.shows(29, " 8x8 16") && (hw(1)[VC_L_MODE] & 0x04) && !(hw(0)[VC_L_MODE] & 0x04));
+    CHECK(k.shows(29, "TILE 0001/0002") && k.shows(29, " 8x8 16") && (hw(1)[VC_L_MODE] & 0x04) && !(hw(0)[VC_L_MODE] & 0x04));
     k.dump("9-layer-dialog");
 }
 
@@ -990,7 +1058,6 @@ TEST(tilekit_saves_and_opens_a_whole_project) {
     k.frames(30);
     // Layer 1: tile 1 on its map. Layer 2: a set of its own (^L, S), tile 1 too, on its map;
     // 640x480. Layer 3: hidden, at the front still. A color changed.
-    k.key(0x11);
     k.click(Kit::zx(1), Kit::zy(1));
     k.click(Kit::mx(1), Kit::my(1));
     k.key(0x1F); // 2
@@ -998,7 +1065,6 @@ TEST(tilekit_saves_and_opens_a_whole_project) {
     k.key(0x16); // S: its own
     k.key(0x28);
     k.frames(30);
-    k.key(0x11);
     k.click(Kit::zx(2), Kit::zy(2));
     k.click(Kit::mx(2), Kit::my(2));
     k.key(0x20, true); // Shift+3: layer 3 hidden

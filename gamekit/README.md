@@ -82,7 +82,7 @@ doesn't):
 What can be kept is: a map made larger or smaller keeps its cells where they were (cut off, or
 tile 0 around them); tiles of 16 colors made 256 keep their pixels, each in the palette row the
 tile was last used in. Tiles of 256 colors made 16, or of another size, can't be: the tile set
-starts again with one blank tile -- after you say yes. (The other layers on that set change with
+starts again with tiles 0 and 1 blank -- after you say yes. (The other layers on that set change with
 it.)
 
 **Room.** Each layer has 48KB of the card's video memory: its own tile set at the start, its
@@ -136,8 +136,10 @@ The same tools work on the map's cells and on the tile's pixels, whichever the m
 
 The right button always does what the eraser does. Clear is for whichever was drawn on last.
 
-A blank map is tile 0 everywhere, so keep tile 0 blank (see-through) for empty cells; while it
-isn't, drawing on it shows all over the map.
+A blank map is tile 0 everywhere, so tile 0 stays blank (see-through): it is the empty cell, and
+the tools won't draw on it. A new set starts with it and tile 1, the one selected, to draw on.
+Put tile 0 on a map (or use the eraser) to empty a cell. A tile set from before this that has
+pixels in tile 0 keeps them, but they can't be edited.
 
 A large fill takes a while: a 64x64 map, about half a second.
 

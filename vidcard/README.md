@@ -31,7 +31,7 @@ card").
 | `vidcard.d` | the registers and constants for 6309 programs (`INCLUDE "vidcard.d"`) |
 | `tools/font2c.py` | makes `vc_font.c` from an 8x16 CP437 font (BDF, or a pixel-outline TrueType font) |
 | `tools/make_vidgfx.py` | makes `VIDGFX.ASM` (below) from `tools/vidgfx.template`, working out its drawing commands |
-| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), `VIDMOUSE` (the mouse and keyboard), `MANDEL` (the Mandelbrot set, with the MC6839 floating-point ROM), and `VIDLIB.ASM`, the helpers they share |
+| `../demo/programs/ASM/VIDEO/` | the demos: `VIDDEMO` (everything at once), `VIDTEXT` (text layers), `VIDTILES` (tiles and sprites), `VIDGFX` (bitmaps, commands, palette, interrupts, PSRAM), `VIDMOUSE` (the mouse and keyboard), `VIDPAD` (the gamepads), `MANDEL` (the Mandelbrot set, with the MC6839 floating-point ROM), and `VIDLIB.ASM`, the helpers they share |
 | `../basic309/` | BASIC's statements for the card (`SCREEN`, `LINE`, `CIRCLE`, `SPRITE`, ...: `../basic309/README.md`) |
 
 ## Registers ($FF80-$FF9F)
@@ -73,6 +73,9 @@ block: `TFM X+,Y` with Y at a `DATA` port (or `CMD`) sends W bytes, one every 3 
 |---|---|
 | `$000000-$03FFFF` | video memory (256KB): everything the picture is made from |
 | `$040000-$04003F` | the display settings (below) |
+| `$040040-$04005F` | the gamepads, read only (see "Gamepads") |
+| `$040060-$04007F` | what each gamepad is, read only (see "Gamepads") |
+| `$040080-$04011F` | the gamepads' button maps; a reset keeps them (see "Gamepads") |
 | `$040200-$0403FF` | the palette: 256 colors, 2 bytes each, RGB565 (`RRRRRGGG GGGBBBBB`), high byte first |
 | `$800000-$FFFFFF` | the PSRAM (8MB): space for pictures, maps and sounds not on screen yet; `COPY` moves them |
 
@@ -146,7 +149,8 @@ or colors part-way down the screen.
   tearing. `FRAME` counts up then.
 - The line interrupt (bit 1) comes as the line in `LINE` begins.
 - Commands done (bit 2): the queue has emptied.
-- Input (bit 3): a key event was queued, or the mouse moved, clicked or turned its wheel.
+- Input (bit 3): a key event was queued, the mouse moved, clicked or turned its wheel, or a
+  gamepad changed.
 
 A program can poll `ISR` (and write the bit back to clear it), or enable the interrupt in `IEN`
 and handle `/IRQ`, which it shares with the UART and the other cards: take it through the BIOS's
@@ -193,6 +197,59 @@ held. On the card, a USB keyboard's keys always go to the queue, and the
 UART's are the terminal's.
 
 A reset (`CTRL` `$80`) clears `INCTRL` and the queue; it leaves the mouse where it is.
+
+## Gamepads
+
+Up to four, plugged in or out at any time, as 8 read-only bytes each in the address space: pad
+`n` at `$040040 + 8*n`. Read them through a data port, a byte at a time (`LDA VC_DATA0`; `LDD`
+would read the next register). `vidcard.d` names them `VC_PAD` and `PD_...`.
+
+| Offset | Name | |
+|---|---|---|
+| `+0` | `PD_FLAGS` | bit 7: connected. If it isn't, all 8 bytes read 0. Bit 6 (`PD_MAPPED`): the buttons are the standard ones below |
+| `+1` | `PD_DPAD` | bit 0 up, 1 down, 2 left, 3 right |
+| `+2` | `PD_BTN1` | bit 0 `BT_SOUTH`, 1 `BT_EAST`, 2 `BT_WEST`, 3 `BT_NORTH`, 4 `BT_L`, 5 `BT_R`, 6 `BT_L2`, 7 `BT_R2` |
+| `+3` | `PD_BTN2` | bit 0 `BT_SELECT`, 1 `BT_START`, 2 `BT_HOME`, 3 `BT_L3`, 4 `BT_R3` (the stick clicks) |
+| `+4`, `+5` | `PD_LX`, `PD_LY` | the left stick: signed, -127 to 127, 0 in the middle; + is right and down |
+| `+6`, `+7` | `PD_RX`, `PD_RY` | the right stick, the same |
+
+The d-pad byte works on any pad: from its hat if it has one, otherwise from X and Y, which is
+what many simple pads' crosses are. Stick values close to the middle (within about 7) read 0, so
+a stick left alone stays still.
+
+The face buttons are named by where they are, because the letters printed on them differ from one
+maker to another: `BT_SOUTH` is the one nearest the player. A game just reads these bits. USB says
+nothing about which button is which, so the card translates each pad's buttons through a map found
+by its USB vendor and product IDs: first the ones in the table below, which the `PADMAP` utility
+fills and saves in `/CMD/PADMAP.INI`, then a short list built into the card. A pad with no map has
+`PD_MAPPED` clear and its own buttons 1-16 in `PD_BTN1` and `PD_BTN2`.
+
+What each pad is, 8 read-only bytes at `$040060 + 8*n` (`VC_PADID`):
+
+| Offset | Name | |
+|---|---|---|
+| `+0` | `ID_VID` | its USB vendor ID, high byte first |
+| `+2` | `ID_PID` | its USB product ID |
+| `+4` | `ID_RAW1` | its own buttons 1-8, whatever its map does with them |
+| `+5` | `ID_RAW2` | its own buttons 9-16 |
+
+The maps, 8 entries of 20 bytes at `$040080` (`VC_PADMAP`): the vendor and product IDs (both 0: an
+empty entry), then for the pad's buttons 1 to 16 which standard button each is, numbered as the bits
+of `PD_BTN1` then `PD_BTN2` (0 South to 12 R3), or `$FF` for none. A change takes effect at the
+pad's next report. The maps stay through a card reset, but not a power cycle: until boot does it,
+running `PADMAP` and pressing Esc sends the saved ones to the card.
+
+`/CMD/PADMAP.INI` is text, one line a pad, the same 20 bytes in hex. A `;` starts a comment:
+
+```
+2DC8 6001  01 00 FF 03 02 FF 04 05 06 07 08 09 0A 0B 0C FF
+```
+
+Any change sets the input interrupt's flag (`ISR` bit 3). A reset leaves the pads alone.
+
+On the card these are generic USB HID gamepads (D-input). XInput and PlayStation pads aren't
+supported. In the emulator they are the PC's first four joysticks or gamepads, on Windows; the
+Linux window doesn't pass them on yet, so there they read as not connected.
 
 ## Drawing commands
 
@@ -424,15 +481,23 @@ video card is half a second slower for it. The emulator's devices can be made to
 too (`set_wake_cycles()`, a test hook), and `test_basic309_video.cpp` boots with both.
 
 **Mouse and keyboard.** The RP2350's USB port is a host: TinyUSB's HID host, through a small
-unpowered hub for a keyboard and a mouse (`firmware/src/usbhost.c`). The hub's 5V has to come
-from the bus to the board's VBUS pin, through a Schottky diode, since the board's VBUS is
-otherwise only fed by a PC. Devices are put in their boot protocols:
-- a mouse reports how far it moved, which `vc_mouse_by()` adds up, with its wheel to
-  `vc_mouse_wheel()`;
-- a keyboard reports the keys held, and the changes become `vc_key()` calls.
+unpowered hub for a keyboard and a mouse (`firmware/src/usbhost.c`). The board's VBUS is
+otherwise only fed by a PC (its own diode lets VBUS power VSYS, not the other way), so a jumper
+from VSYS to VBUS powers the port from the bus: VSYS already comes through the Schottky diode
+above, so a PC on the port can't feed the bus. (With the Pugputer on and the PC off, the port
+puts about 4.7V back into the PC's; unplug it then.) Devices are put in their boot protocols:
+- a mouse reports how far it moved, which `vc_mouse_by()` adds up. Boot reports have no wheel,
+  so a mouse whose report descriptor shows one is moved to report protocol, its descriptor
+  fetched again (a mouse can describe a simpler report while in boot protocol), and its wheel
+  goes to `vc_mouse_wheel()`. If its reports don't match the descriptor, it goes back to boot;
+- a keyboard reports the keys held, and the changes become `vc_key()` calls; the firmware makes
+  a held key repeat (the last one pressed, after half a second, 30 times a second);
+- a generic HID gamepad (one whose report descriptor calls it a joystick or a gamepad) stays in
+  its report protocol and is read by its descriptor, the bytes going to `vc_pad()`.
 
-Still to come: the repeat of a held key (made by the firmware) and gamepads. USB runs in core
-0's main loop, under the bus's interrupt. (Written, not yet tried on the hardware.)
+USB runs in core 0's main loop, under the bus's interrupt. On the hardware (VIDMOUSE), a keyboard
+and a mouse work together through a hub, plugged in before power-on or hot-plugged; an 8BitDo
+SN30 Pro's reports reach the card in D-input mode. Still to come: XInput and PlayStation pads.
 
 **Limits, measured on the hardware.** A line takes 31.8us, about 10700 cycles at 336MHz.
 VIDTILES' page 2 (three tile layers and 128 sprites) looks right with core 0 helping. A few
