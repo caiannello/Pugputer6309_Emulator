@@ -47,6 +47,7 @@ public:
         // bytes as the card's pads have them.
         int pad = 0;
         bool present = false;
+        uint16_t vid = 0, pid = 0; // its USB IDs, which pick its button map
         uint8_t state[8] = {};
     };
     bool poll(Input& in);

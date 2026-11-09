@@ -448,8 +448,8 @@ TEST(vidcard_gamepads_are_read_only_bytes_in_the_address_space) {
     CHECK(k->addr[0] == VC_PAD_BASE + VC_PAD_SIZE + 3);
     // The settings on either side are still ordinary memory.
     vc_poke(k.c, VC_CFG_BASE + 0x3F, 0x5A);
-    vc_poke(k.c, VC_CFG_BASE + 0x60, 0xA5);
-    CHECK(vc_peek(k.c, VC_CFG_BASE + 0x3F) == 0x5A && vc_peek(k.c, VC_CFG_BASE + 0x60) == 0xA5);
+    vc_poke(k.c, VC_CFG_BASE + 0x120, 0xA5);
+    CHECK(vc_peek(k.c, VC_CFG_BASE + 0x3F) == 0x5A && vc_peek(k.c, VC_CFG_BASE + 0x120) == 0xA5);
     // A reset leaves them: they are the hardware's.
     vc_write(k.c, VC_CTRL, 0x80);
     CHECK(vc_peek(k.c, VC_PAD_BASE + VC_PAD_SIZE) == VC_PAD_CONNECTED);
@@ -463,6 +463,134 @@ TEST(vidcard_gamepads_are_read_only_bytes_in_the_address_space) {
     vc_pad(k.c, VC_PADS, s);
     vc_pad(k.c, -1, s);
     for (int i = 0; i < VC_PADS * VC_PAD_SIZE; ++i) CHECK(vc_peek(k.c, VC_PAD_BASE + i) == 0);
+}
+
+// 4-bit tiles, against a model of what they should be: every screen size, tile size, flip and
+// palette row, as the bottom layer (see-through shows the backdrop) and over another layer.
+TEST(vidcard_tile_rows_match_a_model_in_every_form) {
+    // Every combination: 640x480 or 320x240, 16x16 or 8x8, the top layer or the only one,
+    // 8 bits or 4, scrolled or not, and tiles that run off the end of the memory or don't.
+    for (int form = 0; form < 64; ++form) {
+        bool hires = form & 1, big = form & 2, upper = form & 4, bpp8 = form & 8, scrolled = form & 16, wraps = form & 32;
+        Card k;
+        uint32_t seed = 12345u + static_cast<uint32_t>(form);
+        auto rnd = [&]() { return seed = seed * 1664525u + 1013904223u, seed >> 16; };
+        int ts = big ? 16 : 8, scale = hires ? 1 : 2, row_bytes = bpp8 ? ts : ts / 2, tile_bytes = ts * row_bytes;
+        const uint32_t mask = VC_VRAM_SIZE - 1, solid = 0x20000, map0 = 0x4000, map1 = 0x8000;
+        const uint32_t tiles = wraps ? VC_VRAM_SIZE - 3 * static_cast<uint32_t>(tile_bytes) + static_cast<uint32_t>(row_bytes) / 2 : 0x10000;
+        std::memset(k->vram + map0, 0, 0x8000);
+        // Tile 0 all see-through; the rest with some pixels of 0.
+        for (int i = 0; i < tile_bytes; ++i) k->vram[(tiles + i) & mask] = 0;
+        for (int i = tile_bytes; i < tile_bytes * 8; ++i)
+            k->vram[(tiles + i) & mask] = static_cast<uint8_t>(rnd() & rnd() & rnd() | rnd() & 0x88);
+        std::memset(k->vram + solid, 0x11, 256); // the layer below, when there is one
+        uint32_t map = upper ? map1 : map0;
+        uint16_t e = 0;
+        int left = 0;
+        for (int i = 0; i < 64 * 64; ++i) { // (runs of the same cell, as maps have)
+            if (left) {
+                --left;
+            } else {
+                e = static_cast<uint16_t>(rnd() % 8 | (rnd() & 0xFC00));
+                left = static_cast<int>(rnd() % 5);
+            }
+            k->vram[map + 2 * i] = static_cast<uint8_t>(e >> 8);
+            k->vram[map + 2 * i + 1] = static_cast<uint8_t>(e);
+        }
+        int hs = scrolled ? ts + 3 : 0, vs = scrolled ? 5 : 0;
+        auto set_layer = [&](int n, uint32_t m, uint32_t t, int h, int v) {
+            uint8_t* l = k->cfg + VC_LAYER0 + VC_LAYER_SIZE * n;
+            std::memset(l, 0, VC_LAYER_SIZE);
+            l[VC_L_MODE] = static_cast<uint8_t>(VC_TILE | (hires ? 0x04 : 0) | (bpp8 ? 0x18 : 0x10) | (big ? 0x20 : 0));
+            l[VC_L_MAP] = 1 | 4;
+            l[VC_L_MAPBASE] = static_cast<uint8_t>(m >> 16), l[VC_L_MAPBASE + 1] = static_cast<uint8_t>(m >> 8), l[VC_L_MAPBASE + 2] = static_cast<uint8_t>(m);
+            l[VC_L_TILEBASE] = static_cast<uint8_t>(t >> 16), l[VC_L_TILEBASE + 1] = static_cast<uint8_t>(t >> 8), l[VC_L_TILEBASE + 2] = static_cast<uint8_t>(t);
+            l[VC_L_HSCROLL + 1] = static_cast<uint8_t>(h), l[VC_L_VSCROLL + 1] = static_cast<uint8_t>(v);
+        };
+        if (upper) set_layer(0, map0, solid, 0, 0);
+        set_layer(upper ? 1 : 0, map, tiles, hs, vs);
+        k->cfg[VC_DC_CTRL] = upper ? 0x03 : 0x01;
+        k->cfg[VC_DC_BACK] = 0;
+        auto color = [&](int i) {
+            return static_cast<uint16_t>(vc_peek(k.c, VC_PAL_BASE + 2 * i) << 8 | vc_peek(k.c, VC_PAL_BASE + 2 * i + 1));
+        };
+        const int under = !upper ? 0 : bpp8 ? 0x11 : 1;
+        uint16_t line[VC_WIDTH];
+        for (int y : {0, 5, 17, 33, 94}) {
+            vc_render_line(k.c, y, line);
+            int ly = (y / scale + vs) % (64 * ts);
+            bool same = true;
+            for (int x = 0; x < VC_WIDTH / scale; ++x) {
+                int mx = (x + hs) % (64 * ts); // (it wraps: 640 > 64 * 8)
+                int a = static_cast<int>(map) + 2 * ((ly / ts) * 64 + mx / ts);
+                int c = k->vram[a] << 8 | k->vram[a + 1];
+                int tx = mx % ts, ty = ly % ts;
+                if (c & 0x400) tx = ts - 1 - tx;
+                if (c & 0x800) ty = ts - 1 - ty;
+                uint32_t rowat = tiles + static_cast<uint32_t>((c & 0x3FF) * tile_bytes + ty * row_bytes);
+                int v, want_i;
+                if (bpp8) {
+                    v = k->vram[(rowat + tx) & mask];
+                    want_i = v;
+                } else {
+                    int b = k->vram[(rowat + tx / 2) & mask];
+                    v = tx & 1 ? b & 15 : b >> 4;
+                    want_i = (c >> 12) * 16 + v;
+                }
+                uint16_t want = color(v ? want_i : under);
+                for (int s = 0; s < scale; ++s) same = same && line[x * scale + s] == want;
+            }
+            CHECK(same);
+        }
+    }
+}
+
+TEST(vidcard_gamepad_maps_give_every_pad_the_same_buttons) {
+    Card k;
+    const uint8_t a_and_b[VC_PAD_SIZE] = {0, 0, 0x03, 0, 0, 0, 0, 0};
+    const uint8_t last[VC_PAD_SIZE] = {0, 0, 0, 0x80, 0, 0, 0, 0}; // its own button 16
+    auto pad_flags = [&](int n) { return vc_peek(k.c, VC_PAD_BASE + n * VC_PAD_SIZE + VC_PAD_FLAGS); };
+    auto btn1 = [&](int n) { return vc_peek(k.c, VC_PAD_BASE + n * VC_PAD_SIZE + VC_PAD_BTN1); };
+    auto btn2 = [&](int n) { return vc_peek(k.c, VC_PAD_BASE + n * VC_PAD_SIZE + VC_PAD_BTN2); };
+    auto id = [&](int n, int i) { return vc_peek(k.c, VC_PADID_BASE + n * VC_PAD_SIZE + i); };
+    // A pad nobody knows: its own numbers, and it says so.
+    vc_pad_id(k.c, 0, 0x1234, 0xABCD);
+    vc_pad(k.c, 0, a_and_b);
+    CHECK(pad_flags(0) == VC_PAD_CONNECTED && btn1(0) == 0x03 && btn2(0) == 0);
+    CHECK(id(0, VC_PADID_VID_H) == 0x12 && id(0, VC_PADID_VID_L) == 0x34);
+    CHECK(id(0, VC_PADID_PID_H) == 0xAB && id(0, VC_PADID_PID_L) == 0xCD);
+    CHECK(id(0, VC_PADID_RAW1) == 0x03 && id(0, VC_PADID_RAW2) == 0);
+    // The card's own list: an SN30 Pro's A and B are East and South.
+    vc_pad_id(k.c, 1, 0x2DC8, 0x6001);
+    vc_pad(k.c, 1, a_and_b);
+    CHECK(pad_flags(1) == (VC_PAD_CONNECTED | VC_PAD_MAPPED));
+    CHECK(btn1(1) == ((1 << VC_BTN_EAST) | (1 << VC_BTN_SOUTH)) && id(1, VC_PADID_RAW1) == 0x03);
+    // A map from the program, in the address space: button 1 is North, 16 is R3, 2 nothing.
+    uint8_t e[VC_PADMAP_SIZE] = {0x12, 0x34, 0xAB, 0xCD};
+    std::memset(e + 4, VC_BTN_NONE, 16);
+    e[4] = VC_BTN_NORTH;
+    e[4 + 15] = VC_BTN_R3;
+    for (int i = 0; i < VC_PADMAP_SIZE; ++i) vc_poke(k.c, VC_PADMAP_BASE + VC_PADMAP_SIZE * 3 + i, e[i]);
+    vc_pad(k.c, 0, a_and_b);
+    CHECK(pad_flags(0) == (VC_PAD_CONNECTED | VC_PAD_MAPPED) && btn1(0) == (1 << VC_BTN_NORTH) && btn2(0) == 0);
+    vc_pad(k.c, 0, last);
+    CHECK(btn1(0) == 0 && btn2(0) == (1 << (VC_BTN_R3 - 8)) && id(0, VC_PADID_RAW2) == 0x80);
+    // The user's map comes before the card's own.
+    e[0] = 0x2D, e[1] = 0xC8, e[2] = 0x60, e[3] = 0x01;
+    for (int i = 0; i < VC_PADMAP_SIZE; ++i) vc_poke(k.c, VC_PADMAP_BASE + i, e[i]);
+    vc_pad(k.c, 1, a_and_b);
+    CHECK(btn1(1) == (1 << VC_BTN_NORTH));
+    // What each pad is can't be written; a reset keeps it and the maps, and clears the rest.
+    vc_poke(k.c, VC_PADID_BASE, 0xEE);
+    CHECK(id(0, VC_PADID_VID_H) == 0x12);
+    vc_poke(k.c, VC_CFG_BASE + 0x120, 0x77);
+    vc_write(k.c, VC_CTRL, 0x80);
+    CHECK(id(0, VC_PADID_VID_H) == 0x12 && vc_peek(k.c, VC_PADMAP_BASE) == 0x2D);
+    CHECK(vc_peek(k.c, VC_CFG_BASE + 0x120) == 0);
+    // Unplugged: what it was goes too (the map stays, for when it's back).
+    vc_pad(k.c, 0, nullptr);
+    for (int i = 0; i < VC_PAD_SIZE; ++i) CHECK(id(0, i) == 0);
+    CHECK(vc_peek(k.c, VC_PADMAP_BASE + VC_PADMAP_SIZE * 3) == 0x12);
 }
 
 TEST(vidcard_pointer_puts_sprite_0_where_the_mouse_is_each_frame) {

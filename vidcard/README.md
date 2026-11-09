@@ -74,6 +74,8 @@ block: `TFM X+,Y` with Y at a `DATA` port (or `CMD`) sends W bytes, one every 3 
 | `$000000-$03FFFF` | video memory (256KB): everything the picture is made from |
 | `$040000-$04003F` | the display settings (below) |
 | `$040040-$04005F` | the gamepads, read only (see "Gamepads") |
+| `$040060-$04007F` | what each gamepad is, read only (see "Gamepads") |
+| `$040080-$04011F` | the gamepads' button maps; a reset keeps them (see "Gamepads") |
 | `$040200-$0403FF` | the palette: 256 colors, 2 bytes each, RGB565 (`RRRRRGGG GGGBBBBB`), high byte first |
 | `$800000-$FFFFFF` | the PSRAM (8MB): space for pictures, maps and sounds not on screen yet; `COPY` moves them |
 
@@ -204,17 +206,44 @@ would read the next register). `vidcard.d` names them `VC_PAD` and `PD_...`.
 
 | Offset | Name | |
 |---|---|---|
-| `+0` | `PD_FLAGS` | bit 7: connected. If it isn't, all 8 bytes read 0 |
+| `+0` | `PD_FLAGS` | bit 7: connected. If it isn't, all 8 bytes read 0. Bit 6 (`PD_MAPPED`): the buttons are the standard ones below |
 | `+1` | `PD_DPAD` | bit 0 up, 1 down, 2 left, 3 right |
-| `+2` | `PD_BTN1` | buttons 1-8, bit 0 is button 1 |
-| `+3` | `PD_BTN2` | buttons 9-16 |
+| `+2` | `PD_BTN1` | bit 0 `BT_SOUTH`, 1 `BT_EAST`, 2 `BT_WEST`, 3 `BT_NORTH`, 4 `BT_L`, 5 `BT_R`, 6 `BT_L2`, 7 `BT_R2` |
+| `+3` | `PD_BTN2` | bit 0 `BT_SELECT`, 1 `BT_START`, 2 `BT_HOME`, 3 `BT_L3`, 4 `BT_R3` (the stick clicks) |
 | `+4`, `+5` | `PD_LX`, `PD_LY` | the left stick: signed, -127 to 127, 0 in the middle; + is right and down |
 | `+6`, `+7` | `PD_RX`, `PD_RY` | the right stick, the same |
 
 The d-pad byte works on any pad: from its hat if it has one, otherwise from X and Y, which is
 what many simple pads' crosses are. Stick values close to the middle (within about 7) read 0, so
-a stick left alone stays still. Buttons are numbered as the pad numbers them, which differs from
-one model to another: a game should let the player choose.
+a stick left alone stays still.
+
+The face buttons are named by where they are, because the letters printed on them differ from one
+maker to another: `BT_SOUTH` is the one nearest the player. A game just reads these bits. USB says
+nothing about which button is which, so the card translates each pad's buttons through a map found
+by its USB vendor and product IDs: first the ones in the table below, which the `PADMAP` utility
+fills and saves in `/CMD/PADMAP.INI`, then a short list built into the card. A pad with no map has
+`PD_MAPPED` clear and its own buttons 1-16 in `PD_BTN1` and `PD_BTN2`.
+
+What each pad is, 8 read-only bytes at `$040060 + 8*n` (`VC_PADID`):
+
+| Offset | Name | |
+|---|---|---|
+| `+0` | `ID_VID` | its USB vendor ID, high byte first |
+| `+2` | `ID_PID` | its USB product ID |
+| `+4` | `ID_RAW1` | its own buttons 1-8, whatever its map does with them |
+| `+5` | `ID_RAW2` | its own buttons 9-16 |
+
+The maps, 8 entries of 20 bytes at `$040080` (`VC_PADMAP`): the vendor and product IDs (both 0: an
+empty entry), then for the pad's buttons 1 to 16 which standard button each is, numbered as the bits
+of `PD_BTN1` then `PD_BTN2` (0 South to 12 R3), or `$FF` for none. A change takes effect at the
+pad's next report. The maps stay through a card reset, but not a power cycle: until boot does it,
+running `PADMAP` and pressing Esc sends the saved ones to the card.
+
+`/CMD/PADMAP.INI` is text, one line a pad, the same 20 bytes in hex. A `;` starts a comment:
+
+```
+2DC8 6001  01 00 FF 03 02 FF 04 05 06 07 08 09 0A 0B 0C FF
+```
 
 Any change sets the input interrupt's flag (`ISR` bit 3). A reset leaves the pads alone.
 

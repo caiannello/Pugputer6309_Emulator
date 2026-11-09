@@ -297,6 +297,8 @@ void VideoOut::Impl::poll_pads() {
         in.present = there;
         if (there) {
             const JOYCAPSA& c = p.caps;
+            in.vid = c.wMid;
+            in.pid = c.wPid;
             int8_t lx = pad_axis(info.dwXpos, c.wXmin, c.wXmax), ly = pad_axis(info.dwYpos, c.wYmin, c.wYmax);
             in.state[VC_PAD_LX] = static_cast<uint8_t>(lx);
             in.state[VC_PAD_LY] = static_cast<uint8_t>(ly);

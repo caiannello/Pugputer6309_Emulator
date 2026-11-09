@@ -6,9 +6,11 @@
 ;
 ;   Esc            back to the shell
 ;
-; A line of text for each pad: its d-pad (U D L R), its 16 buttons (1-9, 0, A-F
-; for buttons 1 to 16: a dot if it isn't held), and its two sticks. They are
-; bytes in the card's address space, read through data port 0 like any other.
+; A line of text for each pad: its d-pad (U D L R), its buttons (a dot if one
+; isn't held), and its two sticks. They are bytes in the card's address space,
+; read through data port 0 like any other. BTN: the buttons are the standard
+; ones (named along the bottom). RAW: this pad has no map yet, so they are its
+; own 1-16 (1-9, 0, A-F): PADMAP sets one up.
 ;
 ;   ASM -f com vidpad.asm        makes VIDPAD.COM
 ;------------------------------------------------------------------------------
@@ -25,6 +27,16 @@ START       LDA  #$80
             CLRB
             JSR  TEXTAT
             LDX  #T_TITLE
+            JSR  WORDS
+            CLRA
+            LDB  #10
+            JSR  TEXTAT
+            LDX  #T_KEY1
+            JSR  WORDS
+            CLRA
+            LDB  #11
+            JSR  TEXTAT
+            LDX  #T_KEY2
             JSR  WORDS
 ;------------------------------------------------------------------------------
 ; Each frame: all the pads' bytes, then a line for each, then the keys.
@@ -68,11 +80,17 @@ HAVEPAD     LDA  PD_DPAD,Y
             LDX  #L_DPAD
             LDE  #4
             JSR  FLAGS
+            LDX  #T_RAW         ; the pad's own numbers, or the standard names
+            LDU  #L_RAW
+            LDA  PD_FLAGS,Y
+            BITA #PD_MAPPED
+            BEQ  HAVEPAD1
             LDX  #T_BTN
-            JSR  WORDS
+            LDU  #L_BTN
+HAVEPAD1    JSR  WORDS
             LDA  PD_BTN1,Y
             STA  TMP
-            LDX  #L_BTN
+            TFR  U,X
             LDE  #8
             JSR  FLAGS
             LDA  PD_BTN2,Y      ; (X has gone on to the next eight labels)
@@ -171,13 +189,17 @@ TMP         FCB  0
 PADS        RMB  32         ; the four pads' bytes, as of this frame
 
 L_DPAD      FCC  "UDLR"
-L_BTN       FCC  "1234567890ABCDEF"
+L_RAW       FCC  "1234567890ABCDEF"
+L_BTN       FCC  "SEWNLRlr-+H<>xyz"
 
 T_TITLE     FCN  " GAMEPADS: PRESS BUTTONS, MOVE THE STICKS    ESC:QUIT "
+T_KEY1      FCN  " BTN: SEWN FACE BUTTONS  LR SHOULDERS  lr LOWER SHOULDERS  - SELECT  + START"
+T_KEY2      FCN  "      H HOME  <> STICK CLICKS    RAW: NO MAP YET, RUN PADMAP"
 T_PAD       FCN  " PAD "
 T_COLON     FCN  ": "
 T_NONE      FCN  "NOT CONNECTED"
 T_BTN       FCN  " BTN "
+T_RAW       FCN  " RAW "
 T_LX        FCN  " LX "
 T_LY        FCN  " LY "
 T_RX        FCN  " RX "
