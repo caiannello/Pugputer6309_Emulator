@@ -202,8 +202,9 @@ to where the cursor really is:
 
 ## Statements for the video card
 
-The video card (`../vidcard/README.md`) is an output device beside the console: what these
-draw appears in the emulator's video window, while `PRINT` and `INPUT` stay on the terminal.
+The video card (`../vidcard/README.md`) draws on the emulator's video window. When it is also
+the console (the usual case), `PRINT` and `INPUT` are on its text screen, in front of the bitmap
+in `SCREEN 1` and `2`; with `--no-video` they stay on the terminal.
 
 | Statement | |
 |---|---|

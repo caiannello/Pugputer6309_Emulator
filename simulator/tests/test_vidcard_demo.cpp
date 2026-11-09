@@ -163,9 +163,9 @@ TEST(vidcard_demo_vidtext_shows_the_text_layers) {
     }
     CHECK(d.cell(VC_RESET_TEXT_MAP, 4, 3)[0] == 0xC9 && d.cell(VC_RESET_TEXT_MAP, 37, 20)[0] == 0xBC);
     CHECK(d.cell(VC_RESET_TEXT_MAP, 37, 10)[0] == 0xBA && d.cell(VC_RESET_TEXT_MAP, 76, 3)[0] == 0xBB);
-    // The ID and version the card gave, "V" and "1.1".
+    // The ID and version the card gave, "V" and "1.2".
     CHECK(d.cell(VC_RESET_TEXT_MAP, 23, 26)[0] == 'V' && d.cell(VC_RESET_TEXT_MAP, 23, 26)[1] == 226);
-    CHECK(d.cell(VC_RESET_TEXT_MAP, 34, 26)[0] == '1' && d.cell(VC_RESET_TEXT_MAP, 36, 26)[0] == '1');
+    CHECK(d.cell(VC_RESET_TEXT_MAP, 34, 26)[0] == '1' && d.cell(VC_RESET_TEXT_MAP, 36, 26)[0] == '2');
     // The marquee moves; its letters show, doubled, at rows 22-23.
     uint16_t hs = be16(d.layer(1) + VC_L_HSCROLL);
     CHECK(hs > 60);

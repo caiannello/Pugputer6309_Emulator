@@ -65,7 +65,7 @@ endif()
 
 # The video card (../vidcard/core): portable C that the card's firmware is to share, so it is
 # built as it would be there -- C99, no dependencies.
-add_library(vidcard_core STATIC ../vidcard/core/vc.c ../vidcard/core/vc_font.c)
+add_library(vidcard_core STATIC ../vidcard/core/vc.c ../vidcard/core/vc_term.c ../vidcard/core/vc_font.c)
 target_include_directories(vidcard_core PUBLIC ../vidcard/core)
 set_target_properties(vidcard_core PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
 

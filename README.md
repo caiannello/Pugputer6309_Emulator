@@ -57,7 +57,7 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
 | `$4000-$7FFF` | RAM bank 1 (the shell loads at `$4000`) |
 | `$8000-$BFFF` | RAM bank 2 |
 | `$C000-$EFFF` | RAM bank 3 (BASIC.COM loads at `$BC00`, and starts at `$C000`) |
-| `$F000-$FEFF` | BIOS ROM (about 3.1KB of the 3.8KB used) |
+| `$F000-$FEFF` | BIOS ROM (about 3.5KB of the 3.8KB used) |
 | `$FF00-$FFEF` | I/O: the video card `$FF80-$FF9F`, SD storage `$FFD8`, OPL3 music `$FFE0`, UART `$FFE8`, bank registers `$FFEC-$FFEF`; addresses are reserved for a V9958 VDP (`$FFE4`) and a VIA (`$FFB0`) |
 | `$FFF0-$FFFF` | Interrupt vectors |
 
@@ -66,7 +66,9 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
   (1 MB are populated in the emulator, to match my current HW.)
   The BIOS probes how much RAM is installed and hands pages out through `B_PAGE_ALLOC`; bank 0
   stays fixed and applications may remap banks 1-3.
-- **Console.** A serial console: an R65C51 UART at 19200 baud, 8N1.
+- **Console.** The video card's ANSI terminal and USB keyboard, when the card is there (the
+  emulator's video window, by default). Without it, a serial console: an R65C51 UART at 19200
+  baud, 8N1, which also has the boot banner, crash messages and the S-record loader.
 - **Storage.** An SD card holding a FAT16 volume. Today the card is an idealized block device
   (write a block number, stream 512 bytes); the real SPI/transport hardware isn't settled yet.
 - **Clock.** A 16 Hz NMI tick keeps the time.
@@ -207,16 +209,32 @@ result:
 simulator/build/tools/basic309_sdboot_demo
 ```
 
-In the terminal, **Ctrl+\** quits the emulator (Ctrl+C goes to the Pugputer). `reinit_disk.sh`
+The console is the video window; in the terminal it was started from, **Ctrl+\** quits the
+emulator (Ctrl+C goes to the Pugputer). `reinit_disk.sh`
 rebuilds the firmware and makes a fresh `basic309/disk.img`, like `reinit_disk.bat`.
 
 `make_release.sh` builds the Linux binary release
 (`dist/Pugputer6309-demo-<version>-linux-x64.tar.gz`, the version taken from `make_release.bat`),
 with the emulator linked fully statically so it runs on any x86-64 Linux.
 
+### Choosing the console
+
+The emulator starts like a Pugputer with its video card: the machine's console is the video
+window, the terminal it was started from shows only the boot banner and crash messages, and
+closing the window quits.
+
+| | The machine | Its console |
+|---|---|---|
+| (default) | CPU card, video card, SD card, USB | the video window |
+| `--no-video` | the same, with no window | the terminal, or a COM port with `--com` |
+| `--no-card` | the CPU card alone: no video, SD or USB, so no disk | the terminal, or a COM port with `--com`, at the S-record loader |
+
+If no window can open (no display, or `pugputer-video` wasn't built), the emulator carries on as
+with `--no-video`.
+
 ### Using a COM port instead of the console
 
-`basic309_sdboot_demo.exe --com COM4` connects the emulated UART to a Windows COM port, so you
+`basic309_sdboot_demo.exe --no-video --com COM4` connects the emulated UART to a Windows COM port, so you
 can use a real terminal program (PuTTY, Tera Term, a retro-terminal emulator...) as the
 console, or wire the emulator to other software. You need a *virtual serial-port pair*, such as
 [com0com](https://com0com.sourceforge.net): the emulator opens one end (say `COM4`) and the

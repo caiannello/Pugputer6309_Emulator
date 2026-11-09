@@ -57,6 +57,10 @@ public:
 
     // The window is open (it has been opened, and not closed since).
     bool showing() const;
+    // It was open, or tried to open, and isn't now.
+    bool gone() const { return opened_ && closed(); }
+    // Whether a window can be expected to open at all; if not, why, in `why`.
+    static bool can_open(const char** why);
 
     struct Impl;
 

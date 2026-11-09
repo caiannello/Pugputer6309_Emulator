@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -359,6 +360,8 @@ VideoOut::~VideoOut() {
 
 bool VideoOut::closed() const { return impl_->closed; }
 
+bool VideoOut::can_open(const char**) { return true; }
+
 void VideoOut::open() {
     impl_->scale = scale_;
     impl_->thread = std::thread([this] { impl_->run(); });
@@ -416,6 +419,18 @@ std::string helper_path() {
 VideoOut::VideoOut() : impl_(new Impl) {}
 
 VideoOut::~VideoOut() { impl_->finish(); }
+
+bool VideoOut::can_open(const char** why) {
+    if (access(helper_path().c_str(), X_OK) != 0) {
+        *why = "pugputer-video isn't beside the emulator (it is built when SDL2's development files are installed)";
+        return false;
+    }
+    if (!std::getenv("DISPLAY") && !std::getenv("WAYLAND_DISPLAY")) {
+        *why = "there is no display";
+        return false;
+    }
+    return true;
+}
 
 bool VideoOut::closed() const { return impl_->closed; }
 

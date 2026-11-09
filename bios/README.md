@@ -19,7 +19,7 @@ isn't obvious from there.
 | `helpers.asm` | string helpers, the ring buffer |
 
 RAM below `EndOfVars` (`pugbios.map`, currently `$05AE`) is the BIOS's; DOS loads at `DOS_LOAD`
-(`$0600`). About 650 bytes of the ROM code area are free.
+(`$0600`). About 380 bytes of the ROM code area are free.
 
 ## Which devices are there
 
@@ -28,9 +28,32 @@ console's three aliases and the UART always (`$010F`), and the video card (`F_VD
 `$030F`) when the BIOS found it at boot. It looks for the card with reads only, of its last two
 registers: `ID` (`$FF9E`) must read `'V'` and `VERSION` (`$FF9F`) `$11` or later. A write would
 wake the emulator's video window. With no card there, a read gets whatever the bus floats at on
-the machine, or the RAM underneath in the emulator, not that pair. The card has no character
-driver yet: its device takes the null device's routines (nothing to read, writes dropped).
+the machine, or the RAM underneath in the emulator, not that pair.
 BASIC's `SCREEN` asks `B_DQUERY` and stops with `?NV ERROR` (34) when the card isn't there.
+
+## The console
+
+| At power-on | Console | Then |
+|---|---|---|
+| No video card | the UART | the S-record loader (the SD card is on the video card) |
+| The card, a bootable SD card | the card | DOS |
+| The card, no bootable SD card | the card | "Insert a bootable SD card and press a key.", with the S-record loader open on the UART meanwhile |
+
+`DEV_VC_DETECT` makes the card the console when its `STATUS` register says so (bit 0: the firmware
+always does, and the emulator when it has a window: `../vidcard/README.md`, "The console"). It
+then resets the card and points `F_STDOUT`, `F_STDERR` and `F_STDIN` at it, and `F_VDP` is a real
+device: output goes to the card's ANSI terminal, which does the escape sequences itself, so the
+ROM needs only a few bytes for it. A card that doesn't say so takes the null device's routines
+(nothing to read, writes dropped), and the console stays on the UART.
+
+- **Input** is the card's keyboard, or else what comes in on the UART: both work at once, except
+  that while a program has taken the card's keys (`INCTRL` bit 1) only the UART does.
+- **The boot banner, the "no disk" message, a failed boot and a crash report** go to both the UART
+  and the screen (`CON_PUTS`). Everything else goes to the screen only: the UART at 19200 baud
+  would take over a second for a full screen. A crash resets the card first, so the message can
+  be seen whatever the program had on the display.
+- **A key at the "no disk" message** starts the boot again, from the reset. It's the card's
+  keyboard only: what comes in on the UART is for the S-record loader.
 
 ## At power-on
 

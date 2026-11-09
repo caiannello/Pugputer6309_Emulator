@@ -1,8 +1,8 @@
 # EDIT, the text editor
 
-`EDIT.COM` (`edit.asm`) is a full-screen text editor for the serial console, modelled on
+`EDIT.COM` (`edit.asm`) is a full-screen text editor for the console, modelled on
 **GNU nano 2.2** with only its elementary functions. It needs an ANSI (VT100 / xterm) terminal:
-Tera Term, PuTTY, Windows Terminal, or the emulator's own console window.
+the video card's, Tera Term, PuTTY, Windows Terminal, or the emulator's own console window.
 
 ```
 EDIT [file]

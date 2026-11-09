@@ -50,6 +50,7 @@ uint64_t VideoDevice::command_cycles(uint8_t opcode, uint32_t work) const {
         {122920, 229},  // TRIANGLE
         {450, 0},       // FONT
         {450, 97},      // CHAR
+        {450, 0},       // TERM
     };
     const Cost& k = kCost[opcode < VC_C_COUNT ? opcode : 0];
     return static_cast<uint64_t>((k.a + k.b * work) * 1e-9 * cpu_hz_ + 0.5);
@@ -135,6 +136,8 @@ void VideoDevice::reset() {
 void VideoDevice::mouse_to(int x, int y, uint8_t buttons) { vc_mouse_to(card_.get(), x, y, buttons); }
 
 void VideoDevice::mouse_wheel(int clicks) { vc_mouse_wheel(card_.get(), clicks); }
+
+void VideoDevice::set_console(bool on) { card_->console = on ? 1 : 0; }
 
 void VideoDevice::key(uint8_t usage, bool down) { vc_key(card_.get(), usage, down ? 1 : 0); }
 

@@ -423,7 +423,8 @@ basic309_sdboot_demo --com COM10         # bridge the UART to a COM port instead
 basic309_sdboot_demo --com pty           # (Linux) ... or to a new pseudo-terminal (or --com /dev/ttyUSB0)
 basic309_sdboot_demo --bios x.s19 --disk y.img
 basic309_sdboot_demo --no-sound          # the OPL3 makes no sound (and never slows the emulator)
-basic309_sdboot_demo --no-video          # no window for the video card
+basic309_sdboot_demo --no-video          # no window: the UART is the console
+basic309_sdboot_demo --no-card           # no video/SD/USB card: the CPU card alone
 basic309_sdboot_demo --turbo             # the video card doesn't hold the emulator to real time
 basic309_sdboot_demo --scale 2           # the video card's window at 1280x960
 basic309_demo                            # BASIC copied into RAM and started directly, no disk (LOAD/SAVE/OPEN unavailable)

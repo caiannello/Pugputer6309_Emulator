@@ -42,12 +42,13 @@ VC_KEY      equ  VC_BASE+$1B ; read: the next key event's USB usage code (0: non
 VC_KEYCHAR  equ  VC_BASE+$1C ; its character (0: none); bit 7 set: a release
 VC_KEYMODS  equ  VC_BASE+$1D ; modifier keys held now (VC_MOD_...)
 VC_ID       equ  VC_BASE+$1E ; reads 'V'
-VC_VERSION  equ  VC_BASE+$1F ; reads $11 (1.1; 1.0 had no input registers)
+VC_VERSION  equ  VC_BASE+$1F ; reads $12 (1.2; 1.1 had no terminal, 1.0 no input registers)
 
 VC_S_VBLANK equ  $80
 VC_S_BUSY   equ  $40
 VC_S_FULL   equ  $20
 VC_S_KEY    equ  $10        ; a key event is waiting in VC_KEY
+VC_S_CONSOLE equ $01        ; the card is the machine's console
 VC_I_VSYNC  equ  $01        ; vertical blank begins (line 480)
 VC_I_LINE   equ  $02        ; the line in VC_LINE begins
 VC_I_CMD    equ  $04        ; the command queue has emptied
@@ -229,3 +230,4 @@ C_BLIT      equ  $0C        ; src:3 stride:2 w h x y flags:1 (bit 0: 0 is clear)
 C_TRIANGLE  equ  $0D        ; x0 y0 x1 y1 x2 y2
 C_FONT      equ  $0E        ; addr:3 height:1
 C_CHAR      equ  $0F        ; x y char:1
+C_TERM      equ  $10        ; char:1, the next byte for the terminal (ANSI)

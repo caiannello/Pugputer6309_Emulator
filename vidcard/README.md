@@ -43,7 +43,7 @@ card").
 | `$05` | `DATA0` | reads or writes the byte at `ADDR0`, then steps |
 | `$06-$0B` | `ADDR1`, `INC1`, `DATA1` | data port 1, the same |
 | `$0C` | `CTRL` | write `$80`: reset the card (see "At reset") |
-| `$0D` | `STATUS` | read: bit 7 in vertical blank, bit 6 commands still running, bit 5 command queue full, bit 4 a key event waiting |
+| `$0D` | `STATUS` | read: bit 7 in vertical blank, bit 6 commands still running, bit 5 command queue full, bit 4 a key event waiting (the console: a byte to read), bit 0 the card is the machine's console |
 | `$0E` | `IEN` | interrupt enables: bit 0 vertical blank, 1 line, 2 commands done, 3 input |
 | `$0F` | `ISR` | interrupt flags, the same bits; writing 1s clears them. `/IRQ` is low while `IEN AND ISR` isn't 0 |
 | `$10-$11` | `LINE` H, L | read: the line being drawn (0-524; 480-524 are vertical blank). Write: the line for the line interrupt |
@@ -55,10 +55,10 @@ card").
 | `$19` | `MOUSEB` | read: buttons, bit 0 left, 1 right, 2 middle; bit 7 a mouse has been seen |
 | `$1A` | `WHEEL` | read: wheel clicks since the last read, signed (+ away from you) |
 | `$1B` | `KEY` | read: takes the next key event off the queue, and gives its USB usage code (0: none) |
-| `$1C` | `KEYCHAR` | read: that event's character (0: none); bit 7 set if it was a release |
+| `$1C` | `KEYCHAR` | read: that event's character (0: none); bit 7 set if it was a release. While the card is the console and `INCTRL` bit 1 is clear: takes the next byte typed (see "The console") |
 | `$1D` | `KEYMODS` | read: the modifier keys held now (USB's modifier byte: bit 0 left Ctrl, 1 left Shift, 2 left Alt, 3 left GUI, 4-7 the right ones) |
 | `$1E` | `ID` | reads `'V'` (`$56`) |
-| `$1F` | `VERSION` | reads `$11` (1.1; 1.0 had no `$14-$1D`) |
+| `$1F` | `VERSION` | reads `$12` (1.2; 1.1 had no terminal, 1.0 no `$14-$1D`) |
 
 The rest read 0. The multi-byte registers are big-endian, so `STD` and `LDD` work on them:
 `LDA #bank : STA VC_ADDR0 : LDX #addr : STX VC_ADDR0M` points port 0 at `bank:addr`.
@@ -185,16 +185,18 @@ Ctrl+A is 1), 0 for keys like the arrows, with bit 7 set for a release. `KEYMODS
 modifiers held now. `STATUS` bit 4 says an event is waiting. A full queue loses new events;
 writing `$80` to `INCTRL` empties it.
 
-**Whose keys.** In the emulator, keys typed into the video window go to the UART, as the
-terminal's do, until the program sets `INCTRL` bit 1: then they go to the card's queue (and the
+**Whose keys.** With the card as the console, keys go to its terminal until the program sets
+`INCTRL` bit 1 ("The console"), on the card and in the emulator alike. Without it (`--no-video`,
+or a window that can't open) in the emulator, keys typed into the video window go to the UART, as
+the terminal's do, until the program sets the bit: then they go to the card's queue (and the
 UART sees none of them). A program that takes them should clear the bit before it ends (or
 reset the card, which does). If the window is closed (or there is none, `--no-video`) while a
 program takes the keys, the terminal's keys become the card's instead -- each character as the
 key a US keyboard would press for it, Shift and Ctrl with it, and the arrows and the like from
 their escape sequences -- so the program can still be told to stop. The window also lets go of
 the mouse's buttons when it loses the focus, so a drag that ends in another window doesn't stay
-held. On the card, a USB keyboard's keys always go to the queue, and the
-UART's are the terminal's.
+held. On the card, the UART's keys are the terminal program's, and go to the BIOS as well as
+the keyboard's.
 
 A reset (`CTRL` `$80`) clears `INCTRL` and the queue; it leaves the mouse where it is.
 
@@ -276,6 +278,7 @@ PSRAM), clipped to its edges, in the current **color**.
 | `$0D` | TRIANGLE | x0, y0, x1, y1, x2, y2 | filled |
 | `$0E` | FONT | addr 3, height 1 | the font `CHAR` draws with |
 | `$0F` | CHAR | x, y, char 1 | a character's pixels in the color (the rest untouched) |
+| `$10` | TERM | char 1 | the next byte for the terminal (see "The console") |
 
 An unknown opcode is ignored. `STATUS` bit 6 is set while commands are queued or running: wait
 for it to clear before reading back what they drew, or before changing memory they may still use.
@@ -295,6 +298,44 @@ After power-on or a write of `$80` to `CTRL`:
 
 So text can go on the screen right away: port 0 to `$038000 + (row*128 + col)*4`, then the
 character, its color, its background, 0.
+
+## The console
+
+The card can be the machine's console: an ANSI (VT100 / xterm) terminal on that 80x30 text
+screen, with the USB keyboard. `STATUS` bit 0 says the BIOS should use it that way. The firmware
+always sets it; the emulator does when it has a window for the picture (`vc_card.console`).
+
+**Output** is the `TERM` command, one per byte (`LDA #C_TERM : STA VC_CMD : LDA char : STA
+VC_CMD`), so it keeps its place among the other commands. It understands:
+
+- `CR`, `LF` (and `VT`, `FF`), `BS`, `TAB`; characters from `$80` up show the font's glyphs;
+- moving: `ESC [` `A B C D E F G H d f`, and `ESC [ s` / `u`, `ESC 7` / `8`;
+- erasing and editing: `J K X L M @ P`, scrolling `S T`, the scroll region `r`, `ESC D`, `E`, `M`;
+- colors, `m`: 0, 1, 2, 7, 22, 27, 30-37, 39, 40-47, 49, 90-97, 100-107, `38;5;n` and `48;5;n`,
+  and `38;2;r;g;b` and `48;2;r;g;b`, which become the nearest of the 256 colors;
+- questions: `ESC [ 6 n` (where the cursor is, how EDIT finds the screen's size), `5 n`, `c`;
+- `ESC [ ?` modes: 7 (wrap), 25 (the cursor), and 47, 1047 and 1049 (the alternate screen);
+- `ESC c` starts again. Anything else is read to its end and ignored.
+
+The cursor is an underscore that blinks about once a second, painted over the finished picture
+(it never touches video memory), once something has been printed since the reset, and only while
+a text layer shows that screen, unscrolled. While a program has the alternate screen, the normal
+one is kept in video memory at `$03C000-$03E57F`. Commands run a little after they are sent, so
+what a program reads back from the text screen may be behind what it just printed: wait for
+`STATUS` not to say busy.
+
+A card reset (`CTRL` `$80`) also resets the terminal: cursor home, normal colors, a blank
+screen, the keys waiting dropped. BASIC's `SCREEN` and the demos do that, so their text starts at
+the top. Everything on the screen comes from the same map, so `PRINT` and `TPRINT` share it, and
+the text layer in front of a `SCREEN 1` or `2` bitmap shows both.
+
+**Input.** While the card is the console and `INCTRL` bit 1 is clear, a key pressed doesn't go
+in the queue of events: it becomes the bytes a terminal would send (arrows `ESC [ A` ... `D`, Home
+`ESC [ H`, End `ESC [ F`, Insert, Delete, PgUp, PgDn `ESC [ 2 ~`, `3 ~`, `5 ~`, `6 ~`, F1-F4 `ESC O
+P` ... `S`, F5-F12 `ESC [ 15 ~` ..., Alt+key as Esc then the key). Those, and the terminal's
+answers, wait in a 64-byte queue: `STATUS` bit 4 says there's one, and each read of `KEYCHAR`
+takes one. A program that wants the keys themselves sets `INCTRL` bit 1, as it always has, and then
+gets the queue of events.
 
 ## Programming it
 

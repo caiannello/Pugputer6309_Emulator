@@ -7,7 +7,7 @@ echo 8 data bits, no parity, 1 stop bit. See README.md.
 echo.
 set /p PORT=Which COM port should the emulator use (for example COM4)? 
 if "%PORT%"=="" exit /b 1
-"%~dp0pugputer.exe" --com %PORT%
+"%~dp0pugputer.exe" --no-video --com %PORT%
 echo.
 echo The emulator has stopped.
 pause

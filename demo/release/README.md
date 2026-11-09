@@ -71,8 +71,11 @@ If you want a real terminal program (PuTTY, Tera Term, ...) as the console:
 3. Open your terminal program on the other end (`COM5`) at **19200 baud, 8 data bits, no parity,
    1 stop bit**, and set Enter to send CR.
 
-The command-line form is `pugputer.exe --com COM4`; `pugputer.exe --help` lists the options
-(`--bios` and `--disk` select other images).
+The command-line form is `pugputer.exe --no-video --com COM4`; `pugputer.exe --help` lists the
+options (`--bios` and `--disk` select other images). `--no-video` is what puts the console on the
+UART: without it, the console is the video window, and the UART has only the boot banner and any
+crash message. `--no-card` leaves the video, SD and USB card out altogether, as on the CPU card
+alone: there is no disk, and the UART has the S-record loader.
 
 ## What is in this folder
 
@@ -175,7 +178,7 @@ in `/ASM/VIDEO/VIDCARD.TXT`.
 
 While the window is open, the emulator runs at the real machine's speed (60 frames a second);
 `pugputer --turbo` lets it run flat out, `--scale 2` doubles the window, and `--no-video` does
-without it.
+without it, putting the console in the terminal instead.
 
 ## Other commands
 

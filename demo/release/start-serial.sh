@@ -6,6 +6,6 @@ echo "pseudo-terminal that a terminal program (screen, picocom, minicom, ...) ca
 echo "19200 baud, 8 data bits, no parity, 1 stop bit. See README.md."
 echo
 read -r -p "Serial device (for example /dev/ttyUSB0), or Enter for a pseudo-terminal: " PORT
-"$(dirname "$0")/pugputer" --com "${PORT:-pty}"
+"$(dirname "$0")/pugputer" --no-video --com "${PORT:-pty}"
 echo
 echo "The emulator has stopped."

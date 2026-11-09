@@ -63,7 +63,7 @@ int count_set(Card& k, int w, int h) {
 
 TEST(vidcard_resets_to_a_blank_text_screen_with_the_xterm_palette) {
     Card k;
-    CHECK(vc_read(k.c, VC_ID) == 'V' && vc_read(k.c, VC_VERSION) == 0x11);
+    CHECK(vc_read(k.c, VC_ID) == 'V' && vc_read(k.c, VC_VERSION) == 0x12);
     CHECK(k.color(0) == 0x0000 && k.color(9) == 0xF800 && k.color(15) == 0xFFFF);
     CHECK(k.color(16) == 0x0000 && k.color(196) == 0xF800 && k.color(21) == 0x001F);
     CHECK(k.color(244) == 0x8410); // gray 128

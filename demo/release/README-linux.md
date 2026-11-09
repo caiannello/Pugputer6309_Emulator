@@ -197,7 +197,7 @@ in `/ASM/VIDEO/VIDCARD.TXT`.
 
 While the window is open, the emulator runs at the real machine's speed (60 frames a second);
 `./pugputer --turbo` lets it run flat out, `--scale 2` doubles the window, and `--no-video` does
-without it. The window is `pugputer-video`, beside `pugputer`; it needs the SDL2 library
+without it, putting the console in the terminal instead. The window is `pugputer-video`, beside `pugputer`; it needs the SDL2 library
 (`sudo apt install libsdl2-2.0-0` if it isn't there already). Without it, or without a display,
 the emulator says so and goes on without the window.
 

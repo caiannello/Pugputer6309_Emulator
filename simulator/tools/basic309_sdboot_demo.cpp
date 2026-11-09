@@ -12,7 +12,8 @@
 //   basic309_sdboot_demo --bios path\to.s19  -- load a different BIOS image
 //   basic309_sdboot_demo --disk path\to.img  -- load a different disk image
 //   basic309_sdboot_demo --no-sound          -- keep the OPL3 quiet
-//   basic309_sdboot_demo --no-video          -- no window for the video card
+//   basic309_sdboot_demo --no-video          -- no window: the card and SD card stay, this console is the console
+//   basic309_sdboot_demo --no-card           -- no video/SD/USB card at all: the bare CPU card
 //   basic309_sdboot_demo --turbo             -- don't hold the video card to real time
 //   basic309_sdboot_demo --scale N           -- the video window N times 640x480
 //   basic309_sdboot_demo --help
@@ -21,7 +22,13 @@
 // next to the executable first (that is how the binary release is laid out), and
 // then at the paths this build was configured with (the source tree).
 //
-// In console mode the console acts as an ANSI terminal both ways, like the ones a
+// The machine's console is the video window by default, as on a real Pugputer with its video
+// card: the BIOS uses the card's ANSI terminal and keyboard, and this console shows only the
+// boot banner and crash messages (and what's typed in it still reaches the machine). With no
+// window to use (--no-video, or none can open) or no card (--no-card), the console is the
+// UART: this console, or a COM port with --com.
+//
+// When this console is the machine's console, it acts as an ANSI terminal both ways, like the ones a
 // real Pugputer is used from: escape sequences the machine sends are carried out
 // (EDIT.COM draws its screen with them, and asks the terminal's size), and keys
 // arrive as a terminal sends them -- arrows and function keys as escape sequences,
@@ -35,9 +42,9 @@
 // The video card is at $FF80-$FF9F (pugputer/video_device.hpp, vidcard/README.md). Its
 // picture opens in a window (video_out.hpp) when a program first uses the card; from then
 // on the emulator keeps to the real machine's speed, 60 frames a second, unless --turbo.
-// Keys typed into the window go to the UART, just as the console's do -- unless the program
-// has asked for them (the card's VC_IN_CTRL bit 1), when they go to the card's key queue
-// instead. The window's mouse is the card's mouse, and when the program shows its own pointer
+// Keys typed into the window go to the card's terminal when the card is the console, or else
+// to the UART, just as the console's do -- unless the program has asked for them (the card's
+// VC_IN_CTRL bit 1), when they go to the card's key queue instead. The window's mouse is the card's mouse, and when the program shows its own pointer
 // (VC_IN_CTRL bit 0) the PC's is hidden over the window. If the window is closed (or there is
 // none) while a program takes the card's keys, the console's keys become the card's.
 #ifdef _WIN32
@@ -138,13 +145,17 @@ void usage() {
         "  --bios FILE      BIOS image, Motorola S-record (default: pugbios.s19 beside this program)\n"
         "  --disk FILE      FAT16 disk image (default: disk.img beside this program)\n"
         "  --no-sound       no sound from the OPL3 music chip (and no slowing to real time for it)\n"
-        "  --no-video       no window for the video card\n"
+        "  --no-video       no window: the video and SD card stay, and the UART (this console, or\n"
+        "                   --com) is the machine's console\n"
+        "  --no-card        no video/SD/USB card at all, like the CPU card alone: no disk, and the\n"
+        "                   UART (this console, or --com) has the S-record loader\n"
         "  --turbo          run flat out even while the video card is in use (it is held to the\n"
         "                   real machine's speed, 60 frames a second, otherwise)\n"
         "  --scale N        the video window at N times 640x480 (default 1; it can be resized)\n"
         "  --help           this text\n"
         "\n"
-        "In console mode, type at the prompt; %s quits.\n",
+        "The machine's console is the video window unless --no-video or --no-card says otherwise.\n"
+        "%s, or closing the window while it is the console, quits.\n",
         kQuitKey);
 }
 
@@ -357,6 +368,7 @@ int main(int argc, char** argv) {
     std::string disk_path = find_default("disk.img", DISK_IMG_DEFAULT);
     bool sound = true;
     bool video = true;
+    bool card = true;
     bool turbo = false;
     int scale = 1;
     for (int i = 1; i < argc; ++i) {
@@ -373,6 +385,8 @@ int main(int argc, char** argv) {
             sound = false;
         } else if (std::strcmp(argv[i], "--no-video") == 0) {
             video = false;
+        } else if (std::strcmp(argv[i], "--no-card") == 0) {
+            card = false;
         } else if (std::strcmp(argv[i], "--turbo") == 0) {
             turbo = true;
         } else if (std::strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
@@ -392,16 +406,19 @@ int main(int argc, char** argv) {
     bios_rom.load(bios_image.data() + kBiosBase, kBiosSize);
 
     SdCardDevice sdcard;
-    if (!sdcard.open(disk_path)) {
+    if (!card) {
+        std::printf("No video/SD/USB card (--no-card): no disk.\n");
+    } else if (!sdcard.open(disk_path)) {
         std::fprintf(stderr, "Failed to open disk image '%s' (is it next to the program? see --help)\n", disk_path.c_str());
         return 1;
+    } else {
+        std::printf("Attached disk image %s\n", disk_path.c_str());
     }
-    std::printf("Attached disk image %s\n", disk_path.c_str());
 
     SystemBus bus; // RAM starts entirely zeroed
     UartR65C51 uart;
     bus.map_device("bios_rom", kBiosBase, static_cast<uint16_t>(kBiosSize), &bios_rom, IrqLine::None);
-    bus.map_device("sdcard", 0xFFD8, 4, &sdcard, IrqLine::None);
+    if (card) bus.map_device("sdcard", 0xFFD8, 4, &sdcard, IrqLine::None);
     bus.map_device("uart", 0xFFE8, 4, &uart, IrqLine::IRQ);
     bus.map_bank_registers(); // $FFEC-$FFEF: the BIOS programs the RAM banks at reset
 
@@ -418,13 +435,19 @@ int main(int argc, char** argv) {
     }
 
     VideoDevice vcard;
-    bus.map_device("video", VideoDevice::kBase, VideoDevice::kSize, &vcard, IrqLine::IRQ);
+    if (card) bus.map_device("video", VideoDevice::kBase, VideoDevice::kSize, &vcard, IrqLine::IRQ);
     VideoOut screen;
     screen.set_turbo(turbo);
     screen.set_scale(scale);
-    if (video) {
+    // The card is the console when there's a window to see it in.
+    bool console_on_card = false;
+    if (card && video) {
         vcard.set_sink(&screen);
-    } else {
+        const char* why = "";
+        console_on_card = VideoOut::can_open(&why);
+        if (!console_on_card) std::printf("No video window (%s): the console is the UART.\n", why);
+        vcard.set_console(console_on_card);
+    } else if (card) {
         std::printf("Video window off (--no-video).\n");
     }
 
@@ -455,9 +478,14 @@ int main(int argc, char** argv) {
 #endif
 
     if (!use_com) {
-        std::printf("Bridging UART to this console. Type to send bytes; %s to quit.\n"
-                    "(At the shell prompt, type BASIC to start BASIC; SYSTEM leaves it.)\n\n",
-                    kQuitKey);
+        if (console_on_card)
+            std::printf("The console is the video window. This one shows the boot banner and any crash message;\n"
+                        "what you type here reaches the machine too. %s or closing the window quits.\n\n",
+                        kQuitKey);
+        else
+            std::printf("Bridging UART to this console. Type to send bytes; %s to quit.\n"
+                        "(At the shell prompt, type BASIC to start BASIC; SYSTEM leaves it.)\n\n",
+                        kQuitKey);
         setup_console();
         uart.set_tx_callback([](uint8_t b) {
             std::putchar(b);
@@ -479,10 +507,10 @@ int main(int argc, char** argv) {
             bool keys_to_card = (vcard.input_ctrl() & 0x02) != 0;
             switch (in.kind) {
             case VideoOut::Input::Char:
-                if (!keys_to_card) uart.rx_enqueue(in.code);
+                if (!keys_to_card && !console_on_card) uart.rx_enqueue(in.code);
                 break;
             case VideoOut::Input::Key:
-                if (keys_to_card) vcard.key(in.code, in.down);
+                if (keys_to_card || console_on_card) vcard.key(in.code, in.down);
                 break;
             case VideoOut::Input::Mouse: vcard.mouse_to(in.x, in.y, in.buttons); break;
             case VideoOut::Input::Wheel: vcard.mouse_wheel(in.clicks); break;
@@ -493,6 +521,10 @@ int main(int argc, char** argv) {
             }
         }
         screen.set_pointer_hidden((vcard.input_ctrl() & 0x01) != 0);
+        if (console_on_card && screen.gone()) {
+            std::printf("\r\nThe video window has closed, and it was the console: stopping.\r\n");
+            return 0;
+        }
         if (use_com) {
 #ifdef PUGPUTER_HAVE_COM_BRIDGE
             bridge.poll(uart);

@@ -77,6 +77,9 @@ public:
     // The mouse and keyboard (the window's, or a test's): see vc.h, vc_mouse_to and vc_key.
     void mouse_to(int x, int y, uint8_t buttons);
     void mouse_wheel(int clicks);
+    // Whether the BIOS is to use the card as the console (VC_STATUS's console bit). A
+    // reset leaves it. Off by default.
+    void set_console(bool on);
     void key(uint8_t usage, bool down);
     // A gamepad (0-3): its 8 bytes as a program reads them, or nullptr when it's unplugged
     // (see vc.h, vc_pad).
