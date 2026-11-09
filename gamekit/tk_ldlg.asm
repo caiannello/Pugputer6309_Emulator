@@ -280,7 +280,7 @@ LROOM5      STD  LBYTES
             JSR  TSREC
             LDD  TS_NTILES,X
             BNE  LROOM6
-            LDD  #1             ; (a new set: one tile)
+            LDD  #2             ; (a new set: two tiles)
 LROOM6      PSHS D
             LDA  TS_BPP,X       ; their kind: as they are, or as asked
             LDB  TS_TSIZE,X
@@ -351,22 +351,24 @@ LDLGDO5     CLR  UCOUNT         ; (the undo steps don't fit what it is now)
             LDA  #1
             STA  STATDIRTY
             JMP  REDRAWALL
-; NEWSLOT: slot CURL a new tile set of NTS x NBPP: one blank tile, no file.
+; NEWSLOT: slot CURL a new tile set of NTS x NBPP: tile 0 and tile 1 blank, tile 1
+; to draw on, no file.
 NEWSLOT     LDB  CURL
             JSR  TSREC
             LDA  NTS
             STA  TS_TSIZE,X
             LDA  NBPP
             STA  TS_BPP,X
-            LDD  #1
+            LDD  #2
             STD  TS_NTILES,X
-            CLRD
+            LDD  #1
             STD  TS_TILE,X
+            CLRD
             STD  TS_TSTOP,X
             LDA  #1
             STA  TS_MOD,X
             CLR  TS_NAME,X
-            LDA  #C_FILL        ; its room's first 256 bytes 0 (tile 0)
+            LDA  #C_FILL        ; its room's first 512 bytes 0 (tiles 0 and 1)
             STA  VC_CMD
             LDB  CURL
             JSR  SLICEOF
@@ -374,7 +376,7 @@ NEWSLOT     LDB  CURL
             CLRA
             STA  VC_CMD
             STA  VC_CMD
-            LDD  #256
+            LDD  #512
             JSR  CMDD
             CLRA
             STA  VC_CMD

@@ -633,6 +633,8 @@ ZPRESS      BSR  ZPIXEL
             LDA  TOOL
             CMPA #TL_PICK
             BEQ  ZPICK
+            LDD  TILE           ; (tile 0 is the empty cell: it stays as it is)
+            BEQ  ZBLANK
             JSR  PUSHUNDO
             LDA  TOOL
             CMPA #TL_FILL
@@ -647,6 +649,8 @@ ZFILL       LDD  LASTX
             LDA  #1
             STA  TDIRTY
 ZPRESS9     RTS
+ZBLANK      LDX  #T_BLANK
+            JMP  MESSAGE
 ZPICK       LDD  LASTX
             JSR  PIXIDX
             LDA  TILEBUF,X
@@ -664,6 +668,8 @@ ZDRAG       LDA  TOOL
             CMPA #TL_PICK
             BEQ  ZPICK2
             CMPA #TL_FILL
+            BEQ  ZDRAG9
+            LDD  TILE           ; (tile 0: nothing is drawn on it)
             BEQ  ZDRAG9
             JSR  ZPIXEL
             BCS  ZDRAGOFF
@@ -940,8 +946,10 @@ UNDO2       PULS X
 ;------------------------------------------------------------------------------
 ; Tiles.
 ;------------------------------------------------------------------------------
-; CLEARTILE: every pixel of the tile 0.
-CLEARTILE   JSR  PUSHUNDO
+; CLEARTILE: every pixel of the tile 0 (not tile 0's: see ZPRESS).
+CLEARTILE   LDD  TILE
+            LBEQ ZBLANK
+            JSR  PUSHUNDO
             LDX  #TILEBUF
             LDW  #256
 CLEARTILE1  CLR  ,X+

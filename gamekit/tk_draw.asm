@@ -617,6 +617,7 @@ T_B         FCN  " B"
 T_HELP      FCN  "P L F K E U  ,. TILE  H V FLIP  ^S SAVE  ^E EXPORT  ESC"
 T_NOUNDO    FCN  "NOTHING TO UNDO"
 T_FULL      FCN  "THE TILE SET IS FULL"
+T_BLANK     FCN  "TILE 0 STAYS BLANK: IT'S THE EMPTY CELL. N MAKES A NEW TILE"
 T_FILLFULL  FCN  "THE FILL STOPPED: TOO INTRICATE A SHAPE (U UNDOES IT)"
 ;------------------------------------------------------------------------------
 DZCOL       FCB  0
