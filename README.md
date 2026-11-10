@@ -4,6 +4,8 @@ A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD C
 BIOS, DOS, shell, a text editor, an assembler and linker, and BASIC -- and a cycle-counted emulator that runs all of
 it on a PC.
 
+[tilekit editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
+
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/media/demo.png?raw=true)
 
 ## Demo Releases
