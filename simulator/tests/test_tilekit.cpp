@@ -1110,4 +1110,10 @@ TEST(tilekit_saves_and_opens_a_whole_project) {
     CHECK(!k.shows(28, "GAME.TKT*"));
     k.key(0x29);
     CHECK(k.prompt(200000000));
+    // Named in lower case: still the project (not read as a tile set).
+    k.type("tilekit game.tkt");
+    k.frames(300);
+    CHECK(k.shows(28, "GAME.TKT ") && k.shows(27, "GAME2.MAP ") && k.ram("CURL") == 1);
+    k.key(0x29);
+    CHECK(k.prompt(200000000));
 }

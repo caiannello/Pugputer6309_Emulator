@@ -141,7 +141,12 @@ ARGS2       TSTA
             BEQ  ARGS3
             CMPA #$20
             BEQ  ARGS3
-            STA  ,Y+
+            CMPA #'a            ; (in upper case, as the prompts have it: the
+            BLO  ARGS4          ; .TKT and .MAP checks look for those letters)
+            CMPA #'z
+            BHI  ARGS4
+            SUBA #$20
+ARGS4       STA  ,Y+
             CMPY #FILENAME+PR_MAX
             BHS  ARGS3
             LDA  ,X+
