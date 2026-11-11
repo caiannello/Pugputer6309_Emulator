@@ -16,10 +16,13 @@
 ; its tiles at the start, its map at the end.
 ;
 ; And music, if there is a SWAMP.VGM beside them: a VGM file for the OPL3 (or
-; OPL2), as VGMPLAY plays. It goes into the card's PSRAM as it loads, the whole
-; of it, and plays from there through data port 1 -- so the disk isn't read
-; while the swamp scrolls -- over and over (from the song's loop point, if it
-; has one). The OPL3's Timer 1 keeps its time, as in VGMPLAY: the loop below
+; OPL2), as VGMPLAY plays. It goes into the CPU card's RAM as it loads, the whole
+; of it, in 16KB pages of its own (B_PAGE_ALLOC'd, above the program's 64KB), and
+; plays from there through bank 2 ($8000-$BFFF), each page shown there in its
+; turn -- so the disk isn't read while the swamp scrolls -- over and over (from
+; the song's loop point, if it has one). (Not the card's PSRAM: a data port read
+; can be quicker than the card's fetch of the next byte from it, and a byte read
+; twice puts the song out of step.) The OPL3's Timer 1 keeps its time, as in VGMPLAY: the loop below
 ; looks for its ticks (every 4 ms) and for the card's vertical blank (every
 ; 1/60 s), and plays the song between them, giving way to the vertical blank,
 ; so the scrolling is never late. Without the file, the swamp is silent. (The
@@ -36,13 +39,18 @@ B_FOPEN_NAME equ $13
 B_FCLOSE_NAME equ $16
 B_FREAD     equ  $1D
 FOPEN_READ  equ  $00
+B_BANK_GET  equ  $2D        ; the RAM banking calls (see /ASM/DEFINES.D)
+B_BANK_SET  equ  $2E
+B_PAGE_ALLOC equ $2F
+B_PAGE_FREE equ  $30
 ERR_EOF     equ  $09
 CR          equ  $0D
 LF          equ  $0A
 ROOM        equ  $C000      ; each layer's video memory: 48KB
 BUFSIZE     equ  512        ; read at a time: a sector
-SONG        equ  $80        ; the song in the PSRAM: from $800000 (the file's offsets
-                            ; are its addresses there, with this as the high byte)
+WBANK       equ  2          ; the song is seen through bank 2: $8000-$BFFF (the
+WINDOW      equ  $8000      ; program, its variables and BUF are all below it)
+MAXPG       equ  48         ; its pages at most (768KB; a multiple of 4)
 OPL3_BASE   equ  $FFE0      ; $FFE0-$FFE3: the OPL3 (YMF262)
 T1_STEPS    equ  50         ; Timer 1 counts 80 us steps: a tick is 50 of them, 4 ms,
 TICK_FIFTHS equ  882        ; which is 176.4 samples: 882 fifths of a sample
@@ -59,6 +67,7 @@ CLEAR       CLR  ,X+
             DECB
             BNE  CLEAR
             CLR  LAYERN
+            CLR  NPG            ; no song pages yet
 ;------------------------------------------------------------------------------
 ; Each layer: its tile set (and the first one's palette), then its map.
 ;------------------------------------------------------------------------------
@@ -219,7 +228,7 @@ BYTES2      STD  BYTES
             STD  WAITLEFT
             CLR  WAITED
             LDX  #SONGTOP
-            JSR  PORT1AT
+            JSR  SEEK
 ;------------------------------------------------------------------------------
 ; Round and round: the music, as Timer 1 ticks, until the vertical blank; then
 ; the frame. The sky stays, the bayou moves a pixel every 2 frames, the ground
@@ -257,10 +266,11 @@ FRAME1      LDA  VC_ISR         ; the vertical blank?
             STB  VC_DATA0
             JSR  GETKEY
             LBCS FRAME
-            TST  MUSICON        ; a key: the chip quiet, and back to the shell
-            BEQ  FRAME2
+            TST  MUSICON        ; a key: the chip quiet, the song's pages given
+            BEQ  FRAME2         ; back, and back to the shell
             JSR  OPL_QUIET
-FRAME2      JMP  QUIT
+FRAME2      JSR  SONGFREE
+            JMP  QUIT
 ;------------------------------------------------------------------------------
 ; OPEN: the file named at X ("/DEMO/name"), or else "name" here; FH its handle.
 ; TRYOPEN: the same, but carry set if there's neither.
@@ -309,7 +319,8 @@ STREAM      LDY  #BUFSIZE
             LDX  #BUF
             JSR  SENDDAT
             BRA  STREAM
-STREAM1     LDB  FH
+STREAM1
+CLOSE       LDB  FH             ; CLOSE: the file closed
             LDA  #B_FCLOSE_NAME
             SWI2
             RTS
@@ -327,10 +338,13 @@ SIZE2       TFR  E,B
             RTS
 ;------------------------------------------------------------------------------
 ; LOADSONG: SWAMP.VGM, if there is one and it's a song for the OPL3 or OPL2,
-; the whole file into the PSRAM from $800000; MUSICON set if so. Where its
-; commands start, end and loop from are noted as addresses there, and a $66
-; (the end) put at its end -- some files have none, going straight on to their
-; tags.
+; into RAM pages of its own, up to the end of its commands; MUSICON set if so.
+; Its bytes have addresses from 0 (the file's offsets): page SPAGES+n holds
+; addresses n*16KB up. Where its commands start, end and loop from are noted as
+; such addresses, and a $66 (the end) put at its end -- some files have none,
+; going straight on to their tags -- and on to the end of that page, so a
+; command running past it finds one there too. Without the pages it would need,
+; the swamp is silent.
 ;------------------------------------------------------------------------------
 LOADSONG    CLR  MUSICON
             LDX  #N_VGM
@@ -356,11 +370,11 @@ LOADSONG    CLR  MUSICON
             BNE  LS_OK
             LDD  BUF+$50
             ORD  BUF+$52
-            BEQ  LS_NOT
+            LBEQ LS_NOT
 LS_OK       LDX  #BUF+$34       ; the commands: $34 + the offset at $34 (0: $40)
             LDB  #$34
             LDY  #SONGTOP
-            BSR  LEOFS
+            LBSR LEOFS
             BNE  LS_END
             CLR  SONGTOP
             LDD  #$40
@@ -368,39 +382,98 @@ LS_OK       LDX  #BUF+$34       ; the commands: $34 + the offset at $34 (0: $40)
 LS_END      LDX  #BUF+$14       ; their end: the tags ($14 + the offset at $14)
             LDB  #$14
             LDY  #SONGEND
-            BSR  LEOFS
+            LBSR LEOFS
             BNE  LS_LOOP
             LDX  #BUF+4         ; or, with none, the file's ($4 + the offset at $4)
             LDB  #4
-            BSR  LEOFS
+            LBSR LEOFS
 LS_LOOP     LDX  #BUF+$1C       ; the loop: $1C + the offset at $1C (0: the start)
             LDB  #$1C
             LDY  #SONGLOOP
-            BSR  LEOFS
+            LBSR LEOFS
             BNE  LS_COPY
             LDD  SONGTOP
             STD  SONGLOOP
             LDA  SONGTOP+2
             STA  SONGLOOP+2
-LS_COPY     LDA  #SONG          ; the file into the PSRAM: the header read, then the rest
-            LDX  #0
-            JSR  PORT0
+LS_COPY     LDB  #WBANK         ; the window's own page, to put back at the end
+            LDA  #B_BANK_GET
+            SWI2
+            STA  WHOME
+            LDX  #SONGEND       ; no more than the pages hold, less the end's byte
+            LDY  #SONGMAX
+            JSR  CMP3
+            BLO  LS_C1
+            LDD  SONGMAX
+            STD  SONGEND
+            LDA  SONGMAX+2
+            STA  SONGEND+2
+LS_C1       LDD  #0
+            STD  WPOS
+            STA  WPOS+2
+            LDD  TMPW           ; the header read, then the rest, a sector at a time,
+            JSR  CLAMP          ; up to the end of the commands
             LDX  #BUF
-            LDW  TMPW
-            JSR  SENDDAT
-            JSR  STREAM         ; (which closes it)
-            LDA  SONGEND        ; and the end marked
-            ORA  #SONG
-            LDX  SONGEND+1
-            JSR  PORT0
-            LDA  #$66
-            STA  VC_DATA0
-            LDA  #1
+            JSR  STORE
+            BCS  LS_FULL
+LS_READ     LDX  #WPOS
+            LDY  #SONGEND
+            JSR  CMP3
+            BHS  LS_LOADED
+            LDY  #BUFSIZE
+            JSR  READ
+            CMPX #0
+            BEQ  LS_SHORT
+            TFR  X,D
+            JSR  CLAMP
+            LDX  #BUF
+            JSR  STORE
+            BCC  LS_READ
+LS_FULL     JSR  CLOSE          ; no room for it: none
+            JMP  SONGFREE
+LS_SHORT    LDD  WPOS           ; (the file ends sooner than it says)
+            STD  SONGEND
+            LDA  WPOS+2
+            STA  SONGEND+2
+LS_LOADED   JSR  CLOSE
+            LDX  #SONGTOP       ; its commands start before their end, or no song
+            LDY  #SONGEND
+            JSR  CMP3
+            BHS  LS_EMPTY
+            LDX  #SONGLOOP      ; the loop point among them, or else the start
+            LDY  #SONGTOP
+            JSR  CMP3
+            BLO  LS_NOLOOP
+            LDY  #SONGEND
+            JSR  CMP3
+            BLO  LS_MARK
+LS_NOLOOP   LDD  SONGTOP
+            STD  SONGLOOP
+            LDA  SONGTOP+2
+            STA  SONGLOOP+2
+LS_MARK     LDA  #$66           ; the end marked: a $66 at SONGEND (which is WPOS)...
+            STA  BUF
+            LDD  #1
+            STD  PUTLEFT
+            LDX  #BUF
+            JSR  STORE
+            BCS  LS_EMPTY
+            LDD  WPOS+1         ; ... and on to its page's end (in the window now)
+            ANDA #$3F
+            STD  TMPW           ; (0: it was the page's last byte)
+            BEQ  LS_ON1
+            ADDD #WINDOW
+            TFR  D,Y
+            LDD  #$4000
+            SUBD TMPW
+            TFR  D,W
+            LDX  #BUF
+            TFM  X,Y+
+LS_ON1      LDA  #1
             STA  MUSICON
             RTS
-LS_NOT      LDB  FH             ; not a song for this: none
-            LDA  #B_FCLOSE_NAME
-            SWI2
+LS_EMPTY    JMP  SONGFREE
+LS_NOT      JSR  CLOSE          ; not a song for this: none
 LS_NONE     RTS
 ; LEOFS: the 32-bit little-endian offset at X, plus B (where it counts from), to
 ; the 3 bytes at Y (high first); Z set, and nothing stored, if the offset is 0.
@@ -421,14 +494,141 @@ LEOFS       LDA  ,X
             STA  ,Y
             LDA  #1             ; (Z clear)
 LEOFS1      RTS
-; PORT1AT: data port 1 at the song's address at X (3 bytes, from SONG), step 1.
-PORT1AT     LDA  ,X
-            ORA  #SONG
-            LDX  1,X
-            STA  VC_ADDR1
-            STX  VC_ADDR1M
-            LDD  #1
-            STD  VC_INC1
+;------------------------------------------------------------------------------
+; The song's pages. An address (3 bytes, high first) is page index bits 14-21,
+; offset bits 0-13; the window shows one page at a time.
+;------------------------------------------------------------------------------
+; SEEK: the song read from the address at X next (its page in the window, SPTR
+; in it). Trashes D, E, X.
+SEEK        LDD  1,X
+            ANDA #$3F
+            ORA  #WINDOW/256
+            STD  SPTR
+            LDD  ,X
+            LSLD
+            LSLD                ; A = the page index
+            BRA  MAPPG
+; SONGB: the song's next byte in A (into the next page at a page's end). Keeps
+; B; trashes E, X.
+SONGB       LDX  SPTR
+            LDA  ,X+
+            STX  SPTR
+            CMPX #WINDOW+$4000
+            BEQ  SB_NEXT
+            RTS
+SB_NEXT     PSHS A
+            LDX  #WINDOW
+            STX  SPTR
+            LDA  SPG
+            INCA
+            BSR  MAPPG
+            PULS A,PC
+; MAPPG: the song's page A in the window (SPG = A). Past the last one, the last
+; one's last byte instead -- a $66, as the end's page is filled with them. Keeps
+; A, B and X; trashes E; carry set if the BIOS wouldn't.
+MAPPG       PSHS A,B,X
+            CMPA NPG
+            BLO  MP1
+            LDA  NPG
+            DECA
+            LDX  #WINDOW+$3FFF
+            STX  SPTR
+MP1         STA  SPG
+            LDX  #SPAGES
+            LDE  A,X
+            LDB  #WBANK
+            LDA  #B_BANK_SET
+            SWI2
+            PULS A,B,X,PC
+; STORE: PUTLEFT bytes from X to the song's address WPOS on, taking pages as
+; they are needed; WPOS moves on past them. Carry set if a page couldn't be had.
+STORE       LDD  PUTLEFT
+            BEQ  ST_OK
+            PSHS X
+            LDD  WPOS
+            LSLD
+            LSLD                ; A = WPOS's page index
+            CMPA NPG
+            BLO  ST_HAVE
+            LDB  NPG            ; (one more: they are taken in order)
+            CMPB #MAXPG
+            BHS  ST_FULL
+            LDA  #B_PAGE_ALLOC
+            SWI2
+            BCS  ST_FULL
+            LDX  #SPAGES
+            LDB  NPG
+            STA  B,X
+            INC  NPG
+            TFR  B,A
+ST_HAVE     BSR  MAPPG
+            BCS  ST_FULL
+            LDD  WPOS+1         ; the offset in the page, and the room left there
+            ANDA #$3F
+            STD  CHUNK
+            ADDD #WINDOW
+            TFR  D,Y
+            LDD  #$4000
+            SUBD CHUNK
+            CMPD PUTLEFT        ; as much as there is, or fits
+            BLS  ST_C
+            LDD  PUTLEFT
+ST_C        STD  CHUNK
+            TFR  D,W
+            PULS X
+            TFM  X+,Y+
+            LDD  WPOS+1
+            ADDD CHUNK
+            STD  WPOS+1
+            LDA  WPOS
+            ADCA #0
+            STA  WPOS
+            LDD  PUTLEFT
+            SUBD CHUNK
+            STD  PUTLEFT
+            BRA  STORE
+ST_FULL     PULS X
+            ORCC #1
+            RTS
+ST_OK       ANDCC #$FE
+            RTS
+; CLAMP: D bytes -> PUTLEFT: as many of them as come before SONGEND, from WPOS.
+CLAMP       STD  PUTLEFT
+            LDD  SONGEND+1
+            SUBD WPOS+1
+            STD  CHUNK
+            LDA  SONGEND
+            SBCA WPOS
+            BNE  CL_RET         ; (64KB or more to go: all of them)
+            LDD  CHUNK
+            CMPD PUTLEFT
+            BHS  CL_RET
+            STD  PUTLEFT
+CL_RET      RTS
+; CMP3: the 3-byte address at X against the one at Y (unsigned: BLO, BHS...).
+CMP3        LDA  ,X
+            CMPA ,Y
+            BNE  C3_RET
+            LDD  1,X
+            CMPD 1,Y
+C3_RET      RTS
+; SONGFREE: the window back at its own page, and the song's pages given back
+; (DOS's B_EXIT does neither). Nothing if it had none.
+SONGFREE    TST  NPG
+            BEQ  SF_RET
+            LDB  #WBANK
+            LDE  WHOME
+            LDA  #B_BANK_SET
+            SWI2
+SF_FREE     DEC  NPG
+            LDB  NPG
+            LDX  #SPAGES
+            LDB  B,X
+            LDA  #B_PAGE_FREE
+            SWI2
+            TST  NPG
+            BNE  SF_FREE
+SF_RET      CLR  MUSICON
             RTS
 ;------------------------------------------------------------------------------
 ; A tick of Timer 1: its flag cleared (the timer runs on), and 4 ms more on the
@@ -452,7 +652,7 @@ TICK        LDD  #$0480         ; register 4 = $80: the flags cleared
 TICK1       STD  CREDIT
             RTS
 ;------------------------------------------------------------------------------
-; MUSIC: the song's commands, from data port 1, until it is ahead of the clock
+; MUSIC: the song's commands, from its pages (SONGB), until it is ahead of the clock
 ; -- or the vertical blank comes, which goes first. A wait takes 5 fifths a
 ; sample off CREDIT, in parts of up to 6000 samples (30000 fifths: they fit).
 ;------------------------------------------------------------------------------
@@ -480,7 +680,7 @@ MU_PART     STD  TMPW
             STD  CREDIT
             BRA  MUSIC
 MU_DONE     RTS
-MU_CMD      LDA  VC_DATA1
+MU_CMD      JSR  SONGB
             CMPA #$5E           ; $5E rr dd: register rr of array 0 = dd
             BEQ  MU_W0
             CMPA #$5F           ; $5F rr dd: array 1
@@ -494,13 +694,14 @@ MU_CMD      LDA  VC_DATA1
             CMPA #$8F           ; $8n: a YM2612 sample, then wait n
             BLS  MU_DAC
             LBRA MU_HIGH
-MU_W0       LDF  VC_DATA1       ; the register
-            LDA  VC_DATA1       ; its value
-            CMPF #4
+MU_W0       JSR  SONGB          ; the register
+            TFR  A,B
+            JSR  SONGB          ; its value
+            CMPB #4
             BHI  MU_W0OK
-            CMPF #2
+            CMPB #2
             BHS  MUSIC          ; (2-4: the timers, ours)
-MU_W0OK     STF  OPL3_BASE
+MU_W0OK     STB  OPL3_BASE
             NOP
             NOP
             NOP
@@ -513,9 +714,10 @@ MU_W0OK     STF  OPL3_BASE
             NOP
             NOP
             LBRA MUSIC
-MU_W1       LDF  VC_DATA1
-            LDA  VC_DATA1
-            STF  OPL3_BASE+2
+MU_W1       JSR  SONGB
+            TFR  A,B
+            JSR  SONGB
+            STB  OPL3_BASE+2
             NOP
             NOP
             NOP
@@ -528,8 +730,9 @@ MU_W1       LDF  VC_DATA1
             NOP
             NOP
             LBRA MUSIC
-MU_WAIT     LDB  VC_DATA1       ; (little-endian)
-            LDA  VC_DATA1
+MU_WAIT     JSR  SONGB          ; (little-endian)
+            TFR  A,B
+            JSR  SONGB
             BRA  MU_WAITD
 MU_SHORT    ANDA #$0F
             INCA
@@ -596,7 +799,7 @@ MU_ABOVE    CMPA #$A0           ; ($96-$9F: none)
             CMPA #$DF
             BLS  MU_SKIPN
             LDB  #4             ; $E0-$FF: 4
-MU_SKIPN    LDA  VC_DATA1       ; B bytes skipped
+MU_SKIPN    JSR  SONGB          ; B bytes skipped
             DECB
             BNE  MU_SKIPN
             LBRA MUSIC
@@ -604,31 +807,48 @@ MU_END      TST  WAITED
             BEQ  MU_STOP
             CLR  WAITED
             LDX  #SONGLOOP
-            JSR  PORT1AT
+            JSR  SEEK
             LBRA MUSIC
 MU_STOP     CLR  MUSICON
             JMP  OPL_QUIET
-MU_BLOCK    LDA  VC_DATA1       ; ($66)
-            LDA  VC_DATA1       ; (the type)
-            LDA  VC_DATA1       ; the size, little-endian
+MU_BLOCK    JSR  SONGB          ; ($66)
+            JSR  SONGB          ; (the type)
+            JSR  SONGB          ; the size, little-endian
             STA  SKIP+3
-            LDA  VC_DATA1
+            JSR  SONGB
             STA  SKIP+2
-            LDA  VC_DATA1
+            JSR  SONGB
             STA  SKIP+1
-            LDA  VC_DATA1
+            JSR  SONGB
             STA  SKIP
-MU_BLOCK1   LDD  SKIP
-            ORD  SKIP+2
-            LBEQ MUSIC
-            LDD  SKIP+2
-            SUBD #1
-            STD  SKIP+2
-            LDD  SKIP
-            SBCD #0
-            STD  SKIP
-            LDA  VC_DATA1
-            BRA  MU_BLOCK1
+            LDA  SPG            ; skipped all at once: where the song is now (its
+            CLRB                ; page index * 16KB + the offset in the window)...
+            LSRD
+            LSRD
+            STA  POS
+            LDA  SPTR
+            ANDA #$3F
+            PSHS A
+            ORB  ,S+
+            STB  POS+1
+            LDA  SPTR+1
+            STA  POS+2
+            LDD  POS+1          ; ... plus the size: at or past the end is the end
+            ADDD SKIP+2
+            STD  POS+1
+            LDA  POS
+            ADCA SKIP+1
+            STA  POS
+            LBCS MU_END
+            TST  SKIP
+            LBNE MU_END
+            LDX  #POS
+            LDY  #SONGEND
+            JSR  CMP3
+            LBHS MU_END
+            LDX  #POS
+            JSR  SEEK
+            LBRA MUSIC
 ;------------------------------------------------------------------------------
 ; OPL_WRITE: B to the OPL3's register A of array E (0 or 1). Keeps A, B and E.
 ;------------------------------------------------------------------------------
@@ -714,6 +934,7 @@ BADFILE     LDX  #M_BADFILE
             BRA  FAIL
 DISKERR     LDX  #M_DISKERR
 FAIL        PSHS X
+            JSR  SONGFREE       ; (a disk error may come with the song half loaded)
             LDX  #M_SWAMP
             BSR  PUTS
             LDX  NAMEP
@@ -740,6 +961,7 @@ N_TLS       FCN  "/DEMO/SWAMP1.TLS"
 N_MAP       FCN  "/DEMO/SWAMP1.MAP"
 N_VGM       FCN  "/DEMO/SWAMP.VGM"
 STREAMLEN   FCB  4,4,5,10,1,4   ; VGM commands $90-$95's operands
+SONGMAX     FCB  MAXPG/4-1,$FF,$FF ; the song's last address: MAXPG pages, less 1
 T_LOADING   FCC  "Loading the swamp..."
             FCB  CR,LF,0
 M_SWAMP     FCN  "SWAMP: "
@@ -764,7 +986,7 @@ BYTES       equ  HCODE+1    ; 2: the map's bytes
 MAPADR      equ  BYTES+2    ; 3: where the map goes
 LAYERS      equ  MAPADR+3   ; 48: the three layers' settings, as the card has them
 MUSICON     equ  LAYERS+48  ; the song is playing
-SONGTOP     equ  MUSICON+1  ; 3: where its commands start (from SONG, high first)
+SONGTOP     equ  MUSICON+1  ; 3: where its commands start (its address, high first)
 SONGEND     equ  SONGTOP+3  ; 3: and end
 SONGLOOP    equ  SONGEND+3  ; 3: and where the end goes back to
 CREDIT      equ  SONGLOOP+3 ; 2: the clock's lead on the song (fifths of a sample)
@@ -772,6 +994,15 @@ WAITLEFT    equ  CREDIT+2   ; 2: samples of a wait still to go
 WAITED      equ  WAITLEFT+2 ; a wait since the song (re)started
 SKIP        equ  WAITED+1   ; 4: a data block's bytes still to skip
 TMPW        equ  SKIP+4     ; 2
-BUF         equ  TMPW+2     ; BUFSIZE: the file, as it is read
+NPG         equ  TMPW+2     ; the song's pages taken
+SPAGES      equ  NPG+1      ; MAXPG: which they are, in order
+WHOME       equ  SPAGES+MAXPG ; the window's own page
+SPG         equ  WHOME+1    ; the page index the window shows
+SPTR        equ  SPG+1      ; 2: the song's next byte, in the window
+WPOS        equ  SPTR+2     ; 3: the address the load is at
+PUTLEFT     equ  WPOS+3     ; 2: STORE's bytes still to go
+CHUNK       equ  PUTLEFT+2  ; 2
+POS         equ  CHUNK+2    ; 3: MU_BLOCK's address after the block
+BUF         equ  POS+3      ; BUFSIZE: the file, as it is read
 
             END  START

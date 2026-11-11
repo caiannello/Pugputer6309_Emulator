@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -67,6 +68,7 @@ struct Demo {
         type("ASM -f com " + name + ".ASM");
         CHECK(prompt(8000000000ull));
         CHECK(s.received.find("rror") == std::string::npos);
+        if (s.received.find("rror") != std::string::npos) std::printf("%s\n", s.received.c_str()); // (what ASM said)
         Fat16Volume vol;
         Fat16Volume::Entry e;
         CHECK(vol.load(img.c_str()) && vol.find("/" + name + ".COM", e));
@@ -598,9 +600,11 @@ TEST(vidcard_demo_swamp_scrolls_the_swamp) {
     CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
 }
 
-// With a SWAMP.VGM beside its pictures, it plays that, over and over, from the PSRAM, timed
-// by the OPL3's Timer 1, while the swamp scrolls as before. The song here is WILHELM.VGM made
-// the way some converters write them: no $66 at its end, its tags straight after.
+// With a SWAMP.VGM beside its pictures, it plays that, over and over, from RAM pages of its
+// own (seen through bank 2), timed by the OPL3's Timer 1, while the swamp scrolls as before.
+// The song here is WILHELM.VGM made the way some converters write them: no $66 at its end,
+// its tags straight after -- and with a 20000-byte data block before its commands, so that
+// it takes three pages, and each play skips the block and reads on from one page to the next.
 TEST(vidcard_demo_swamp_plays_its_music) {
     std::string dir = std::string(REPO_DIR) + "/demo/swamp/";
     std::vector<pugputer::Fat16File> files;
@@ -619,6 +623,12 @@ TEST(vidcard_demo_swamp_plays_its_music) {
         for (int i = 0; i < 4; ++i) song[at + i] = static_cast<char>(v >> (8 * i));
     };
     song.pop_back();                                      // no end command
+    CHECK(song[0x34] == static_cast<char>(0xCC) && song[0x1C] == 0); // (commands at $100; no loop point)
+    const uint32_t block = 20000;                         // $67 $66 type size: waits, if played
+    std::string data = std::string("\x67\x66\x00", 3);
+    for (int i = 0; i < 4; ++i) data += static_cast<char>(block >> (8 * i));
+    for (uint32_t i = 0; i < block; ++i) data += static_cast<char>(i % 3 == 0 ? 0x61 : 0xFF);
+    song.insert(0x100, data);
     uint32_t tags = static_cast<uint32_t>(song.size());   // "Gd3 ", version, length, no strings
     song += std::string("Gd3 \x00\x01\x00\x00\x00\x00\x00\x00", 12);
     le32(0x14, tags - 0x14);
@@ -635,10 +645,19 @@ TEST(vidcard_demo_swamp_plays_its_music) {
         seconds += 0.1;
     }
     CHECK(d.cfg(VC_DC_CTRL)[0] == 0x07);
-    // The file is in the PSRAM, from its start, with an end put where its tags start.
+    // The file is in RAM pages above the program's 64KB -- the first ones free, so one after
+    // another -- up to its tags, where an end is put, and $66s on to that page's end.
+    const size_t kPage = pugputer::SystemBus::kPageSize;
+    uint8_t* ram = d.s.bus.phys_ram();
+    size_t first = 0;
+    for (size_t p = 4; p < d.s.bus.ram_pages() && !first; ++p)
+        if (std::memcmp(ram + p * kPage, song.data(), 0x100) == 0) first = p;
+    CHECK(first >= 4 && tags > 2 * kPage && tags < 3 * kPage);
+    const uint8_t* at = ram + first * kPage;
     bool same = true;
-    for (uint32_t i = 0; i < tags; ++i) same = same && d.c().psram[i] == static_cast<uint8_t>(song[i]);
-    CHECK(same && d.c().psram[tags] == 0x66);
+    for (uint32_t i = 0; i < tags; ++i) same = same && at[i] == static_cast<uint8_t>(song[i]);
+    for (size_t i = tags; i < 3 * kPage; ++i) same = same && at[i] == 0x66;
+    CHECK(same);
     // It plays, and goes on playing after the song's 2.61 s (115101 samples) are up: started
     // again, in the chip's time. Any stretch of exactly two plays holds two plays' writes,
     // wherever it starts -- the song's 4342 each -- and Timer 1's ticks, every 4 ms (its flag
@@ -664,6 +683,20 @@ TEST(vidcard_demo_swamp_plays_its_music) {
     CHECK(d.prompt(100000000));
     CHECK(opl3.reg(0x04) == 0x60 && opl3.reg(0x105) == 0 && opl3.reg(0xB0) == 0 && opl3.reg(0x1B8) == 0);
     CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
+    // Bank 2 is back at its own page, and the song's pages were given back: a second run
+    // takes the same ones.
+    CHECK(d.s.bus.bank_register(2) == 2);
+    std::memset(ram + first * kPage, 0, 3 * kPage);
+    d.type("SWAMP");
+    seconds = 0;
+    while (d.cfg(VC_DC_CTRL)[0] != 0x07 && seconds < 20) {
+        d.run(0.1);
+        seconds += 0.1;
+    }
+    CHECK(std::memcmp(ram + first * kPage, song.data(), tags) == 0);
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(d.s.bus.bank_register(2) == 2);
 }
 
 // Without its pictures it says so, on the text screen, and goes back to the shell.
