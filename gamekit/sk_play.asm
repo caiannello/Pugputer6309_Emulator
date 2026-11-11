@@ -18,6 +18,18 @@
 ;   SK_STOP    the song stopped: its notes let go, and fade as they would
 ;   SK_OFF     the chip silent and as it starts (OPL2 mode, timers stopped);
 ;              before a program ends, and before SK_POLL with no song
+;
+; For an editor, notes played by hand (with a song, or without one):
+;
+;   SK_JSETUP  A: the 4-op pairs ($104's bits), B: flags (bit 0 rhythm mode)
+;              -> the chip and the tracks set up so, with no song
+;   SK_JAM     B: a track, A: a note (1-96; $7F the key let go), E: an
+;              instrument (0: the track's own) -> played now
+;   SK_JREF    B: a track, E: an instrument -> its registers written again,
+;              the key as it is (a held note changes as it is edited)
+;   SK_IREF    E: an instrument -> the same, on every track playing it
+;   SK_IBASE   (2 bytes; SK_START and SK_PSTART make it 0) not 0: the
+;   SK_INUM    instruments are SK_INUM of 32 bytes there, not the song's own
 ;   SK_PLAYING (a byte) not 0 while the song plays
 ;   SK_TICKS   (2 bytes) Timer 2's ticks since SK_START, playing or not
 ;   SK_RATE    (a byte) ticks a second, as the song has them now
@@ -95,6 +107,7 @@ SK_PSTART   STX  SK_PGT
 SKBEGIN     JSR  SK_OFF
             LDD  #0
             STD  SK_TICKS
+            STD  SK_IBASE
             LDX  #0         ; the header
             CLRA
             JSR  SKSEEK
@@ -121,24 +134,7 @@ SKB1        JSR  SKGETB
             LSLD
             ADDD SK_PTAB
             STD  SK_ITAB
-            LDE  #1         ; the chip: OPL3 mode, the song's 4-op channels
-            LDD  #$0501
-            JSR  SKW
-            LDA  #$04
-            LDB  SK_HDR+5
-            ANDB #$3F
-            JSR  SKW
-            CLRE            ; deep tremolo and vibrato, and rhythm mode
-            LDB  SK_HDR+6
-            ANDB #$C0
-            LDA  SK_HDR+4
-            BITA #1
-            BEQ  SKB2
-            ORB  #$20
-SKB2        STB  SK_BD
-            LDA  #$BD
-            JSR  SKW
-            JSR  SKTRACKS
+            JSR  SKCHIP
             LDA  SK_HDR+8   ; ticks a row: 1-31 (6 if it says otherwise)
             BEQ  SKB3
             CMPA #32
@@ -160,6 +156,89 @@ SKB5        JSR  SKRATE
             RTS
 SKBAD       ORCC #1
             RTS
+
+; SK_JSETUP: the chip and the tracks for notes played by hand, with no song.
+SK_JSETUP   PSHS D
+            JSR  SK_OFF
+            PULS D
+            STA  SK_HDR+5
+            STB  SK_HDR+4
+            CLR  SK_HDR+6
+; SKCHIP: the chip as SK_HDR says (OPL3 mode, the 4-op pairs, rhythm mode,
+; deep tremolo and vibrato), and the tracks for it.
+SKCHIP      LDE  #1         ; the chip: OPL3 mode, the song's 4-op channels
+            LDD  #$0501
+            JSR  SKW
+            LDA  #$04
+            LDB  SK_HDR+5
+            ANDB #$3F
+            JSR  SKW
+            CLRE            ; deep tremolo and vibrato, and rhythm mode
+            LDB  SK_HDR+6
+            ANDB #$C0
+            LDA  SK_HDR+4
+            BITA #1
+            BEQ  SKB2
+            ORB  #$20
+SKB2        STB  SK_BD
+            LDA  #$BD
+            JSR  SKW
+            JMP  SKTRACKS
+
+; SK_JAM: note A on track B, now (instrument E, or the track's own).
+SK_JAM      PSHS A
+            LDA  #SK_TSIZE
+            MUL
+            ADDD #SK_TRK
+            TFR  D,U
+            PULS A
+            LDX  #SK_CELL
+            STA  ,X
+            STE  1,X
+            CLR  2,X
+            CLR  3,X
+            CLR  4,X
+            LDA  T_FL,U
+            BITA #1
+            BEQ  SKJ9
+            TSTE
+            BEQ  SKJ1
+            CLR  T_INS,U    ; (always read again: it may have been edited)
+SKJ1        JSR  SKTRIG
+            JMP  SKOUT
+SKJ9        RTS
+; SK_IREF: instrument E's registers again to every track playing it (a song's
+; too), their keys as they are: an instrument changed is heard at once.
+SK_IREF     LDU  #SK_TRK
+            LDB  #SK_NTRK
+SKIR1       PSHS B
+            LDA  T_FL,U
+            BITA #1
+            BEQ  SKIR2
+            CMPE T_INS,U
+            BNE  SKIR2
+            PSHSW
+            TFR  E,A
+            JSR  SKLOADR
+            JSR  SKOUT
+            PULSW
+SKIR2       LEAU SK_TSIZE,U
+            PULS B
+            DECB
+            BNE  SKIR1
+            RTS
+; SK_JREF: instrument E's registers to track B again, its key as it is.
+SK_JREF     LDA  #SK_TSIZE
+            MUL
+            ADDD #SK_TRK
+            TFR  D,U
+            LDA  T_FL,U
+            BITA #1
+            BEQ  SKJ9
+            TFR  E,A
+            STA  T_INS,U
+            JSR  SKLOADR
+            JMP  SKOUT
 
 ; SKTRACKS: the tracks set up for the song: which channel and operators each
 ; has, as its 4-op pairs and rhythm mode make them.
@@ -1017,7 +1096,7 @@ SKKO1       CLRE
 SKLOADI     STA  T_INS,U
             JSR  SKKOFF
             LDA  T_INS,U
-            JSR  SKFETCH
+SKLOADR     JSR  SKFETCH    ; (SK_JREF comes in here: the key as it is)
             LDA  SK_IB
             STA  T_IFL,U
             LDD  SK_IB+1
@@ -1168,7 +1247,19 @@ SKFE1       CLR  ,X+
             STB  SK_IB+19
             TSTA
             BEQ  SKFE9
-            CMPA SK_HDR+9
+            LDX  SK_IBASE   ; the editor's instruments
+            BEQ  SKFE3
+            CMPA SK_INUM
+            BHI  SKFE9
+            DECA
+            LDB  #SK_ILEN
+            MUL
+            LEAX D,X
+            LDY  #SK_IB
+            LDW  #SK_ILEN
+            TFM  X+,Y+
+            RTS
+SKFE3       CMPA SK_HDR+9
             BHI  SKFE9
             DECA
             LDB  #SK_ILEN
@@ -1373,6 +1464,8 @@ SKDRUMS     FCB  6,6,$10,$13,2,$10,0 ; track, channel, operators, how many,
 SK_PLAYING  RMB  1
 SK_TICKS    RMB  2
 SK_RATE     RMB  1
+SK_IBASE    RMB  2          ; the editor's instruments (0: the song's)
+SK_INUM     RMB  1
 SK_PAGED    RMB  1          ; the song: in pages (1) or in memory (0)
 SK_BASE     RMB  2          ;   in memory: where
 SK_PGT      RMB  2          ;   in pages: their list, how many, the bank, and its

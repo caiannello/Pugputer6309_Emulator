@@ -80,9 +80,13 @@ void Opl3Device::write_register(uint16_t r, uint8_t v) {
         due_ = 0;
         // Back from idle soon enough to be a rest in the music: the silence it was is
         // played before this write, so the music keeps its time (the emulator ran ahead
-        // meanwhile, and now waits for the sound to catch up).
+        // meanwhile, and now waits for the sound to catch up). Not if someone pressed a key
+        // or a button meanwhile: then the silence was theirs (a note played by hand, as
+        // an editor does), and the note sounds at once -- the emulator ran ahead of them too.
         double rest = static_cast<double>(cycles_ - idle_at_) / cpu_hz_;
-        if (sink_ && idle_at_ != 0 && rest < kMaxRest) {
+        bool theirs = input_;
+        input_ = false;
+        if (sink_ && idle_at_ != 0 && rest < kMaxRest && !theirs) {
             std::fill(std::begin(buf_), std::end(buf_), int16_t(0));
             for (size_t n = static_cast<size_t>(rest * rate_); n > 0;) {
                 size_t k = std::min(n, kChunk);
@@ -139,6 +143,7 @@ void Opl3Device::generate(size_t frames) {
         active_ = false;
         due_ = 0;
         idle_at_ = cycles_;
+        input_ = false;
         sink_->idle();
     }
 }

@@ -19,7 +19,9 @@
 #include "disk_images.hpp"
 #include "fat16_reader.hpp"
 #include "pugputer/opl3_device.hpp"
+#include "pugputer/video_device.hpp"
 #include "test_framework.hpp"
+#include "vc.h"
 
 using pugputer::Opl3Device;
 
@@ -238,6 +240,109 @@ struct Ticks {
 };
 
 using V = std::vector<int>;
+
+// SONGKIT.COM on the machine with the video card and the OPL3, worked through the card's
+// keyboard and mouse as a person at the video window would.
+struct Editor {
+    std::string img;
+    Basic309Session s;
+    pugputer::VideoDevice v;
+    Opl3Device opl3;
+    std::vector<Opl3Device::Write> log;
+    bool ok = false;
+
+    explicit Editor(std::vector<pugputer::Fat16File> more = {}) {
+        std::string repo = REPO_DIR;
+        std::string bin = host_file(repo + "/gamekit/build/songkit.bin");
+        std::vector<pugputer::Fat16File> files = {disk_file("SONGKIT.COM", bin)};
+        for (auto& f : more) files.push_back(std::move(f));
+        CHECK(!bin.empty());
+        img = build_image("songkit_ed.img", 32768, 4, files);
+        v.set_draw_all(true);
+        s.attach_video(&v);
+        CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
+        s.bus.map_device("opl3", 0xFFE0, 4, &opl3);
+        opl3.set_log(&log);
+        ok = !bin.empty() && !img.empty();
+    }
+    void frames(int n = 3) { s.bus.run(static_cast<uint64_t>(n * kHz / 60)); }
+    // Starts SONGKIT (with these arguments) and waits for its screen.
+    bool start(const std::string& args = "") {
+        std::string cmd = "SONGKIT" + (args.empty() ? "" : " " + args);
+        for (char ch : cmd) s.send_byte(static_cast<uint8_t>(ch));
+        s.send_byte('\r');
+        for (int i = 0; i < 200; ++i) {
+            frames(6);
+            if (row(0).find("SONGKIT") != std::string::npos && row(28).find("Esc") != std::string::npos) {
+                frames(6);
+                return true;
+            }
+        }
+        return false;
+    }
+    // A key pressed (and let go, unless held), with Ctrl or Shift.
+    void key(uint8_t usage, bool ctrl = false, bool shift = false, bool hold = false) {
+        if (ctrl) v.key(0xE0, true);
+        if (shift) v.key(0xE1, true);
+        v.key(usage, true);
+        frames(2);
+        if (!hold) {
+            v.key(usage, false);
+            frames(2);
+        }
+        if (shift) v.key(0xE1, false);
+        if (ctrl) v.key(0xE0, false);
+        frames(2);
+    }
+    void up(uint8_t usage) {
+        v.key(usage, false);
+        frames(3);
+    }
+    void text(const std::string& t) {
+        for (char c : t) {
+            if (c >= 'A' && c <= 'Z') key(static_cast<uint8_t>(0x04 + c - 'A'));
+            else if (c >= 'a' && c <= 'z') key(static_cast<uint8_t>(0x04 + c - 'a'));
+            else if (c >= '1' && c <= '9') key(static_cast<uint8_t>(0x1E + c - '1'));
+            else if (c == '0') key(0x27);
+            else if (c == '.') key(0x37);
+            else if (c == ' ') key(0x2C);
+        }
+    }
+    // Row r of the screen, as text.
+    std::string row(int r) {
+        std::string out;
+        const uint8_t* m = v.card().vram + VC_RESET_TEXT_MAP + r * 128 * 4;
+        for (int c = 0; c < 80; ++c) out += static_cast<char>(m[4 * c] ? m[4 * c] : ' ');
+        return out;
+    }
+    uint8_t bg(int r, int c) { return v.card().vram[VC_RESET_TEXT_MAP + (r * 128 + c) * 4 + 2]; }
+    // SONGKIT_SHOW: the screen as text; SONGKIT_SHOT=file.ppm: as the card shows it.
+    void show() {
+        for (int r = 0; r < 30; ++r) std::printf("  |%s|\n", row(r).c_str());
+        if (const char* shot = std::getenv("SONGKIT_SHOT")) {
+            frames(3);
+            std::ofstream f(shot, std::ios::binary);
+            f << "P6 640 480 255\n";
+            for (int i = 0; i < 640 * 480; ++i) {
+                uint32_t p = v.pixels()[i];
+                char rgb[3] = {static_cast<char>(p >> 16), static_cast<char>(p >> 8), static_cast<char>(p)};
+                f.write(rgb, 3);
+            }
+        }
+    }
+    // The cell lit up (the field being edited) on row r: its column, or -1.
+    int lit(int r) {
+        for (int c = 0; c < 80; ++c)
+            if (bg(r, c) == 25) return c;
+        return -1;
+    }
+    std::vector<uint8_t> file(const std::string& path) {
+        Fat16Volume vol;
+        Fat16Volume::Entry e;
+        if (!vol.load(img.c_str()) || !vol.find(path, e)) return {};
+        return vol.read(e);
+    }
+};
 
 } // namespace
 
@@ -522,4 +627,224 @@ TEST(songkit_song_to_wav) {
     f.write(reinterpret_cast<const char*>(keep.pcm.data()), bytes);
     std::printf("  wrote %s: %.1f s\n", wav.c_str(), keep.pcm.size() / 2.0 / k.opl3.sample_rate());
     CHECK(!keep.pcm.empty());
+}
+
+// SONGKIT starts on a new song's one instrument, and shows it.
+TEST(songkit_editor_starts_with_a_new_song) {
+    Editor e;
+    if (!e.ok) return;
+    CHECK(e.start());
+    if (std::getenv("SONGKIT_SHOW")) e.show();
+    CHECK(e.row(0).find("SONGKIT") != std::string::npos && e.row(0).find("(a new song)") != std::string::npos);
+    CHECK(e.row(2).find("Instrument 1 of 1") != std::string::npos && e.row(2).find("Piano") != std::string::npos);
+    CHECK(e.row(9).find("Attack") != std::string::npos);
+    // The default instrument is FM (1>2): operator 2 is the one heard, in orange; 3 and 4
+    // (a 2-op instrument's) dim, and no values under them.
+    auto fg = [&](int r, int c) { return e.v.card().vram[VC_RESET_TEXT_MAP + (r * 128 + c) * 4 + 1]; };
+    CHECK(fg(8, 17) == 250 && fg(8, 25) == 214 && fg(8, 33) == 240 && e.row(9).substr(33, 10) == "          ");
+}
+
+namespace {
+// SONGKIT's variables, by their names in the listing lwasm made.
+uint16_t kit_sym(const std::string& name) {
+    static std::string lst = host_file(std::string(REPO_DIR) + "/gamekit/build/songkit.lst");
+    std::string key = "[ G] " + name + " ";
+    size_t at = lst.find(key);
+    if (at == std::string::npos) return 0;
+    size_t nl = lst.find('\n', at);
+    std::string line = lst.substr(at, nl - at);
+    return static_cast<uint16_t>(std::stoul(line.substr(line.find_last_of(' ') + 1), nullptr, 16));
+}
+// The writes to register r in the log from index `from` on.
+V writes_to(const std::vector<Opl3Device::Write>& log, size_t from, uint16_t r) {
+    V v;
+    for (size_t i = from; i < log.size(); ++i)
+        if (log[i].reg == r) v.push_back(log[i].value);
+    return v;
+}
+constexpr uint8_t kRight = 0x4F, kLeft = 0x50, kDown = 0x51, kUp = 0x52, kMinus = 0x2D, kPlus = 0x2E;
+constexpr uint8_t kZ = 0x1D, kX = 0x1B, kC = 0x06, kOctDn = 0x2F, kEnter = 0x28, kEsc = 0x29;
+} // namespace
+
+// The arrows, + and -, the keys as a piano (notes held, chords, an octave down), a sound
+// changed while its note is held, new instruments, a name, and the mouse.
+TEST(songkit_editor_edits_and_plays_an_instrument) {
+    Editor e;
+    if (!e.ok) return;
+    CHECK(e.start());
+    uint16_t inst = kit_sym("INST");
+    CHECK(inst != 0);
+    auto ib = [&](int i, int n) { return e.s.bus.read_cpu(static_cast<uint16_t>(inst + 32 * (i - 1) + n)); };
+    // The first operator's attack is lit; right, then down: the second's decay; - makes it 2.
+    CHECK(e.lit(9) == 17);
+    e.key(kRight);
+    e.key(kDown);
+    CHECK(e.lit(10) == 25 && e.lit(9) == -1);
+    e.key(kMinus);
+    CHECK(e.row(10).substr(25, 6) == "2     " && ib(1, 10) == 0xF2);
+    CHECK(e.row(0).find("(a new song)*") != std::string::npos);
+    // Z held: C-4 on the first voice (track 0, a 4-op channel: the instrument's two operators
+    // as 1 and 2, the pair's second connection 1), keyed; let go, the key up.
+    size_t mark = e.log.size();
+    e.key(kZ, false, false, true);
+    CHECK(writes_to(e.log, mark, 0x23) == V({0x21}) && writes_to(e.log, mark, 0x63) == V({0xF2}));
+    CHECK(writes_to(e.log, mark, 0xC3) == V({0x31}) && writes_to(e.log, mark, 0xA0) == V({0x59}));
+    CHECK(writes_to(e.log, mark, 0xB0).back() == 0x31);
+    // A chord: X too, on the next voice (track 1); a change while they're held: both
+    // written again, still keyed.
+    e.key(kX, false, false, true);
+    CHECK(writes_to(e.log, mark, 0xA1) == V({0x83}) && writes_to(e.log, mark, 0xB1).back() == 0x31);
+    mark = e.log.size();
+    e.key(kPlus);
+    CHECK(ib(1, 10) == 0xF3);
+    CHECK(writes_to(e.log, mark, 0x63) == V({0xF3}) && writes_to(e.log, mark, 0x64) == V({0xF3}));
+    CHECK(writes_to(e.log, mark, 0xB0) == V({0x31}) && writes_to(e.log, mark, 0xB1) == V({0x31}));
+    mark = e.log.size();
+    e.up(kZ);
+    e.up(kX);
+    CHECK(writes_to(e.log, mark, 0xB0) == V({0x11}) && writes_to(e.log, mark, 0xB1) == V({0x11}));
+    // An octave down: Z is C-3 (block 3).
+    e.key(kOctDn);
+    CHECK(e.row(24).find("Octave 3") != std::string::npos);
+    mark = e.log.size();
+    e.key(kZ);
+    V b0 = writes_to(e.log, mark, 0xB0);
+    CHECK(std::find(b0.begin(), b0.end(), 0x2D) != b0.end());
+    // ^N: a new instrument, the second; ^D: a copy of it, the third.
+    e.key(0x11, true);
+    CHECK(e.row(2).find("Instrument 2 of 2") != std::string::npos);
+    e.key(kMinus); // (its second operator's decay 2)
+    e.key(0x07, true);
+    CHECK(e.row(2).find("Instrument 3 of 3") != std::string::npos && ib(3, 10) == 0xF2 && ib(2, 10) == 0xF2);
+    // PgUp: the second; a click on the name renames it.
+    e.key(0x4B);
+    CHECK(e.row(2).find("Instrument 2 of 3") != std::string::npos);
+    e.v.mouse_to(30 * 8 + 4, 2 * 16 + 8, 0);
+    e.frames();
+    e.v.mouse_to(30 * 8 + 4, 2 * 16 + 8, 1);
+    e.frames();
+    e.v.mouse_to(30 * 8 + 4, 2 * 16 + 8, 0);
+    e.frames();
+    CHECK(e.row(29).find("The instrument's name: Piano_") != std::string::npos);
+    for (int i = 0; i < 5; ++i) e.key(0x2A); // backspace
+    e.text("Bell 2");
+    e.key(kEnter);
+    CHECK(e.row(2).find("Name  BELL 2") != std::string::npos || e.row(2).find("Name  bell 2") != std::string::npos);
+    // The wheel over the first operator's level: one up.
+    e.v.mouse_to(17 * 8 + 4, 13 * 16 + 8, 0);
+    e.v.mouse_wheel(1);
+    e.frames(4);
+    CHECK(e.lit(13) == 17 && e.row(13).substr(17, 2) == "27" && (ib(2, 4) & 0x3F) == 27);
+    if (std::getenv("SONGKIT_SHOW")) e.show();
+}
+
+// Files: an instrument saved (.INS) and opened into another; a new song saved; a song with
+// music opened (two RAM pages of it), an instrument added, and saved as another file -- its
+// patterns as they were, moved on past the larger instrument table, the names after them;
+// Space playing it; and Esc, asked first.
+TEST(songkit_editor_opens_and_saves) {
+    Song song;
+    song.ins = {kPiano, ins2({0x22, 0x1A, 0xF2, 0x45, 0x01}, {0x22, 0x00, 0xF3, 0x36, 0x00}, 0x08)};
+    song.orders = {0, 1};
+    song.loop = 0;
+    Pattern p0, p1;
+    p0.rows = 16;
+    p0.put(0, 0, {N("C-4"), 1}).put(8, 0, {N("E-4"), 2});
+    p1.rows = 16;
+    p1.put(0, 0, {N("G-4"), 1});
+    song.pats = {p0, p1};
+    song.pad = {0, 17000};
+    std::string old = song.bytes();
+    Editor e({disk_file("TUNE.SNG", old)});
+    if (!e.ok) return;
+    auto be24 = [](const std::vector<uint8_t>& f, size_t at) { return f[at] << 16 | f[at + 1] << 8 | f[at + 2]; };
+    auto wait = [&] { e.frames(40); };
+    CHECK(e.start("tune"));
+    wait();
+    CHECK(e.row(0).find("TUNE.SNG ") != std::string::npos && e.row(2).find("Instrument 1 of 2") != std::string::npos);
+    CHECK(e.row(29).find("Opened TUNE.SNG") != std::string::npos);
+    // Instrument 2 saved as BELL.INS.
+    e.key(0x4E); // PgDn
+    e.key(0x1A, true);
+    CHECK(e.row(29).find("Save the instrument as (.INS): _") != std::string::npos);
+    e.text("BELL");
+    e.key(kEnter);
+    wait();
+    std::vector<uint8_t> bell = e.file("/BELL.INS");
+    CHECK(bell.size() == 52 && std::string(bell.begin(), bell.begin() + 4) == "PSI1");
+    CHECK(std::equal(bell.begin() + 4, bell.begin() + 36, song.ins[1].begin()));
+    // Into instrument 1, opened.
+    e.key(0x4B); // PgUp
+    e.key(0x12, true);
+    e.text("BELL.INS");
+    e.key(kEnter);
+    wait();
+    CHECK(e.row(29).find("Opened BELL.INS") != std::string::npos && e.row(0).find("TUNE.SNG*") != std::string::npos);
+    // A third instrument, and the song saved as OUT.SNG.
+    e.key(0x11, true);
+    e.key(0x04, true);
+    CHECK(e.row(29).find("Save the song as: TUNE.SNG_") != std::string::npos);
+    for (int i = 0; i < 8; ++i) e.key(0x2A);
+    e.text("OUT");
+    e.key(kEnter);
+    wait();
+    for (int i = 0; i < 20 && e.row(29).find("Saved") == std::string::npos; ++i) wait();
+    CHECK(e.row(29).find("Saved OUT.SNG") != std::string::npos && e.row(0).find("OUT.SNG ") != std::string::npos);
+    std::vector<uint8_t> out = e.file("/OUT.SNG");
+    std::vector<uint8_t> was(old.begin(), old.end());
+    CHECK(out.size() == was.size() + 32 + 3 * 16);
+    if (out.size() != was.size() + 32 + 3 * 16) return;
+    CHECK(std::equal(out.begin(), out.begin() + 9, was.begin()) && out[9] == 3);
+    CHECK(std::equal(out.begin() + 16, out.begin() + 82, was.begin() + 16)); // (title to the orders)
+    size_t patstart = 80 + 2 + 8 + 2 * 32;
+    CHECK(be24(out, 83) == be24(was, 83) + 32 && be24(out, 87) == be24(was, 87) + 32);
+    CHECK(std::equal(out.begin() + 90, out.begin() + 122, song.ins[1].begin())); // (BELL, into 1)
+    CHECK(std::equal(out.begin() + 122, out.begin() + 154, song.ins[1].begin()));
+    CHECK(std::equal(was.begin() + patstart, was.end(), out.begin() + patstart + 32));
+    CHECK(be24(out, 13) == static_cast<int>(was.size() + 32));
+    CHECK(std::string(out.end() - 16, out.end()).substr(0, 5) == "Piano");
+    // Back to instrument 1 (^Left twice: PgUp without an Fn key).
+    e.key(kLeft, true);
+    e.key(kLeft, true);
+    CHECK(e.row(2).find("Instrument 1 of 3") != std::string::npos);
+    e.key(kRight, true);
+    CHECK(e.row(2).find("Instrument 2 of 3") != std::string::npos);
+    e.key(kLeft, true);
+    // Space: the song plays (Timer 2 started), with the instruments as they are now; Space
+    // again stops it.
+    size_t mark = e.log.size();
+    e.key(0x2C);
+    e.frames(30);
+    CHECK(e.row(24).find("playing the song") != std::string::npos);
+    CHECK(writes_to(e.log, mark, 0x04).size() > 10 && writes_to(e.log, mark, 0x20).size() >= 1);
+    CHECK(writes_to(e.log, mark, 0x20)[0] == 0x22); // (instrument 1 is BELL now)
+    // A change while it plays is heard at once, on the song's track playing that instrument
+    // (track 0, half a second in: C-4 on instrument 1): its first operator's attack, 14.
+    mark = e.log.size();
+    e.key(kMinus);
+    V att = writes_to(e.log, mark, 0x60);
+    CHECK(std::find(att.begin(), att.end(), 0xE2) != att.end());
+    CHECK(e.row(24).find("playing the song") != std::string::npos);
+    e.key(0x2C);
+    CHECK(e.row(24).find("playing the song") == std::string::npos);
+    // Backspace: silence, whatever is sounding (the song too): every operator all the way down.
+    e.key(0x2C);
+    e.frames(20);
+    mark = e.log.size();
+    e.key(0x2A);
+    CHECK(e.row(29).find("All notes off") != std::string::npos);
+    CHECK(e.row(24).find("playing the song") == std::string::npos);
+    CHECK(writes_to(e.log, mark, 0x43).size() >= 1 && writes_to(e.log, mark, 0x43)[0] == 0x3F);
+    CHECK(e.opl3.reg(0x104) == 0x3F);
+    // Esc, with a change: asked; N: nothing. Esc again, Y: back to the shell.
+    e.key(kMinus);
+    e.key(kEsc);
+    CHECK(e.row(29).find("quit anyway?") != std::string::npos);
+    e.key(0x11);
+    CHECK(e.row(29).find("quit anyway?") == std::string::npos && e.row(0).find("SONGKIT") != std::string::npos);
+    e.key(kEsc);
+    e.key(0x1C);
+    e.frames(30);
+    CHECK(e.v.input_ctrl() == 0);
+    CHECK(e.s.bus.bank_register(1) == 1);
 }

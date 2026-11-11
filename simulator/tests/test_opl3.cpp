@@ -96,6 +96,20 @@ TEST(opl3_plays_a_note_and_goes_quiet_after_it) {
     CHECK(c.frames >= idle_frames + 48000 && c.frames < idle_frames + 2 * 48000);
     run(d, 0.1);
     CHECK(c.frames > idle_frames + 48000 + 4000);
+    // Unless someone pressed a key meanwhile: then the silence was theirs, and a note played
+    // by hand sounds at once.
+    reg(d, 0xB0, 0x12);
+    run(d, 3.0);
+    CHECK(!d.active());
+    idle_frames = c.frames;
+    run(d, 0.5);
+    d.heard_input();
+    run(d, 0.5);
+    note_on(d);
+    CHECK(d.active());
+    CHECK(c.frames == idle_frames);
+    run(d, 0.1);
+    CHECK(c.frames > idle_frames + 4000 && c.frames < idle_frames + 6000);
     // A long pause (someone typing at the shell) isn't played back.
     reg(d, 0xB0, 0x12);
     run(d, 3.0);

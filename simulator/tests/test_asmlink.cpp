@@ -320,6 +320,9 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     CHECK(m.run("ASM -o SONGPLAY.COM songplay.asm").find("ERROR") == std::string::npos);
     CHECK(same("/ASM/GAMEKIT/SONGPLAY.COM", host_text(repo("gamekit/build/songplay.bin")),
                m.file("/ASM/GAMEKIT/SONGPLAY.COM")));
+    CHECK(m.run("ASM -o SONGKIT.COM songkit.asm").find("ERROR") == std::string::npos);
+    CHECK(same("/ASM/GAMEKIT/SONGKIT.COM", host_text(repo("gamekit/build/songkit.bin")),
+               m.file("/ASM/GAMEKIT/SONGKIT.COM")));
 }
 
 TEST(asm_assembles_itself_and_the_copy_works) {

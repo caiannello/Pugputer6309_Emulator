@@ -20,15 +20,20 @@ make, a game loads straight into the card.
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
+| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next four |
+| `sk_ui.asm` | its screen (the card's text layer), the mouse and keys, a line of typing |
+| `sk_inst.asm` | its instrument page |
+| `sk_file.asm` | its files: songs (`.SNG`) and instruments (`.INS`) |
 | `sk_play.asm` | SONGKIT's player: plays a song on the OPL3, in a game as in the kit's own programs (below) |
 | `songplay.asm` | `SONGPLAY.COM`: plays a song file from the shell |
+| `tools/sk_fields.py` | makes the instrument page's table of fields in `sk_inst.asm`: where each is, and which is next to it |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
-`compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin` and
-`build/songplay.bin`, which carry their own program headers; `mkdiskimg` puts them in `/CMD` as
-`TILEKIT.COM` and `SONGPLAY.COM`. On the Pugputer, the release disk's `/ASM/GAMEKIT` has the
-sources: `ASM -o TILEKIT.COM tilekit.asm` (or `ASM -o SONGPLAY.COM songplay.asm`) there makes
-the same program.
+`compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin`,
+`build/songkit.bin` and `build/songplay.bin`, which carry their own program headers;
+`mkdiskimg` puts them in `/CMD` as `TILEKIT.COM`, `SONGKIT.COM` and `SONGPLAY.COM`. On the
+Pugputer, the release disk's `/ASM/GAMEKIT` has the sources: `ASM -o TILEKIT.COM tilekit.asm`
+(or `SONGKIT.COM songkit.asm`, `SONGPLAY.COM songplay.asm`) there makes the same program.
 
 ## TILEKIT
 
@@ -327,10 +332,10 @@ Metatiles (8x16, 32x32).
 ## SONGKIT
 
 SONGKIT is the kit's music, for the OPL3 (YMF262) music chip: a tracker-style editor of
-songs and of the chip's instruments (to come), and the player that plays them -- one piece of
-code, `sk_play.asm`, in a game and in the kit's own programs alike, so a song plays in a game
-as it does in the editor. What is here so far is the player, the song file it plays, and
-`SONGPLAY`.
+songs and of the chip's instruments, and the player that plays them -- one piece of code,
+`sk_play.asm`, in a game and in the kit's own programs alike, so a song plays in a game as it
+does in the editor. What is here so far is the player, the song file it plays, `SONGPLAY`,
+and the editor's instrument page; its patterns are to come.
 
 ```
 SONGPLAY file           (".SNG" is added to a name without an extension)
@@ -339,6 +344,53 @@ SONGPLAY file           (".SNG" is added to a name without an extension)
 plays a song from the shell: it is read into RAM pages of its own (up to 512KB) and played
 from there, timed by the OPL3's Timer 2. A key stops it; at its end, unless it loops, the last
 notes have a second to fade.
+
+```
+SONGKIT [file]          a song (".SNG" is added to a name without an extension)
+```
+
+opens the editor, on a song's instruments -- a new song's (one empty pattern, one
+instrument) if no file is named.
+
+### The instrument page
+
+Every setting the chip has for an instrument, on one page, heard as it is changed: the
+keyboard's letters are a piano, so a note held while a setting changes changes with it.
+
+- **Top:** the instrument's number (of how many), its name; how many operators (2 or 4), how
+  they are connected (FM, one modulating the next, or additive, each heard -- and the four
+  ways of 4), the first operator's feedback; a fixed note (a drum) or a transpose, fine tune;
+  the outputs (left, right, both); and what the keys play it on, a channel or one of the
+  chip's drums (SONGKIT's setting, not the instrument's).
+- **The operators,** a column each: attack, decay, sustain level, release, level, multiple
+  (of the note's frequency), waveform, key scale level and rate, sustained (held at the
+  sustain level while the key is down, or not), vibrato and tremolo. The operators heard --
+  the carriers, which the volume turns down -- are headed in orange; the others shape them.
+  Attack, decay and release are fastest at 15; level and sustain level loudest at 0.
+
+| Keys | |
+|---|---|
+| Z S X D C V G B H N J M , L . ; / | a piano: C, C# ... to E an octave up |
+| Q 2 W 3 E R 5 T 6 Y 7 U I 9 O 0 P | an octave above those |
+| `[` `]` | the octave down, up (0-7; 4 to start with: Z is C-4, middle C) |
+| arrows | the setting to change |
+| + (=), - | change it (no or yes: the other) |
+| Enter | on the name: rename it |
+| PgUp, PgDn (or Ctrl+Left, Ctrl+Right) | the instrument before, after |
+| Ctrl+N, Ctrl+D | a new instrument; a copy of this one (each after the last) |
+| Space | play the song, with its instruments as they are; again: stop |
+| Backspace | silence: the song stopped, every note cut off at once (even one that would never fade: a release of 0, sustained) |
+| Ctrl+O | open a song, or an instrument (`.INS`) into this one |
+| Ctrl+S, Ctrl+A | save the song; save it as another name |
+| Ctrl+W | save this instrument as a file of its own (`.INS`) |
+| Esc | back to the shell (asked first, with changes not saved) |
+
+A click picks a setting (on the name, renames it); the wheel over one changes it. Up to six
+notes sound at once, each on one of the chip's 4-op channels (so 4-op instruments play as they
+are); on a drum, one at a time.
+
+A song's music is kept as it was opened, and saved with the instruments as they are then.
+An instrument changed while the song plays is heard at once, wherever the song is playing it.
 
 ### Songs
 
@@ -440,13 +492,19 @@ Its numbers are high byte first.
 | 8 | ticks a row, 1-31 (others: 6) |
 | 9, 10, 11 | how many instruments (0-255), patterns (1-255) and orders (1-255) |
 | 12 | the loop: the order it goes back to after the last ($FF: none, it ends) |
-| 13 | 3 bytes of 0 |
+| 13 | where the instruments' names are (3 bytes, from the file's start; 0: none) |
 | 16 | the title: 32 bytes, 0s after it |
 | 48 | the author: 32 bytes |
 | 80 | the orders: a byte each, a pattern's number |
 | then | the pattern table: for each pattern its rows (1-255; 0: 64), then where it is (3 bytes, from the file's start) |
 | then | the instruments, 32 bytes each |
 | then | the patterns, wherever the table says |
+| then | (SONGKIT's) the instruments' names, 16 bytes each, 0s after each -- where offset 13 says |
+
+A player stops before the names: a game can leave them out. SONGKIT writes the patterns
+after the instruments, and the names after them.
+
+An instrument's own file (`.INS`) is `PSI1`, its 32 bytes, and its name (16).
 
 A pattern is its rows one after another, and a row its cells that aren't empty, in any order,
 each a byte -- bits 0-4 its track, bit 5 a note and an instrument follow, bit 6 a volume
@@ -474,8 +532,17 @@ of its own:
 Timer 2 is the player's, and each tick clears the timers' flags: a game can't count on Timer
 1's while a song plays. With the song in pages, their bank is the player's while it plays.
 
+For an editor (SONGKIT uses these), notes played by hand, with a song playing or not:
+
+| | |
+|---|---|
+| `SK_JSETUP` | A: the 4-op pairs (`$104`'s bits), B: flags (bit 0, rhythm mode): the chip and the tracks set so, with no song |
+| `SK_JAM` | B: a track, A: a note (1-96; `$7F` the key let go), E: an instrument (0: the track's own): played now |
+| `SK_JREF` | B: a track, E: an instrument: its registers written again, the key as it is -- a held note sounds as the instrument is now |
+| `SK_IBASE`, `SK_INUM` | (2 bytes, 1) not 0: the instruments are `SK_INUM` of 32 bytes at `SK_IBASE`, not the song's own (`SK_START` and `SK_PSTART` make it 0) |
+
 ### SONGKIT's next steps
 
-The editor (patterns, orders, and the instruments, played from the keyboard as they are
-made), sound effects on channels kept from the music, export as VGM and as assembly source,
-and on the PC, instruments taken from other formats (and a starter library).
+The pattern editor and the orders, sound effects on channels kept from the music, export as
+VGM and as assembly source, and on the PC, instruments taken from other formats (and a starter
+library).
