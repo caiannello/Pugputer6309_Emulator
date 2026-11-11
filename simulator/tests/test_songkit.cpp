@@ -629,13 +629,22 @@ TEST(songkit_song_to_wav) {
     CHECK(!keep.pcm.empty());
 }
 
-// SONGKIT starts on a new song's one instrument, and shows it.
+// SONGKIT starts on a new song's pattern page: its settings, its one order, its one
+// pattern (64 empty rows of 18 tracks, five shown); Tab shows its one instrument.
 TEST(songkit_editor_starts_with_a_new_song) {
     Editor e;
     if (!e.ok) return;
     CHECK(e.start());
     if (std::getenv("SONGKIT_SHOW")) e.show();
     CHECK(e.row(0).find("SONGKIT") != std::string::npos && e.row(0).find("(a new song)") != std::string::npos);
+    CHECK(e.row(2).find("Speed 6   Rate 60   Rows 64   Loop 00    Rhythm no") != std::string::npos);
+    CHECK(e.row(3).find("Orders >00 ") != std::string::npos);
+    CHECK(e.row(4).substr(5, 57) == "0             1             2             3             4");
+    CHECK(e.row(5).substr(2, 17) == "00 ... .. .. ... " && e.row(24).substr(2, 2) == "13");
+    CHECK(e.row(25).find("Octave 4   Instrument 01 Piano") != std::string::npos);
+    CHECK(e.row(25).find("Pattern 00 of 01") != std::string::npos);
+    CHECK(e.lit(5) == 5); // (the cursor: the first track's note)
+    e.key(0x2B); // Tab
     CHECK(e.row(2).find("Instrument 1 of 1") != std::string::npos && e.row(2).find("Piano") != std::string::npos);
     CHECK(e.row(9).find("Attack") != std::string::npos);
     // The default instrument is FM (1>2): operator 2 is the one heard, in orange; 3 and 4
@@ -672,6 +681,7 @@ TEST(songkit_editor_edits_and_plays_an_instrument) {
     Editor e;
     if (!e.ok) return;
     CHECK(e.start());
+    e.key(0x2B); // (Tab: the instrument page)
     uint16_t inst = kit_sym("INST");
     CHECK(inst != 0);
     auto ib = [&](int i, int n) { return e.s.bus.read_cpu(static_cast<uint16_t>(inst + 32 * (i - 1) + n)); };
@@ -761,8 +771,9 @@ TEST(songkit_editor_opens_and_saves) {
     auto wait = [&] { e.frames(40); };
     CHECK(e.start("tune"));
     wait();
+    CHECK(e.row(5).substr(5, 13) == "C-4 01 .. ..." && e.row(29).find("Opened TUNE.SNG") != std::string::npos);
+    e.key(0x2B); // (Tab: the instrument page)
     CHECK(e.row(0).find("TUNE.SNG ") != std::string::npos && e.row(2).find("Instrument 1 of 2") != std::string::npos);
-    CHECK(e.row(29).find("Opened TUNE.SNG") != std::string::npos);
     // Instrument 2 saved as BELL.INS.
     e.key(0x4E); // PgDn
     e.key(0x1A, true);
@@ -847,4 +858,170 @@ TEST(songkit_editor_opens_and_saves) {
     e.frames(30);
     CHECK(e.v.input_ctrl() == 0);
     CHECK(e.s.bus.bank_register(1) == 1);
+}
+
+// The pattern page: notes, a key let go, a volume and an effect typed into cells, each
+// packed into the song at once (saved, as the format has it); new patterns and orders, a
+// setting or two (the tracks change with rhythm mode and the 4-op pairs); a note put in
+// while the song plays, and heard when the song gets to it; rows in and out; the mouse.
+TEST(songkit_editor_edits_patterns) {
+    Editor e;
+    if (!e.ok) return;
+    auto wait = [&] { e.frames(40); };
+    auto be24 = [](const std::vector<uint8_t>& f, size_t at) { return f[at] << 16 | f[at + 1] << 8 | f[at + 2]; };
+    constexpr uint8_t kTab = 0x2B, kSpace = 0x2C, kIns = 0x49, kDel = 0x4C, kHome = 0x4A;
+    CHECK(e.start());
+    // Z: C-4 with instrument 1, heard (track 0: channel 0), on down a row; 1: the key let go.
+    size_t mark = e.log.size();
+    e.key(kZ, false, false, true);
+    CHECK(writes_to(e.log, mark, 0xA0) == V({0x59}) && writes_to(e.log, mark, 0xB0).back() == 0x31);
+    e.up(kZ);
+    CHECK(writes_to(e.log, mark, 0xB0).back() == 0x11);
+    e.key(0x1E);
+    // The volume's first digit: 3 (30); the effect: A (A00).
+    for (int i = 0; i < 3; ++i) e.key(kRight);
+    e.key(0x20);
+    e.key(kRight);
+    e.key(kRight);
+    e.key(0x04);
+    CHECK(e.row(5).substr(2, 17) == "00 C-4 01 .. ... ");
+    CHECK(e.row(6).substr(5, 13) == "=== .. .. ...");
+    CHECK(e.row(7).substr(5, 13) == "... .. 30 ...");
+    CHECK(e.row(8).substr(5, 13) == "... .. .. A00");
+    CHECK(e.lit(9) == 15 && e.row(0).find("(a new song)*") != std::string::npos);
+    // Saved: the pattern packed as the format has it.
+    e.key(0x16, true);
+    e.text("PAT");
+    e.key(kEnter);
+    for (int i = 0; i < 20 && e.row(29).find("Saved") == std::string::npos; ++i) wait();
+    std::vector<uint8_t> f = e.file("/PAT.SNG");
+    CHECK(f.size() > 100);
+    if (f.size() < 100) return;
+    CHECK(f[9] == 1 && f[10] == 1 && f[11] == 1 && f[81] == 64);
+    size_t at = static_cast<size_t>(be24(f, 82)), end = static_cast<size_t>(be24(f, 13));
+    const V packed = {0x20, 0x31, 0x01, 0x1F, 0x20, 0x7F, 0x00, 0x1F, 0x40, 0x31, 0x1F, 0x80, 0x41, 0x00, 0x1E, 60};
+    CHECK(at == 80 + 1 + 4 + 32 && end == at + packed.size());
+    CHECK(end <= f.size() && V(f.begin() + static_cast<long>(at), f.begin() + static_cast<long>(end)) == packed);
+    // ^N: a new pattern (01), played by a new order after this one, and shown; ^Up: back.
+    e.key(0x11, true);
+    CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(25).find("Pattern 01 of 02") != std::string::npos);
+    CHECK(e.row(5).substr(5, 13) == "... .. .. ...");
+    e.key(kUp, true);
+    CHECK(e.row(25).find("Pattern 00 of 02") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
+    // ^R: this order again; ^X: out again; + and -: the order's pattern.
+    e.key(0x15, true);
+    CHECK(e.row(3).find(">00 00 01 ") != std::string::npos);
+    e.key(0x1B, true);
+    CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(25).find("Pattern 01 of 02") != std::string::npos);
+    e.key(kMinus);
+    CHECK(e.row(3).find(">00 00 ") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
+    e.key(kPlus);
+    CHECK(e.row(3).find(">00 01 ") != std::string::npos);
+    e.key(kUp, true);
+    // The settings: up from the first row; speed 7; rhythm mode; channels 0 and 3 a 4-op pair
+    // (track 3 gone, track 0 marked 4-op).
+    e.key(kHome);
+    e.key(kUp);
+    CHECK(e.lit(1) == 8);
+    e.key(kRight);
+    e.key(kRight);
+    e.key(kPlus);
+    CHECK(e.row(2).find("Speed 7 ") != std::string::npos);
+    for (int i = 0; i < 4; ++i) e.key(kRight);
+    e.key(kPlus);
+    CHECK(e.row(2).find("Rhythm yes") != std::string::npos);
+    e.key(kRight);
+    e.key(kPlus);
+    CHECK(e.row(4).substr(5, 6) == "0 4-op" && e.row(4).substr(47, 2) == "4 ");
+    CHECK(e.opl3.reg(0x104) == 0x01 && (e.opl3.reg(0xBD) & 0x20) != 0);
+    // Down to the grid, row 8 of track 1 (from the effect column, where the cursor was);
+    // Space plays the song, and E-4 put in there is heard when the song gets there (the song
+    // moved along under the player, which keeps its place).
+    e.key(kDown);
+    for (int i = 0; i < 8; ++i) e.key(kDown);
+    for (int i = 0; i < 3; ++i) e.key(kRight);
+    CHECK(e.lit(13) == 19);
+    e.key(kSpace);
+    e.key(kC);
+    mark = e.log.size();
+    e.frames(70);
+    V b1 = writes_to(e.log, mark, 0xB1);
+    CHECK(std::find(b1.begin(), b1.end(), 0x31) != b1.end());
+    CHECK(e.row(13).substr(19, 13) == "E-4 01 .. ...");
+    bool lit = false;
+    for (int r = 5; r < 25; ++r) lit = lit || e.bg(r, 2) == 22;
+    CHECK(lit);
+    e.key(kSpace);
+    // Insert: a blank row in track 0 at the top, C-4 a row down; Shift+Delete: back up.
+    e.key(kHome);
+    for (int i = 0; i < 8; ++i) e.key(kLeft);
+    e.key(kIns);
+    CHECK(e.row(5).substr(5, 3) == "..." && e.row(6).substr(5, 3) == "C-4");
+    e.key(kDel, false, true);
+    CHECK(e.row(5).substr(5, 3) == "C-4" && e.row(6).substr(5, 3) == "===");
+    // A click: row 5 of the third track shown.
+    e.v.mouse_to(33 * 8 + 4, 10 * 16 + 8, 0);
+    e.frames();
+    e.v.mouse_to(33 * 8 + 4, 10 * 16 + 8, 1);
+    e.frames();
+    e.v.mouse_to(33 * 8 + 4, 10 * 16 + 8, 0);
+    e.frames();
+    CHECK(e.lit(10) == 33);
+    if (std::getenv("SONGKIT_SHOW")) e.show();
+}
+
+// A song across two RAM pages: its first pattern edited (all that comes after it, 17000
+// bytes and the second pattern, moved along over the pages' edge), its second one (in the
+// second page) too; saved, every byte where it should be.
+TEST(songkit_editor_edits_a_song_across_pages) {
+    Song song;
+    song.ins = {kPiano};
+    song.orders = {0, 1};
+    Pattern p0, p1;
+    p0.rows = 16;
+    p0.put(0, 0, {N("C-4"), 1});
+    p1.rows = 16;
+    p1.put(0, 0, {N("G-4"), 1});
+    song.pats = {p0, p1};
+    song.pad = {0, 17000};
+    std::string old = song.bytes();
+    Editor e({disk_file("TUNE.SNG", old)});
+    if (!e.ok) return;
+    auto be24 = [](const std::vector<uint8_t>& f, size_t at) { return f[at] << 16 | f[at + 1] << 8 | f[at + 2]; };
+    CHECK(e.start("tune"));
+    e.frames(40);
+    // Pattern 0: D-4 at row 1 (X), a volume at row 2.
+    e.key(kDown);
+    e.key(kX);
+    for (int i = 0; i < 3; ++i) e.key(kRight);
+    e.key(0x1F); // 2: volume 20 (stored one more)
+    p0.put(1, 0, {N("D-4"), 1}).put(2, 0, {0, 0, 0x21});
+    // Pattern 1 (the next order): A-4 at row 3, and what was at row 0 cleared.
+    e.key(kDown, true);
+    CHECK(e.row(25).find("Pattern 01 of 02") != std::string::npos && e.row(5).substr(5, 6) == "G-4 01");
+    for (int i = 0; i < 3; ++i) e.key(kLeft);
+    e.key(0x4A); // Home
+    e.key(0x4C); // Delete
+    e.key(kDown);
+    e.key(kDown);
+    e.key(0x10); // M: B-4
+    Pattern p1b;
+    p1b.rows = 16;
+    p1b.put(3, 0, {N("B-4"), 1});
+    song.pats = {p0, p1b};
+    // ^A: saved as OUT.SNG.
+    e.key(0x04, true);
+    for (int i = 0; i < 8; ++i) e.key(0x2A);
+    e.text("OUT");
+    e.key(kEnter);
+    for (int i = 0; i < 20 && e.row(29).find("Saved") == std::string::npos; ++i) e.frames(40);
+    std::vector<uint8_t> out = e.file("/OUT.SNG");
+    std::string w = song.bytes();
+    std::vector<uint8_t> want(w.begin(), w.end());
+    CHECK(out.size() == want.size() + 16);
+    if (out.size() != want.size() + 16) return;
+    CHECK(std::equal(want.begin(), want.begin() + 13, out.begin()));
+    CHECK(std::equal(want.begin() + 16, want.end(), out.begin() + 16)); // (but the names' place)
+    CHECK(be24(out, 13) == static_cast<int>(want.size()));
+    if (std::getenv("SONGKIT_SHOW")) e.show();
 }

@@ -20,10 +20,11 @@ make, a game loads straight into the card.
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
-| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next four |
+| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next five |
 | `sk_ui.asm` | its screen (the card's text layer), the mouse and keys, a line of typing |
 | `sk_inst.asm` | its instrument page |
 | `sk_file.asm` | its files: songs (`.SNG`) and instruments (`.INS`) |
+| `sk_pat.asm` | its pattern page: the song's settings, orders and patterns |
 | `sk_play.asm` | SONGKIT's player: plays a song on the OPL3, in a game as in the kit's own programs (below) |
 | `songplay.asm` | `SONGPLAY.COM`: plays a song file from the shell |
 | `tools/sk_fields.py` | makes the instrument page's table of fields in `sk_inst.asm`: where each is, and which is next to it |
@@ -334,8 +335,8 @@ Metatiles (8x16, 32x32).
 SONGKIT is the kit's music, for the OPL3 (YMF262) music chip: a tracker-style editor of
 songs and of the chip's instruments, and the player that plays them -- one piece of code,
 `sk_play.asm`, in a game and in the kit's own programs alike, so a song plays in a game as it
-does in the editor. What is here so far is the player, the song file it plays, `SONGPLAY`,
-and the editor's instrument page; its patterns are to come.
+does in the editor. Here so far: the player, the song file it plays, `SONGPLAY`, and the
+editor, with a page for the song's patterns and one for its instruments.
 
 ```
 SONGPLAY file           (".SNG" is added to a name without an extension)
@@ -349,8 +350,57 @@ notes have a second to fade.
 SONGKIT [file]          a song (".SNG" is added to a name without an extension)
 ```
 
-opens the editor, on a song's instruments -- a new song's (one empty pattern, one
-instrument) if no file is named.
+opens the editor on a song's pattern page -- a new song's (one empty pattern of 64 rows, one
+instrument) if no file is named. Tab goes from the pattern page to the instrument page and
+back. On either, the keyboard's letters are a piano, Space plays the song (from the order
+being edited) or stops it, and a change is heard at once, even while the song plays.
+
+### The pattern page
+
+At the top, the song's settings: its title and author; its **speed** (ticks a row) and
+**rate** (ticks a second); this pattern's **rows**; the **loop** (the order the song goes
+back to at its end, or none); **rhythm** mode; and which of the chip's channels are **4-op**
+pairs (0 with 3, 1 with 4 ... -- channel 0's pair lit when it is one). Below them the
+**orders**, each the pattern it plays (the one being edited lit, the one playing in orange,
+the loop's marked `>`); then the pattern that order plays, a row of the grid for each of its
+rows and a column for each of the song's tracks, five at a time. A cell reads
+
+```
+C-4 01 30 A0F       note, instrument, volume, effect and its parameter (all in hex)
+=== .. .. ...       the key let go; dots: nothing there
+```
+
+The cursor is on a field of a cell (lit); typing there puts in a note, or a digit, and moves
+down a row. The row being played is shown in green as the song plays.
+
+| Keys | |
+|---|---|
+| arrows | the cursor: a field, a row; up from the first row to the settings (left and right pick one, + and - change it, down goes back) |
+| PgUp, PgDn, Home, End | 16 rows up, down; the first row, the last |
+| Z-M, Q-P (the piano's keys) | in the note field: that note, with the instrument being used, heard as it goes in |
+| 1 | in the note field: the key let go |
+| 0-9, A-F | in the other fields: that digit (an effect: 0-9 or A-Z) |
+| Delete | the field cleared (a note with its instrument; an effect with its parameter) |
+| Insert, Ctrl+Insert | a blank row at the cursor, the rows below down one (the last lost): in this track, in all |
+| Shift+Delete, Ctrl+Delete | the row at the cursor out, the rows below up one: in this track, in all |
+| Ctrl+Up, Ctrl+Down | the order before, after |
+| + (=), - | this order plays the pattern after, before (in the settings: the setting changed) |
+| Ctrl+N, Ctrl+D | a new pattern (empty), a copy of this one: played by a new order after this one |
+| Ctrl+R, Ctrl+X | this order again (after it); this order out (its pattern stays) |
+| Ctrl+Left, Ctrl+Right | the instrument notes go in with: before, after |
+| `[` `]` | the octave down, up |
+| Enter | on the title, the author: type it again |
+| Tab | the instrument page |
+| Space, Backspace, Esc, Ctrl+O, S, A, W | as on the instrument page |
+
+A click picks a cell, an order, or a setting (the title or the author: typed again); the
+wheel over a setting changes it, over the grid moves the cursor. Rhythm mode and the 4-op
+pairs change the song's tracks: the song stops first. SONGKIT edits patterns of up to 128
+rows (a longer one, from elsewhere, is played and kept as it is).
+
+The song is kept in RAM as its file has it: each change to a pattern is packed into it at
+once (what comes after moved along), and the player is told (`SK_RESYNC`), so it goes on
+from the same order and row.
 
 ### The instrument page
 
@@ -383,19 +433,19 @@ keyboard's letters are a piano, so a note held while a setting changes changes w
 | Ctrl+O | open a song, or an instrument (`.INS`) into this one |
 | Ctrl+S, Ctrl+A | save the song; save it as another name |
 | Ctrl+W | save this instrument as a file of its own (`.INS`) |
+| Tab | the pattern page |
 | Esc | back to the shell (asked first, with changes not saved) |
 
 A click picks a setting (on the name, renames it); the wheel over one changes it. Up to six
 notes sound at once, each on one of the chip's 4-op channels (so 4-op instruments play as they
 are); on a drum, one at a time.
 
-A song's music is kept as it was opened, and saved with the instruments as they are then.
 An instrument changed while the song plays is heard at once, wherever the song is playing it.
 
 ### Songs
 
-A song is a list of **orders**, each naming a **pattern** to play; a pattern is up to 64 (in
-the file, 255) **rows**, and a row has a **cell** for each of the song's 20 **tracks**. A row
+A song is a list of **orders**, each naming a **pattern** to play; a pattern is up to 255
+**rows** (128 in SONGKIT), and a row has a **cell** for each of the song's 20 **tracks**. A row
 lasts *speed* **ticks** (6, to start with), and the song plays *rate* ticks a second (60, to
 start with): so 10 rows a second, at first. At the end of its orders a song goes back to its
 **loop** order -- or, with none, ends.
@@ -540,9 +590,10 @@ For an editor (SONGKIT uses these), notes played by hand, with a song playing or
 | `SK_JAM` | B: a track, A: a note (1-96; `$7F` the key let go), E: an instrument (0: the track's own): played now |
 | `SK_JREF` | B: a track, E: an instrument: its registers written again, the key as it is -- a held note sounds as the instrument is now |
 | `SK_IBASE`, `SK_INUM` | (2 bytes, 1) not 0: the instruments are `SK_INUM` of 32 bytes at `SK_IBASE`, not the song's own (`SK_START` and `SK_PSTART` make it 0) |
+| `SK_RESYNC` | the song changed in its memory while it plays (patterns or orders edited, the bytes after them moved along): its header read again, and its place found again -- the same order, the same row |
 
 ### SONGKIT's next steps
 
-The pattern editor and the orders, sound effects on channels kept from the music, export as
-VGM and as assembly source, and on the PC, instruments taken from other formats (and a starter
-library).
+Copying and pasting blocks of a pattern, sound effects on channels kept from the music,
+export as VGM and as assembly source, and on the PC, instruments taken from other formats
+(and a starter library).

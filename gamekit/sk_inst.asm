@@ -35,19 +35,36 @@ F_OP        equ  7
 F_UP        equ  8          ; (then down, left and right)
 F_FIX       equ  4          ; the fixed-note field (its number)
 
-; SETIP: IP and NP, the instrument being edited and its name.
+; SETIP: IP and NP, the instrument being edited and its name (a copy, in
+; CURNAME, of the names' page's: PUTNAME puts it back).
 SETIP       LDA  CURI
             DECA
             LDB  #SK_ILEN
             MUL
             ADDD #INST
             STD  IP
+            LDX  #CURNAME
+            STX  NP
+            BSR  NAMEAT
+            LDY  #CURNAME
+            LDW  #16
+            TFM  X+,Y+
+            CLR  ,Y
+            RTS
+PUTNAME     BSR  NAMEAT
+            TFR  X,Y
+            LDX  #CURNAME
+            LDW  #16
+            TFM  X+,Y+
+            RTS
+; NAMEAT: X, instrument CURI's name in the names' page (in the window).
+NAMEAT      JSR  NMAP
             LDA  CURI
             DECA
             LDB  #16
             MUL
-            ADDD #NAMES
-            STD  NP
+            ADDD #WINDOW
+            TFR  D,X
             RTS
 ; FADDR: Y, field A. (A kept.)
 FADDR       PSHS A
@@ -354,19 +371,23 @@ FHIT9       ANDCC #$FE
 ; Drawing it.
 ;------------------------------------------------------------------------------
 DRAWPAGE    JSR  TXCLR
-            LDX  #LABELS        ; the labels: column, row, the text
-DP1         LDD  ,X++
+            LDX  #LABELS
+            BSR  DRAWLAB
+            JSR  DRAWTITLE
+            JSR  DRAWSTAT
+            BRA  DRAWVALS
+; DRAWLAB: the labels at X: each its column, its row, its color, its text.
+DRAWLAB     LDD  ,X++
             CMPA #$FF
-            BEQ  DP2
+            BEQ  DL9
             JSR  TXAT
             PSHS A
-            LDA  ,X+            ; its color
+            LDA  ,X+
             STA  TXFG
             PULS A
             JSR  TXSTR
-            BRA  DP1
-DP2         JSR  DRAWTITLE
-            JSR  DRAWSTAT
+            BRA  DRAWLAB
+DL9         RTS
 ; DRAWVALS: every field, the instrument's number, the operators' headings
 ; (those heard lit), and the note's label.
 DRAWVALS    CLRA
@@ -628,8 +649,11 @@ DT2         JSR  TXCH
             CLR  TXBG
             RTS
 
-; DRAWSTAT: the octave the keys play, and whether the song is playing.
-DRAWSTAT    LDD  #$0218
+; DRAWSTAT: the octave the keys play, and whether the song is playing (and
+; on the pattern page, more: PSTAT).
+DRAWSTAT    TST  PAGE
+            LBEQ PSTAT
+            LDD  #$0218
             JSR  TXAT
             CLR  TXBG
             LDA  #C_LABEL
@@ -739,7 +763,7 @@ LABELS      FCB  2,2,C_LABEL
             FCC  "PgUp PgDn (^arrows): instrument  ^N new  ^D copy  Space: song  Bksp: hush"
             FCB  0
             FCB  2,28,C_HELP
-            FCC  "^O open   ^S save song   ^A save as   ^W save instrument   Esc: quit"
+            FCC  "^O open  ^S save  ^A save as  ^W save instrument  Tab: patterns  Esc: quit"
             FCB  0
             FCB  $FF,$FF
 S_OF        FCC  " of "

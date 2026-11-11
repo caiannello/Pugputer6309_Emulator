@@ -7,12 +7,12 @@
 ;
 ;   SONGKIT [file]      a song (.SNG, the default) to open
 ;
-; So far, its instruments: every setting of the chip's for one, on one page,
-; heard as it is edited -- the keyboard's two rows of letters are a piano
-; (Z-M, and Q-P an octave up), up to six notes at once. A song's music is kept
-; as it was opened and saved with its instruments as they are now; Space plays
-; it, with them. The instruments are played by the player games use
-; (sk_play.asm).
+; Two pages, Tab from one to the other: the song's patterns (its settings, its
+; orders, and the pattern an order plays, a grid of rows and tracks: sk_pat.asm),
+; and its instruments (every setting of the chip's for one, heard as it is
+; edited: sk_inst.asm). The keyboard's two rows of letters are a piano (Z-M,
+; and Q-P an octave up). Space plays the song as it is -- a change is heard at
+; once, while it plays -- by the player games use (sk_play.asm).
 ;
 ;   ASM -o SONGKIT.COM songkit.asm     makes SONGKIT.COM
 ;------------------------------------------------------------------------------
@@ -37,6 +37,8 @@ START       LDS  #KIT_STACK
             CLR  NPG
             CLR  NNPG
             CLR  MODE
+            CLR  PAGE
+            CLR  SETF
             CLR  SONGON
             CLR  PLAYON
             LDA  #4
@@ -48,6 +50,14 @@ START       LDS  #KIT_STACK
             SWI2
             STA  WHOME
             JSR  UISTART
+            LDA  #B_PAGE_ALLOC  ; the pattern buffer's page, and the names'
+            SWI2
+            LBCS NOMEM
+            STA  PBPG
+            LDA  #B_PAGE_ALLOC
+            SWI2
+            LBCS NOMEM
+            STA  NMPG
             JSR  NEWSONG
             LBCS NOMEM
             LDA  #B_ARGS        ; a file named?
@@ -72,14 +82,18 @@ ST2A        STA  ,Y+
             BNE  ST2
 ST3         CLR  ,Y
             JSR  JAMSET
-            JSR  DRAWPAGE
+            JSR  DRAWCUR
             TST  PR_BUF
             BEQ  MAIN
             JSR  OPENNAMED      ; (its name in PR_BUF)
 ;------------------------------------------------------------------------------
 ; The main loop: the song's ticks, the mouse, the keys.
 ;------------------------------------------------------------------------------
-MAIN        JSR  SK_POLL
+MAIN        TST  SONGON         ; (the window the player's: the editor's pages
+            BEQ  MAIN0          ; come and go in it)
+            LDB  SK_PG
+            JSR  SKMAP
+MAIN0       JSR  SK_POLL
             TST  SONGON         ; the song over by itself?
             BEQ  MAIN1
             TST  SK_PLAYING
@@ -87,10 +101,15 @@ MAIN        JSR  SK_POLL
             CLR  SONGON
             JSR  JAMSET
             JSR  DRAWSTAT
-MAIN1       JSR  POLLIN
+MAIN1       JSR  PLAYPOS
+            JSR  POLLIN
             TST  MODE
             BNE  MAIN2
-            JSR  MOUSE
+            TST  PAGE
+            BNE  MAIN1A
+            JSR  PMOUSE
+            BRA  MAIN2
+MAIN1A      JSR  MOUSE
 MAIN2       JSR  GETKEY
             BEQ  MAIN
             JSR  KEYDO
@@ -150,7 +169,9 @@ KDTYPE      JSR  PRKEY          ; a line of typing
 KD1         TSTB                ; a key let go: a note's end
             BPL  KD2
             JMP  PIANOUP
-KD2         LDB  KEYMODS
+KD2         TST  PAGE           ; (the pattern page's own)
+            LBEQ PKEY
+            LDB  KEYMODS
             BITB #VC_MOD_CTL
             BNE  KDCTL
             JSR  PIANODN        ; a note?
@@ -192,6 +213,8 @@ KEYTAB      FCB  K_UP
             FDB  KNEXT
             FCB  K_SPACE
             FDB  KSONG
+            FCB  K_TAB
+            FDB  KTAB
             FCB  K_ENTER
             FDB  KENTER
             FCB  K_ESC
@@ -248,6 +271,8 @@ KNEXT       LDA  CURI
             BHS  KOCT9
             INC  CURI
 KINST       JSR  SETIP
+            TST  PAGE
+            LBEQ DRAWSTAT
             JMP  DRAWVALS
 KENTER      TST  CURF           ; on the name: rename it
             BNE  KOCT9
@@ -273,7 +298,8 @@ RN2         DECB
             BEQ  RN3
             CLR  ,Y+
             BRA  RN2
-RN3         LDA  #1
+RN3         JSR  PUTNAME
+            LDA  #1
             STA  CHANGED
             JSR  CLRMSG
             JSR  DRAWTITLE
@@ -292,7 +318,10 @@ KSONG1      JSR  CLRVOICES
             JSR  SK_PSTART
             BCS  KSONG9
             JSR  USEINST
-            LDA  #1
+            LDA  CURORD         ; from the order being edited
+            BEQ  KSONG2
+            JSR  SKORDER
+KSONG2      LDA  #1
             STA  SONGON
 KSONG9      JMP  DRAWSTAT
 ; KHUSH: silence: the song stopped, every note cut off (even one that would
@@ -310,6 +339,12 @@ KQUIT       TST  CHANGED
             JMP  ASK
 QUITNOW     JSR  SK_OFF
             JSR  FREEPG
+            LDB  PBPG
+            LDA  #B_PAGE_FREE
+            SWI2
+            LDB  NMPG
+            LDA  #B_PAGE_FREE
+            SWI2
             JSR  UIEND
             LDA  #B_EXIT
             SWI2
@@ -343,7 +378,11 @@ DUPINST     LDX  IP
 ADDINST     LDA  NINST
             CMPA #MAXINST
             BHS  ADD9
-            PSHS X,Y
+            PSHS X
+            TFR  Y,X            ; (its name kept: Y may be CURNAME, about to change)
+            LDY  #NAMETMP
+            LDW  #16
+            TFM  X+,Y+
             INC  NINST
             LDA  NINST
             STA  CURI
@@ -352,10 +391,11 @@ ADDINST     LDA  NINST
             LDY  IP
             LDW  #SK_ILEN
             TFM  X+,Y+
-            PULS X
+            LDX  #NAMETMP
             LDY  NP
             LDW  #16
             TFM  X+,Y+
+            JSR  PUTNAME
             JSR  USEINST
             LDA  #1
             STA  CHANGED
@@ -377,7 +417,11 @@ USEINST     LDX  #INST
 ; instruments play as they are), and rhythm mode (for the drums).
 JAMSET      LDA  #$3F
             LDB  #1
-            JSR  SK_JSETUP
+            TST  PAGE           ; (the pattern page: the song's own tracks)
+            BNE  JS1
+            LDA  SPAIRS
+            LDB  SFLAGS
+JS1         JSR  SK_JSETUP
             JSR  USEINST
 CLRVOICES   LDX  #VKEY
             LDB  #NVOICE
@@ -387,29 +431,16 @@ CV1         CLR  ,X+
             RTS
 ; PIANODN: key A a note? (Carry set if not.) It starts, on a voice of its
 ; own -- or the drum Play on says.
-PIANODN     LDX  #PIANO
-PD1         LDB  ,X++
-            LBEQ PD9
-            CMPA -2,X
-            BNE  PD1
-            LDB  -1,X           ; its place in the two octaves
+PIANODN     JSR  PIANOKEY
+            LBCS PD9
             STA  PDKEY
+            STB  PDNOTE
             LDX  #VKEY          ; (a held key repeating: nothing)
             LDE  #NVOICE
 PD2         CMPA ,X+
             BEQ  PD8
             DECE
             BNE  PD2
-            LDA  OCT
-            PSHS B
-            LDB  #12
-            MUL
-            ADDB ,S+
-            INCB
-            CMPB #96
-            BLS  PD3
-            LDB  #96
-PD3         STB  PDNOTE
             CLRA                ; a voice: a free one, or the next in turn
             LDX  #VKEY
 PD4         TST  A,X
@@ -451,6 +482,39 @@ PD8         ANDCC #$FE
             RTS
 PD9         ORCC #1
             RTS
+; PIANOKEY: key A one of the piano's? B its note (1-96, at the octave OCT),
+; carry clear; carry set if not. (A kept.)
+PIANOKEY    LDX  #PIANO
+PKY0        LDB  ,X++
+            BEQ  PKYNO
+            CMPA -2,X
+            BNE  PKY0
+            PSHS A
+            LDA  OCT
+            LDB  #12
+            MUL
+            ADDB -1,X           ; (its place in the two octaves)
+            INCB
+            CMPB #96
+            BLS  PKY1A
+            LDB  #96
+PKY1A       PULS A
+            ANDCC #$FE
+            RTS
+PKYNO       ORCC #1
+            RTS
+; KTAB: Tab: the other page.
+KTAB        LDA  PAGE
+            EORA #1
+            STA  PAGE
+            TST  SONGON         ; (the chip for its keys, unless the song plays)
+            BNE  KTAB1
+            JSR  JAMSET
+KTAB1       JMP  DRAWCUR
+; DRAWCUR: the page being shown, drawn.
+DRAWCUR     TST  PAGE
+            LBEQ DRAWPAT
+            JMP  DRAWPAGE
 ; PIANOUP: key A let go: its note too.
 PIANOUP     CLRB
 PU1         LDX  #VKEY
@@ -505,19 +569,26 @@ S_NOMEM     FCC  "SONGKIT: not enough memory"
             INCLUDE "sk_ui.asm"
             INCLUDE "sk_inst.asm"
             INCLUDE "sk_file.asm"
+            INCLUDE "sk_pat.asm"
             INCLUDE "sk_play.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------
 MODE        RMB  1          ; 0 editing; 1 a line being typed; 2 a question
+PAGE        RMB  1          ; the page shown: 0 the patterns', 1 the instruments'
+PBPG        RMB  1          ; the pattern buffer's page, and the names'
+NMPG        RMB  1
 PR_DO       RMB  2          ; what Enter does, after typing
 CF_DO       RMB  2          ; what Y does, to a question
 CHANGED     RMB  1          ; changes not saved
 SONGON      RMB  1          ; the song playing
 NINST       RMB  1          ; the instruments: how many, the one edited
 CURI        RMB  1
-IP          RMB  2          ; it, and its name
-NP          RMB  2
+IP          RMB  2          ; it, and its name (NP: CURNAME, a copy of the names'
+NP          RMB  2          ; page's)
+CURNAME     RMB  17
+NAMETMP     RMB  16
+PNI         RMB  1
 CURF        RMB  1          ; the field being edited
 OCT         RMB  1          ; the keys' octave
 PLAYON      RMB  1          ; 0 a channel, 1-5 a drum
@@ -580,10 +651,73 @@ SPTO        RMB  3
 SPLEN       RMB  2
 DELTA       RMB  2
 HBUF        RMB  80
+SPAIRS      RMB  1          ; the song's 4-op pairs and flags (its header's)
+SFLAGS      RMB  1
+CURORD      RMB  1          ; (sk_pat.asm's) the order being edited, its pattern
+CURPAT      RMB  1
+PATOK       RMB  1          ;   (in the buffer, to edit), its rows,
+PROWS       RMB  1
+PATOFS      RMB  3          ;   where it is in the song, and how long
+PATLEN      RMB  2
+CROW        RMB  1          ; the cursor: row, track (of TLIST), field
+CTRK        RMB  1
+CCOL        RMB  1
+TOPROW      RMB  1          ; the first row shown, the first track
+LTRK        RMB  1
+AREA        RMB  1          ; 0 the grid, 1 the settings (SETF the one picked)
+SETF        RMB  1
+OTOP        RMB  1          ; the first order shown
+PLORD       RMB  1          ; where the song is playing, as shown ($FF: not)
+PLROW       RMB  1
+PPOLD       RMB  2
+TLIST       RMB  SK_NTRK    ; the song's tracks, how many
+NTL         RMB  1
+MROW        RMB  1          ; the mouse's cell
+MCOL        RMB  1
+DRR         RMB  1          ; (drawing)
+DRS         RMB  1
+DRN         RMB  1
+DRF         RMB  1
+DRBG        RMB  1
+DRX         RMB  2
+DGR         RMB  1
+DGN         RMB  1
+PNIB        RMB  1          ; (typing)
+PKIND       RMB  1
+PALL        RMB  1
+PTMP        RMB  1
+PKROW       RMB  1          ; (packing, unpacking)
+PKN         RMB  1
+PKLEN       RMB  2
+RFLAG       RMB  1
+RENT        RMB  1
+RGUARD      RMB  1
+RJUNK       RMB  5
+WOFS        RMB  3
+IPREM       RMB  2
+IPN         RMB  2
+IOPK        RMB  2
+APSIZE      RMB  2
+SLAT        RMB  3          ; (SPLICE)
+SLOLD       RMB  2
+SLNEW       RMB  2
+SLD         RMB  2
+SLTHR       RMB  3
+SLSRC       RMB  3
+SLDST       RMB  3
+SLLEN       RMB  3
+SLCF        RMB  3
+SLCT        RMB  3
+SLN         RMB  2
+ROWLEN      RMB  MAXROWS    ; each row's cells' bytes, packed
+RBUF        RMB  ROWB       ; a row read
+WBUF        RMB  6*SK_NTRK+4 ; a row packed
 ; (The large ones are only addresses, after the program's last byte.)
 IOBUF       equ  *          ; 1024
 INST        equ  IOBUF+1024 ; the instruments, 32 bytes each
-NAMES       equ  INST+MAXINST*SK_ILEN ; and their names
-VAREND      equ  NAMES+MAXINST*16
+VAREND      equ  INST+MAXINST*SK_ILEN
+            IFGT VAREND-(KIT_STACK-512)
+            ERROR "SONGKIT's variables reach its stack"
+            ENDC
 
             END  START

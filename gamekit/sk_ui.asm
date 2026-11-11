@@ -223,16 +223,20 @@ GETKEY9     RTS
 
 ;------------------------------------------------------------------------------
 ; A line of typing, on row 29: PRSTART with X the question, Y the text to start
-; with (or 0), A: 1 for a file's name (upper case, no spaces); then PRKEY with
+; with (or 0), A: 1 for a file's name (upper case, no spaces, 40 at most), 0
+; for an instrument's (16), 2 for a song's title (32); then PRKEY with
 ; each key (A usage, B character) -- it answers A = 0 (go on), 1 (Enter:
 ; PR_BUF holds the line, 0 at its end) or 2 (Esc).
 ;------------------------------------------------------------------------------
 PRSTART     STX  PR_ASK
             STA  PR_FILE
-            LDB  #PR_MAX        ; (a file's name 40 characters, others 16)
-            TSTA
-            BNE  PRSTART0
+            LDB  #PR_MAX        ; (a file's name 40 characters, a title 32,
+            CMPA #1             ; others 16)
+            BEQ  PRSTART0
             LDB  #16
+            TSTA
+            BEQ  PRSTART0
+            LDB  #32
 PRSTART0    STB  PR_MAXL
             CLR  PR_LEN
             CMPY #0
@@ -264,8 +268,9 @@ PRKEY       TSTB                ; (a key let go: nothing)
             BLO  PRKEY0         ; (nothing typed)
             CMPB #$7F
             BHS  PRKEY0
-            TST  PR_FILE
-            BEQ  PRKEY4
+            LDA  PR_FILE
+            CMPA #1
+            BNE  PRKEY4
             CMPB #$20           ; a name: no spaces, upper case
             BEQ  PRKEY0
             CMPB #'a

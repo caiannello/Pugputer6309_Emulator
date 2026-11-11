@@ -3,11 +3,12 @@
 ;    FILE: sk_file.asm
 ;
 ; SONGKIT's files. The song is kept as its file is, in RAM pages of its own
-; (PAGES, seen through bank 1), so its music is played and saved as it came;
-; its instruments and their names are in INST and NAMES, to edit. Saving
-; writes the file again with the instruments as they are now (their names
-; after the patterns, where the header's bytes 13-15 say), the patterns moved
-; along as the instruments before them grow or shrink.
+; (PAGES, seen through bank 1), where the player plays it and the pattern page
+; edits it (sk_pat.asm); its instruments and their names are in INST and the
+; names' page (NMPG), to edit. Saving writes the file again with the
+; instruments as they are now (their names after the patterns, where the
+; header's bytes 13-15 say), the patterns moved along as the instruments
+; before them grow or shrink.
 ;
 ; An instrument's own file (.INS): "PSI1", its 32 bytes, its name (16).
 ;
@@ -51,8 +52,9 @@ NS1         CLR  ,X+
             LDD  #119
             STD  SSIZE+1
             JSR  PARSE
+            JSR  NMAP
             LDX  #DEFNAME
-            LDY  #NAMES
+            LDY  #WINDOW
             LDW  #16
             TFM  X+,Y+
             CLR  SONGNAME
@@ -127,7 +129,7 @@ OS1         JSR  FREEPG         ; the old song's pages given back, the new ones 
             STA  CURI
             JSR  SETIP
             JSR  JAMSET
-            JSR  DRAWPAGE
+            JSR  DRAWCUR
             LDX  #S_OPENED
             JSR  MSG
             LDX  #SONGNAME
@@ -168,11 +170,12 @@ LI1         CMPX #INSLEN
             LDY  NP
             LDW  #16
             TFM  X+,Y+
+            CLR  ,Y
+            JSR  PUTNAME
             LDA  #1
             STA  CHANGED
             JSR  JAMREF
-            JSR  DRAWTITLE
-            JSR  DRAWVALS
+            JSR  DRAWCUR
             LDX  #S_OPENED
             JSR  MSG
             LDX  #FNAME
@@ -285,6 +288,10 @@ TABLES      LDA  WINDOW+11
             STA  NPAT
             LDA  WINDOW+9
             STA  OLDNI
+            LDA  WINDOW+5
+            STA  SPAIRS
+            LDA  WINDOW+4
+            STA  SFLAGS
             LDB  NPAT
             CLRA
             LSLD
@@ -300,8 +307,22 @@ TABLES      LDA  WINDOW+11
             STD  DSTART
             RTS
 ; PARSE: the song in PAGES (SSIZE its size) SONGKIT's: its instruments and
-; their names into INST and NAMES.
-PARSE       JSR  MAP0
+; their names into INST and the names' page; its first order's pattern into
+; the pattern buffer, to edit.
+PARSE       BSR  PARSE0
+            CLR  CURORD         ; its first order, row, track
+            CLR  CROW
+            CLR  CTRK
+            CLR  CCOL
+            CLR  TOPROW
+            CLR  LTRK
+            CLR  AREA
+            CLR  OTOP
+            LDD  #$FFFF
+            STD  PLORD
+            JSR  MKTLIST
+            JMP  PATLOAD
+PARSE0      JSR  MAP0
             JSR  TABLES
             LDD  WINDOW+13      ; its names, and where its patterns end
             STD  NAMEOFS
@@ -319,11 +340,13 @@ PA1         LDD  NAMEOFS
             STD  DEND
             LDA  NAMEOFS+2
             STA  DEND+2
-PA2         LDX  #NAMES         ; no names yet
+PA2         JSR  NMAP           ; no names yet
+            LDX  #WINDOW
             LDW  #MAXINST*16
-PA3         CLR  ,X+
-            DECW
-            BNE  PA3
+            CLR  PTMP
+            LDY  #PTMP
+            TFM  Y,X+
+            JSR  MAP0
             LDA  OLDNI          ; the instruments
             STA  NINST
             BNE  PA4
@@ -350,15 +373,29 @@ PA4         LDX  #WINDOW
 PA5         LDA  NAMEOFS
             LDX  NAMEOFS+1
             JSR  RSEEK
-            LDY  #NAMES
-            LDA  OLDNI
+            CLR  PNI
+PA6         LDA  PNI            ; each, by way of NAMETMP
+            CMPA OLDNI
+            BHS  PA9
+            LDY  #NAMETMP
+            LDB  #16
+PA7         JSR  RGETB
+            STA  ,Y+
+            DECB
+            BNE  PA7
+            JSR  NMAP
+            LDA  PNI
             LDB  #16
             MUL
-            TFR  D,W
-PA6         JSR  RGETB
-            STA  ,Y+
-            DECW
-            BNE  PA6
+            ADDD #WINDOW
+            TFR  D,Y
+            LDX  #NAMETMP
+            LDW  #16
+            TFM  X+,Y+
+            LDB  RPG            ; (back to reading)
+            JSR  MAPPG
+            INC  PNI
+            BRA  PA6
 PA9         RTS
 
 ;------------------------------------------------------------------------------
@@ -483,7 +520,8 @@ SV3         STA  ,Y
             STA  SPTO+2
             JSR  WRSPAN
             LBCS SVERR
-            LDX  #NAMES         ; the names
+            JSR  NMAP           ; the names
+            LDX  #WINDOW
             LDA  NINST
             LDB  #16
             MUL
@@ -626,12 +664,12 @@ MAP0        PSHS B
             PULS B,PC
 MAPPG       PSHS D,X
             PSHSW
+            STB  RPG            ; (past the last: the last shown, RPG as asked)
             CMPB NPG
             BLO  MP1
             LDB  NPG
             DECB
-MP1         STB  RPG
-            LDX  #PAGES
+MP1         LDX  #PAGES
             LDE  B,X
             LDB  #WBANK
             LDA  #B_BANK_SET

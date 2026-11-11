@@ -28,6 +28,9 @@
 ;   SK_JREF    B: a track, E: an instrument -> its registers written again,
 ;              the key as it is (a held note changes as it is edited)
 ;   SK_IREF    E: an instrument -> the same, on every track playing it
+;   SK_RESYNC  the song changed in its memory while it plays (patterns or
+;              orders edited, moved along) -> its header read again, and its
+;              place found again: the same order, the same row
 ;   SK_IBASE   (2 bytes; SK_START and SK_PSTART make it 0) not 0: the
 ;   SK_INUM    instruments are SK_INUM of 32 bytes there, not the song's own
 ;   SK_PLAYING (a byte) not 0 while the song plays
@@ -108,32 +111,8 @@ SKBEGIN     JSR  SK_OFF
             LDD  #0
             STD  SK_TICKS
             STD  SK_IBASE
-            LDX  #0         ; the header
-            CLRA
-            JSR  SKSEEK
-            LDX  #SK_HDR
-            LDB  #16
-SKB1        JSR  SKGETB
-            STA  ,X+
-            DECB
-            BNE  SKB1
-            LDD  SK_HDR     ; "PSG1"
-            CMPD #$5053
-            LBNE SKBAD
-            LDD  SK_HDR+2
-            CMPD #$4731
-            LBNE SKBAD
-            LDB  SK_HDR+11  ; orders: one at least
-            LBEQ SKBAD
-            CLRA            ; where the pattern table and the instruments are
-            ADDD #SK_HLEN
-            STD  SK_PTAB
-            LDB  SK_HDR+10
-            CLRA
-            LSLD
-            LSLD
-            ADDD SK_PTAB
-            STD  SK_ITAB
+            JSR  SKHEAD
+            BCS  SKBAD
             JSR  SKCHIP
             LDA  SK_HDR+8   ; ticks a row: 1-31 (6 if it says otherwise)
             BEQ  SKB3
@@ -156,6 +135,77 @@ SKB5        JSR  SKRATE
             RTS
 SKBAD       ORCC #1
             RTS
+; SKHEAD: the song's header into SK_HDR, and where its tables are; carry set
+; if it isn't a song.
+SKHEAD      LDX  #0
+            CLRA
+            JSR  SKSEEK
+            LDX  #SK_HDR
+            LDB  #16
+SKH1        JSR  SKGETB
+            STA  ,X+
+            DECB
+            BNE  SKH1
+            LDD  SK_HDR     ; "PSG1"
+            CMPD #$5053
+            BNE  SKBAD
+            LDD  SK_HDR+2
+            CMPD #$4731
+            BNE  SKBAD
+            LDB  SK_HDR+11  ; orders: one at least
+            BEQ  SKBAD
+            CLRA            ; where the pattern table and the instruments are
+            ADDD #SK_HLEN
+            STD  SK_PTAB
+            LDB  SK_HDR+10
+            CLRA
+            LSLD
+            LSLD
+            ADDD SK_PTAB
+            STD  SK_ITAB
+            ANDCC #$FE
+            RTS
+
+; SK_RESYNC: the song changed where it lies (an editor's doing): its header
+; read again, and its place in it found again -- the same order, the same row.
+SK_RESYNC   TST  SK_PLAYING
+            BEQ  SKY9
+            JSR  SKHEAD
+            BCS  SKY9
+            LDA  SK_ROW     ; the rows read so far: through this one, once its
+            TST  SK_TICKN   ; first tick is past
+            BEQ  SKY1
+            INCA
+SKY1        STA  SK_BROW
+            LDA  SK_ORD     ; (an order past the last now: the loop, or the end)
+            JSR  SKORDER
+            TST  SK_PLAYING
+            BEQ  SKY9
+            LDA  #1
+            STA  SK_DISC
+SKY2        LDA  SK_ROW     ; passed over again
+            CMPA SK_BROW
+            BHS  SKY4
+            CMPA SK_ROWS
+            BHS  SKY4
+            TST  SK_SKIP
+            BEQ  SKY3
+            DEC  SK_SKIP
+            BRA  SKY3A
+SKY3        JSR  SKROW
+SKY3A       INC  SK_ROW
+            BRA  SKY2
+SKY4        TST  SK_TICKN   ; within a row: its own number again
+            BEQ  SKY5
+            DEC  SK_ROW
+            RTS
+SKY5        LDA  SK_ROW     ; between rows, and past the pattern's end now: the
+            CMPA SK_ROWS    ; next order
+            BLO  SKY9
+            LDA  SK_ORD
+            INCA
+            JMP  SKORDER
+SKY9        RTS
 
 ; SK_JSETUP: the chip and the tracks for notes played by hand, with no song.
 SK_JSETUP   PSHS D
