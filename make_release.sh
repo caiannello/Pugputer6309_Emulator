@@ -57,7 +57,13 @@ if [ "$VIDEO" = 1 ]; then
     chmod +x "$OUT/pugputer-video"
 fi
 cp "$ROOT/bios/pugbios.s19" "$OUT/pugbios.s19"
-"$BUILD/tools/mkdiskimg" --out "$OUT/disk-original.img" --add-dir "$ROOT/demo/programs" --sources "$ROOT"
+# local/disk/ (not in the repository): experiments, added after the demos -- they go in the tarball too
+LOCALDISK=()
+if [ -d "$ROOT/local/disk" ]; then
+    echo "NOTE: adding local/disk/ to the release disk"
+    LOCALDISK=(--add-dir "$ROOT/local/disk")
+fi
+"$BUILD/tools/mkdiskimg" --out "$OUT/disk-original.img" --add-dir "$ROOT/demo/programs" "${LOCALDISK[@]}" --sources "$ROOT"
 cp "$OUT/disk-original.img" "$OUT/disk.img"
 cp "$ROOT/demo/release/start-console.sh" "$ROOT/demo/release/start-serial.sh" \
    "$ROOT/demo/release/reset-disk.sh" "$OUT/"

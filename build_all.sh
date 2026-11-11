@@ -35,7 +35,7 @@ cmake -S "$ROOT/simulator" -B "$BUILD" -DCMAKE_BUILD_TYPE=$CONFIG
 cmake --build "$BUILD" --parallel "$JOBS" --target mkdiskimg basic309_sdboot_demo
 
 echo "=== Making the disk image ==="
-"$BUILD/tools/mkdiskimg"
+"$BUILD/tools/mkdiskimg" --demo SWAMP
 
 echo "=== Building the tests ==="
 # (Configured again now that the ROM and disk images exist: the tests that need them are

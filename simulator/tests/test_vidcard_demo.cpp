@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -14,6 +15,7 @@
 #include "basic309_session.hpp"
 #include "disk_images.hpp"
 #include "fat16_reader.hpp"
+#include "pugputer/opl3_device.hpp"
 #include "pugputer/video_device.hpp"
 #include "test_framework.hpp"
 #include "vc.h"
@@ -46,7 +48,8 @@ struct Demo {
     VideoDevice v;
     bool built = false;
 
-    explicit Demo(const std::string& n) : name(n) {
+    // (extra: more files for the disk -- what the demo reads)
+    explicit Demo(const std::string& n, std::vector<pugputer::Fat16File> extra = {}) : name(n) {
         std::string dir = std::string(DEMO_DIR) + "/ASM/VIDEO/";
         std::string src = host_text(dir + name + ".ASM");
         std::string lib = host_text(dir + "VIDLIB.ASM");
@@ -54,15 +57,18 @@ struct Demo {
         std::string asm_com = host_text(ASM_BIN_PATH);
         CHECK(!src.empty() && !lib.empty() && !inc.empty() && !asm_com.empty());
         std::string file = name + ".ASM";
-        img = build_image((name + ".img").c_str(), 32768, 4,
-                          {disk_file(file.c_str(), src), disk_file("VIDLIB.ASM", lib), disk_file("VIDCARD.D", inc),
-                           disk_file("ASM.COM", asm_com), disk_file("CMD/KEEP.TXT", "(so that /CMD is there)")});
+        std::vector<pugputer::Fat16File> files = {disk_file(file.c_str(), src), disk_file("VIDLIB.ASM", lib),
+                                                  disk_file("VIDCARD.D", inc), disk_file("ASM.COM", asm_com),
+                                                  disk_file("CMD/KEEP.TXT", "(so that /CMD is there)")};
+        files.insert(files.end(), extra.begin(), extra.end());
+        img = build_image((name + ".img").c_str(), 32768, 4, files);
         v.set_draw_all(true);
         s.attach_video(&v);
         CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
         type("ASM -f com " + name + ".ASM");
         CHECK(prompt(8000000000ull));
         CHECK(s.received.find("rror") == std::string::npos);
+        if (s.received.find("rror") != std::string::npos) std::printf("%s\n", s.received.c_str()); // (what ASM said)
         Fat16Volume vol;
         Fat16Volume::Entry e;
         CHECK(vol.load(img.c_str()) && vol.find("/" + name + ".COM", e));
@@ -515,6 +521,192 @@ TEST(vidcard_demo_padmap_sets_up_a_pad_and_saves_it) {
     d.v.key(0x29, false);
     d.run(0.1);
     CHECK(d.prompt(100000000));
+}
+
+// SWAMP: its pictures are the TILEKIT project in demo/swamp, which the release disk has in
+// /DEMO; it reads them into the card and scrolls two of the three layers.
+TEST(vidcard_demo_swamp_scrolls_the_swamp) {
+    std::string dir = std::string(REPO_DIR) + "/demo/swamp/";
+    std::vector<std::string> tls, map;
+    std::vector<pugputer::Fat16File> files;
+    for (int n = 1; n <= 3; ++n) {
+        std::string t = "SWAMP" + std::to_string(n) + ".TLS", m = "SWAMP" + std::to_string(n) + ".MAP";
+        tls.push_back(host_text(dir + t));
+        map.push_back(host_text(dir + m));
+        CHECK(tls.back().size() > 528 && map.back().size() == 48 + 32 * 32 * 2);
+        files.push_back(disk_file(("DEMO/" + t).c_str(), tls.back()));
+        files.push_back(disk_file(("DEMO/" + m).c_str(), map.back()));
+    }
+    Demo d("SWAMP", files);
+    if (!d.built) return;
+    d.type("SWAMP");
+    double seconds = 0;
+    while (d.cfg(VC_DC_CTRL)[0] != 0x07 && seconds < 20) {
+        d.run(0.1);
+        seconds += 0.1;
+    }
+    std::printf("  loaded in about %.1f s\n", seconds);
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x07 && d.cfg(VC_DC_BACK)[0] == 0);
+    CHECK(d.s.received.find("Loading the swamp") != std::string::npos);
+    // The palette is the first set's; each layer has 48KB, its tiles at the start and its
+    // map (32x32 cells, 2KB) at the end: 16x16 tiles of 8 bits a pixel at 320x240.
+    for (int i = 0; i < 512; ++i) CHECK(d.c().cfg[0x200 + i] == static_cast<uint8_t>(tls[0][16 + i]));
+    auto addr = [](const uint8_t* p) { return static_cast<uint32_t>(p[0] << 16 | p[1] << 8 | p[2]); };
+    for (int n = 0; n < 3; ++n) {
+        const uint8_t* l = d.layer(n);
+        uint32_t tiles = 0xC000u * n, cells = tiles + 0xC000 - 2048;
+        CHECK(l[VC_L_MODE] == (VC_TILE | 3 << 3 | 0x20) && l[VC_L_MAP] == 0);
+        CHECK(addr(l + VC_L_TILEBASE) == tiles && addr(l + VC_L_MAPBASE) == cells);
+        CHECK(be16(l + VC_L_VSCROLL) == 0);
+        bool same = true;
+        for (uint32_t i = 528; i < tls[n].size(); ++i) same = same && d.vram(tiles + i - 528) == static_cast<uint8_t>(tls[n][i]);
+        for (uint32_t i = 48; i < map[n].size(); ++i) same = same && d.vram(cells + i - 48) == static_cast<uint8_t>(map[n][i]);
+        CHECK(same);
+    }
+    // The sky stays; the bayou moves a pixel every 2 frames, the ground 2 a frame.
+    auto hs = [&](int n) { return be16(d.layer(n) + VC_L_HSCROLL); };
+    d.run(0.5);
+    uint16_t bayou = hs(1), ground = hs(2);
+    CHECK(hs(0) == 0 && ground / 4 == bayou && ground >= 2);
+    d.run(0.5);
+    CHECK(hs(0) == 0 && hs(2) - ground >= 58 && hs(2) - ground <= 62 && hs(1) - bayou >= 14 && hs(1) - bayou <= 16);
+    // The picture is the three maps, front to back, at those scrolls -- each line, as the card
+    // may be part of the way down a frame: the lines above at these, those below at the frame
+    // before's.
+    auto matches = [&](int y, uint16_t s1, uint16_t s2) {
+        const uint16_t scroll[3] = {0, s1, s2};
+        for (int x = 0; x < 320; ++x) {
+            int color = 0;
+            for (int n = 2; n >= 0 && color == 0; --n) {
+                int mx = (x + scroll[n]) & 511;
+                uint32_t cell = 0xC000u * n + 0xC000 - 2048 + ((y / 16) * 32 + mx / 16) * 2;
+                uint16_t e = static_cast<uint16_t>(d.vram(cell) << 8 | d.vram(cell + 1));
+                int tx = mx % 16, ty = y % 16;
+                if (e & 0x400) tx = 15 - tx;
+                if (e & 0x800) ty = 15 - ty;
+                color = d.vram(0xC000u * n + (e & 1023) * 256 + ty * 16 + tx);
+            }
+            if (d.v.pixel(2 * x, 2 * y) != d.shown(color)) return false;
+        }
+        return true;
+    };
+    uint16_t s1 = hs(1), s2 = hs(2), p2 = static_cast<uint16_t>(s2 - 2), p1 = static_cast<uint16_t>(p2 / 4);
+    int lines = 0;
+    for (int y = 0; y < 240; ++y) lines += matches(y, s1, s2) || matches(y, p1, p2);
+    CHECK(lines == 240);
+    d.dump("1");
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
+}
+
+// With a SWAMP.VGM beside its pictures, it plays that, over and over, from RAM pages of its
+// own (seen through bank 2), timed by the OPL3's Timer 1, while the swamp scrolls as before.
+// The song here is WILHELM.VGM made the way some converters write them: no $66 at its end,
+// its tags straight after -- and with a 20000-byte data block before its commands, so that
+// it takes three pages, and each play skips the block and reads on from one page to the next.
+TEST(vidcard_demo_swamp_plays_its_music) {
+    std::string dir = std::string(REPO_DIR) + "/demo/swamp/";
+    std::vector<pugputer::Fat16File> files;
+    for (int n = 1; n <= 3; ++n) {
+        std::string t = "SWAMP" + std::to_string(n) + ".TLS", m = "SWAMP" + std::to_string(n) + ".MAP";
+        files.push_back(disk_file(("DEMO/" + t).c_str(), host_text(dir + t)));
+        files.push_back(disk_file(("DEMO/" + m).c_str(), host_text(dir + m)));
+    }
+    // (The demo disk's own, Red River Valley, is a song it takes: VGM 1.51, for the OPL3.)
+    std::string own = host_text(dir + "SWAMP.VGM");
+    CHECK(own.size() > 0x80 && own.compare(0, 4, "Vgm ") == 0 && own[8] == 0x51 && own[9] == 0x01);
+    CHECK(own[0x5C] != 0 || own[0x5D] != 0 || own[0x5E] != 0 || own[0x5F] != 0);
+    std::string song = host_text(std::string(REPO_DIR) + "/demo/vgm/WILHELM.VGM");
+    CHECK(song.size() == 14066 && static_cast<uint8_t>(song.back()) == 0x66);
+    auto le32 = [&](size_t at, uint32_t v) {
+        for (int i = 0; i < 4; ++i) song[at + i] = static_cast<char>(v >> (8 * i));
+    };
+    song.pop_back();                                      // no end command
+    CHECK(song[0x34] == static_cast<char>(0xCC) && song[0x1C] == 0); // (commands at $100; no loop point)
+    const uint32_t block = 20000;                         // $67 $66 type size: waits, if played
+    std::string data = std::string("\x67\x66\x00", 3);
+    for (int i = 0; i < 4; ++i) data += static_cast<char>(block >> (8 * i));
+    for (uint32_t i = 0; i < block; ++i) data += static_cast<char>(i % 3 == 0 ? 0x61 : 0xFF);
+    song.insert(0x100, data);
+    uint32_t tags = static_cast<uint32_t>(song.size());   // "Gd3 ", version, length, no strings
+    song += std::string("Gd3 \x00\x01\x00\x00\x00\x00\x00\x00", 12);
+    le32(0x14, tags - 0x14);
+    le32(0x04, static_cast<uint32_t>(song.size()) - 4);
+    files.push_back(disk_file("DEMO/SWAMP.VGM", song));
+    Demo d("SWAMP", files);
+    if (!d.built) return;
+    pugputer::Opl3Device opl3;
+    d.s.bus.map_device("opl3", 0xFFE0, 4, &opl3);
+    d.type("SWAMP");
+    double seconds = 0;
+    while (d.cfg(VC_DC_CTRL)[0] != 0x07 && seconds < 20) {
+        d.run(0.1);
+        seconds += 0.1;
+    }
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x07);
+    // The file is in RAM pages above the program's 64KB -- the first ones free, so one after
+    // another -- up to its tags, where an end is put, and $66s on to that page's end.
+    const size_t kPage = pugputer::SystemBus::kPageSize;
+    uint8_t* ram = d.s.bus.phys_ram();
+    size_t first = 0;
+    for (size_t p = 4; p < d.s.bus.ram_pages() && !first; ++p)
+        if (std::memcmp(ram + p * kPage, song.data(), 0x100) == 0) first = p;
+    CHECK(first >= 4 && tags > 2 * kPage && tags < 3 * kPage);
+    const uint8_t* at = ram + first * kPage;
+    bool same = true;
+    for (uint32_t i = 0; i < tags; ++i) same = same && at[i] == static_cast<uint8_t>(song[i]);
+    for (size_t i = tags; i < 3 * kPage; ++i) same = same && at[i] == 0x66;
+    CHECK(same);
+    // It plays, and goes on playing after the song's 2.61 s (115101 samples) are up: started
+    // again, in the chip's time. Any stretch of exactly two plays holds two plays' writes,
+    // wherever it starts -- the song's 4342 each -- and Timer 1's ticks, every 4 ms (its flag
+    // cleared each time, a write).
+    d.run(0.5);
+    uint64_t w0 = opl3.register_writes();
+    CHECK(w0 > 0 && opl3.reg(0x04) == 0x21 && opl3.reg(0x02) == 256 - 50); // Timer 1 on, every 4 ms
+    double two = 2 * 115101 / 44100.0;
+    d.run(two);
+    int64_t got = static_cast<int64_t>(opl3.register_writes() - w0);
+    int64_t want = 2 * 4342 + static_cast<int64_t>(two / 0.004);
+    std::printf("  %lld register writes in two plays (%lld expected)\n", static_cast<long long>(got),
+                static_cast<long long>(want));
+    CHECK(got > want - 40 && got < want + 40);
+    // The scrolling keeps its pace with the music going: the bayou a pixel every 2 frames,
+    // the ground 2 a frame.
+    auto hs = [&](int n) { return be16(d.layer(n) + VC_L_HSCROLL); };
+    uint16_t bayou = hs(1), ground = hs(2);
+    d.run(1.0);
+    CHECK(hs(0) == 0 && hs(2) - ground >= 118 && hs(2) - ground <= 122 && hs(1) - bayou >= 29 && hs(1) - bayou <= 31);
+    // A key: quiet (the timers stopped, OPL2 mode, every key off), and back to the shell.
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(opl3.reg(0x04) == 0x60 && opl3.reg(0x105) == 0 && opl3.reg(0xB0) == 0 && opl3.reg(0x1B8) == 0);
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
+    // Bank 2 is back at its own page, and the song's pages were given back: a second run
+    // takes the same ones.
+    CHECK(d.s.bus.bank_register(2) == 2);
+    std::memset(ram + first * kPage, 0, 3 * kPage);
+    d.type("SWAMP");
+    seconds = 0;
+    while (d.cfg(VC_DC_CTRL)[0] != 0x07 && seconds < 20) {
+        d.run(0.1);
+        seconds += 0.1;
+    }
+    CHECK(std::memcmp(ram + first * kPage, song.data(), tags) == 0);
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(d.s.bus.bank_register(2) == 2);
+}
+
+// Without its pictures it says so, on the text screen, and goes back to the shell.
+TEST(vidcard_demo_swamp_says_when_its_pictures_are_missing) {
+    Demo d("SWAMP");
+    if (!d.built) return;
+    d.type("SWAMP");
+    CHECK(d.prompt(400000000));
+    CHECK(d.s.received.find("SWAMP: SWAMP1.TLS: not found (in /DEMO or here)") != std::string::npos);
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
 }
 
 // MANDEL: the MC6839 floating-point ROM sets up each pixel, 8.8 fixed point iterates. ASM

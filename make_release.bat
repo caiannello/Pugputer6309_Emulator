@@ -38,7 +38,13 @@ if exist "%ROOT%dist\%NAME%" rmdir /s /q "%ROOT%dist\%NAME%"
 mkdir "%OUT%" || exit /b 1
 copy /y "%BUILD%\tools\Release\basic309_sdboot_demo.exe" "%OUT%\pugputer.exe" >nul || exit /b 1
 copy /y "%ROOT%bios\pugbios.s19" "%OUT%\pugbios.s19" >nul || exit /b 1
-"%BUILD%\tools\Release\mkdiskimg.exe" --out "%OUT%\disk-original.img" --add-dir "%ROOT%demo\programs" --sources "%ROOT%." || exit /b 1
+rem local\disk\ (not in the repository): experiments, added after the demos -- they go in the zip too
+set LOCALDISK=
+if exist "%ROOT%local\disk\" (
+    echo NOTE: adding local\disk\ to the release disk
+    set LOCALDISK=--add-dir "%ROOT%local\disk"
+)
+"%BUILD%\tools\Release\mkdiskimg.exe" --out "%OUT%\disk-original.img" --add-dir "%ROOT%demo\programs" %LOCALDISK% --sources "%ROOT%." || exit /b 1
 copy /y "%OUT%\disk-original.img" "%OUT%\disk.img" >nul
 copy /y "%ROOT%demo\release\start-console.bat" "%OUT%\" >nul || exit /b 1
 copy /y "%ROOT%demo\release\start-com-port.bat" "%OUT%\" >nul || exit /b 1

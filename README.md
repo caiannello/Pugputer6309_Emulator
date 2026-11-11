@@ -113,7 +113,7 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
 - **Video card.** 640x480 in 256 colors (from 65536): three layers of text (80x30), tile maps
   or bitmaps, 128 sprites between them, and drawing commands the card carries out itself, for a
   card built on an RP2350, and statements for it in BASIC. `/DEMO` on the release disk has a demo
-  of each part of it (`VIDDEMO`, `VIDTEXT`, `VIDTILES`, `VIDGFX`, `VIDMOUSE`, `VIDPAD`, and `MANDEL`, the Mandelbrot set) and `/BASIC/VIDEO.BAS` one in BASIC. See
+  of each part of it (`VIDDEMO`, `VIDTEXT`, `VIDTILES`, `VIDGFX`, `VIDMOUSE`, `VIDPAD`, `MANDEL`, the Mandelbrot set, and `SWAMP`, a parallax-scrolling night swamp with music) and `/BASIC/VIDEO.BAS` one in BASIC. See
   `vidcard/README.md`.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
   card and banked RAM modeled to the register, and the YMF262 (OPL3) music chip playing through
@@ -214,6 +214,11 @@ simulator/build/tools/basic309_sdboot_demo
 The console is the video window; in the terminal it was started from, **Ctrl+\** quits the
 emulator (Ctrl+C goes to the Pugputer). `reinit_disk.sh`
 rebuilds the firmware and makes a fresh `basic309/disk.img`, like `reinit_disk.bat`.
+
+**Trying things out before they are in the repository:** put them in `local/disk/` (git
+ignores `local/`). `reinit_disk` and `make_release` (`.bat` and `.sh`) copy that folder onto
+the disk image's root as it is -- `local/disk/SWAMP/GAME.BAS` becomes `/SWAMP/GAME.BAS`
+(8.3 names; others are skipped). The rest of `local/` is yours for work files.
 
 `make_release.sh` builds the Linux binary release
 (`dist/Pugputer6309-demo-<version>-linux-x64.tar.gz`, the version taken from `make_release.bat`),

@@ -78,13 +78,24 @@ inline constexpr DemoProgram kDemoPrograms[] = {
     {"demo/build/vidpad.bin", "DEMO/VIDPAD.COM", 0x4000},
     {"demo/build/padmap.bin", "CMD/PADMAP.COM", 0x4000}, // (a utility, so on the PATH with the others)
     {"demo/build/mandel.bin", "DEMO/MANDEL.COM", 0x4000},
+    {"demo/build/swamp.bin", "DEMO/SWAMP.COM", 0x4000},
 };
 
-// Files the demo programs use, copied to /DEMO as they are: the songs VGMPLAY plays.
+// Files the demo programs use, copied to /DEMO as they are: the songs VGMPLAY plays, and
+// SWAMP's pictures (a TILEKIT project: TILEKIT SWAMP.TKT opens it) and music (Red River
+// Valley, a traditional song, from a MIDI file by midi2vgm_opl3).
 inline constexpr DemoSource kDemoFiles[] = {
     {"demo/vgm/HAL9000.VGM", "DEMO/VGMPLAY/HAL9000.VGM"},
     {"demo/vgm/JFK.VGM", "DEMO/VGMPLAY/JFK.VGM"},
     {"demo/vgm/WILHELM.VGM", "DEMO/VGMPLAY/WILHELM.VGM"},
+    {"demo/swamp/SWAMP.TKT", "DEMO/SWAMP.TKT"},
+    {"demo/swamp/SWAMP1.TLS", "DEMO/SWAMP1.TLS"},
+    {"demo/swamp/SWAMP1.MAP", "DEMO/SWAMP1.MAP"},
+    {"demo/swamp/SWAMP2.TLS", "DEMO/SWAMP2.TLS"},
+    {"demo/swamp/SWAMP2.MAP", "DEMO/SWAMP2.MAP"},
+    {"demo/swamp/SWAMP3.TLS", "DEMO/SWAMP3.TLS"},
+    {"demo/swamp/SWAMP3.MAP", "DEMO/SWAMP3.MAP"},
+    {"demo/swamp/SWAMP.VGM", "DEMO/SWAMP.VGM"},
 };
 
 } // namespace pugputer

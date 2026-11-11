@@ -11,6 +11,9 @@
 /lwtools-*/
 /dist/
 /Claude_Readme/
+# Experiments not in the repository yet; local/disk/ goes onto the disk images
+# (reinit_disk, make_release)
+/local/
 /.vscode/
 
 # Build trees

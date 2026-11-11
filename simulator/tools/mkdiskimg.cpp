@@ -18,16 +18,24 @@
 //             --hexdump path/to/hexdump.bin --move path/to/move.bin
 //             --tilekit path/to/tilekit.bin
 //             --out path/to/disk.img
-//             [--add-dir path/to/folder] [--sources path/to/repository]
+//             [--sources path/to/repository] [--demo NAME]... [--add-dir path/to/folder]...
 //
-// --add-dir copies a folder onto the disk as well: its files (8.3 names) into the
-// root directory and its subfolders, recursively, into directories of the same
-// names -- the binary release does this with demo/programs (BASIC/, ASM/).
 // --sources adds the programs' sources from the repository, in /ASM (see
 // pugputer/demo_sources.hpp), for rebuilding them on the Pugputer, and the demo
 // programs, built (demo/compile.bat or .sh), in /DEMO, with the files they use
-// (/DEMO/VGMPLAY's songs).
+// (/DEMO/VGMPLAY's songs, SWAMP's pictures).
+// --demo adds just one of those demos, /DEMO/NAME.COM, with its files in /DEMO (those
+// named NAME...), from the repository this was built in (or --sources's): reinit_disk
+// puts SWAMP on basic309/disk.img this way.
+// --add-dir copies a folder onto the disk as well: its files (8.3 names) into the
+// root directory and its subfolders, recursively, into directories of the same
+// names -- the binary release does this with demo/programs (BASIC/, ASM/). It can
+// be given more than once.
+// A file added at a path the disk already has replaces it: the sources and demos go
+// on first, then the folders, in order (reinit_disk and make_release add local/disk/,
+// if there is one, last).
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -73,7 +81,8 @@ int main(int argc, char** argv) {
     std::string basic_path = EXBASROM309_S19_DEFAULT;
     std::string shell_path = SHELL_BIN_DEFAULT;
     std::string out_path = DISK_IMG_DEFAULT;
-    std::string add_dir;
+    std::vector<std::string> add_dirs;
+    std::vector<std::string> demos;
     std::string sources;
     // The other programs in /CMD, each assembled with its own header: the option that
     // names another file for it, the file, and its name on the disk.
@@ -104,9 +113,13 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--shell") == 0 && i + 1 < argc) {
             shell_path = argv[++i];
         } else if (std::strcmp(argv[i], "--add-dir") == 0 && i + 1 < argc) {
-            add_dir = argv[++i];
+            add_dirs.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--sources") == 0 && i + 1 < argc) {
             sources = argv[++i];
+        } else if (std::strcmp(argv[i], "--demo") == 0 && i + 1 < argc) {
+            std::string name = argv[++i];
+            for (char& c : name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            demos.push_back(name);
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             out_path = argv[++i];
         }
@@ -151,7 +164,75 @@ int main(int argc, char** argv) {
         std::printf("Loaded %s (%zu bytes) as /CMD/%s\n", p.path.c_str(), f.data.size(), p.name);
         files.push_back(std::move(f));
     }
-    if (!add_dir.empty()) {
+    // Everything from here on replaces a file already at its path (compared as DOS does,
+    // in either case), so the order says which wins: the sources and demos, then the
+    // folders of --add-dir (reinit_disk and make_release add local/disk/ last of all).
+    auto add = [&](Fat16File f, const char* note) {
+        auto same = std::find_if(files.begin(), files.end(), [&](const Fat16File& g) {
+            return std::equal(g.name.begin(), g.name.end(), f.name.begin(), f.name.end(), [](char a, char b) {
+                return std::toupper(static_cast<unsigned char>(a)) == std::toupper(static_cast<unsigned char>(b));
+            });
+        });
+        std::printf("%s /%s (%zu bytes%s)\n", same == files.end() ? "Added" : "Replaced", f.name.c_str(),
+                    f.data.size(), note);
+        if (same != files.end())
+            *same = std::move(f);
+        else
+            files.push_back(std::move(f));
+    };
+    auto add_file = [&](const std::string& repo, const pugputer::DemoSource& src) {
+        Fat16File f;
+        f.name = src.disk;
+        if (!read_file((std::filesystem::path(repo) / src.repo).string(), f.data)) return false;
+        add(std::move(f), "");
+        return true;
+    };
+    // A demo program: its raw image, given the program header ASM -f com would give it.
+    auto add_program = [&](const std::string& repo, const pugputer::DemoProgram& prog) {
+        Fat16File f;
+        f.name = prog.disk;
+        std::vector<uint8_t> body;
+        if (!read_file((std::filesystem::path(repo) / prog.repo).string(), body)) {
+            std::fprintf(stderr, "(the demos are built by demo/compile.bat, or compile.sh)\n");
+            return false;
+        }
+        // Program header: "PX", load address, entry address, flags (all big-endian).
+        uint8_t hi = static_cast<uint8_t>(prog.load >> 8), lo = static_cast<uint8_t>(prog.load & 0xFF);
+        f.data = {'P', 'X', hi, lo, hi, lo, 0, 0};
+        f.data.insert(f.data.end(), body.begin(), body.end());
+        add(std::move(f), " with its header");
+        return true;
+    };
+    if (!sources.empty()) {
+        for (const auto& src : pugputer::kDemoSources)
+            if (!add_file(sources, src)) return 1;
+        for (const auto& prog : pugputer::kDemoPrograms)
+            if (!add_program(sources, prog)) return 1;
+        for (const auto& src : pugputer::kDemoFiles)
+            if (!add_file(sources, src)) return 1;
+    }
+    for (const auto& name : demos) {
+        // /DEMO/NAME.COM, and the files in /DEMO whose names start with NAME
+        std::string repo = sources.empty() ? REPO_DIR_DEFAULT : sources;
+        std::string prog_name = "DEMO/" + name + ".COM";
+        bool found = false;
+        for (const auto& prog : pugputer::kDemoPrograms)
+            if (prog_name == prog.disk) {
+                if (!add_program(repo, prog)) return 1;
+                found = true;
+            }
+        if (!found) {
+            std::fprintf(stderr, "There's no demo /%s (see pugputer/demo_sources.hpp)\n", prog_name.c_str());
+            return 1;
+        }
+        std::string prefix = "DEMO/" + name;
+        for (const auto& src : pugputer::kDemoFiles) {
+            std::string disk = src.disk;
+            if (disk.compare(0, prefix.size(), prefix) == 0 && disk.find('/', 5) == std::string::npos)
+                if (!add_file(repo, src)) return 1;
+        }
+    }
+    for (const auto& add_dir : add_dirs) {
         // Everything under the folder, in a stable order; a file's path relative to
         // the folder (with "/" separators) is its path on the disk.
         std::vector<std::filesystem::path> extra;
@@ -168,39 +249,7 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (!read_file((std::filesystem::path(add_dir) / rel).string(), f.data)) return 1;
-            std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
-            files.push_back(std::move(f));
-        }
-    }
-    if (!sources.empty()) {
-        for (const auto& src : pugputer::kDemoSources) {
-            Fat16File f;
-            f.name = src.disk;
-            if (!read_file((std::filesystem::path(sources) / src.repo).string(), f.data)) return 1;
-            std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
-            files.push_back(std::move(f));
-        }
-        for (const auto& prog : pugputer::kDemoPrograms) {
-            Fat16File f;
-            f.name = prog.disk;
-            std::vector<uint8_t> body;
-            if (!read_file((std::filesystem::path(sources) / prog.repo).string(), body)) {
-                std::fprintf(stderr, "(the demos are built by demo/compile.bat, or compile.sh)\n");
-                return 1;
-            }
-            // Program header: "PX", load address, entry address, flags (all big-endian).
-            uint8_t hi = static_cast<uint8_t>(prog.load >> 8), lo = static_cast<uint8_t>(prog.load & 0xFF);
-            f.data = {'P', 'X', hi, lo, hi, lo, 0, 0};
-            f.data.insert(f.data.end(), body.begin(), body.end());
-            std::printf("Added /%s (%zu bytes with its header)\n", f.name.c_str(), f.data.size());
-            files.push_back(std::move(f));
-        }
-        for (const auto& src : pugputer::kDemoFiles) {
-            Fat16File f;
-            f.name = src.disk;
-            if (!read_file((std::filesystem::path(sources) / src.repo).string(), f.data)) return 1;
-            std::printf("Added /%s (%zu bytes)\n", f.name.c_str(), f.data.size());
-            files.push_back(std::move(f));
+            add(std::move(f), "");
         }
     }
     auto result = build_fat16_image(out_path, dos_payload, files);
