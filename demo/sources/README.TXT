@@ -31,7 +31,8 @@ Pugputer, byte for byte as they were built.
                                                           the MC6839 floating-point ROM)
                  ASM -f com swamp.asm      then SWAMP     (parallax scrolling; its
                                                           pictures, SWAMP*.TLS and .MAP,
-                                                          are in /DEMO)
+                                                          are in /DEMO, with its song,
+                                                          SWAMP.VGM)
 
   GAMEKIT/     TILEKIT, the tile set editor (README.TXT there), and the files it
                includes:

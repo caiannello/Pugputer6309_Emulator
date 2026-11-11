@@ -14,6 +14,7 @@
 #include "basic309_session.hpp"
 #include "disk_images.hpp"
 #include "fat16_reader.hpp"
+#include "pugputer/opl3_device.hpp"
 #include "pugputer/video_device.hpp"
 #include "test_framework.hpp"
 #include "vc.h"
@@ -594,6 +595,74 @@ TEST(vidcard_demo_swamp_scrolls_the_swamp) {
     d.dump("1");
     d.key();
     CHECK(d.prompt(100000000));
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
+}
+
+// With a SWAMP.VGM beside its pictures, it plays that, over and over, from the PSRAM, timed
+// by the OPL3's Timer 1, while the swamp scrolls as before. The song here is WILHELM.VGM made
+// the way some converters write them: no $66 at its end, its tags straight after.
+TEST(vidcard_demo_swamp_plays_its_music) {
+    std::string dir = std::string(REPO_DIR) + "/demo/swamp/";
+    std::vector<pugputer::Fat16File> files;
+    for (int n = 1; n <= 3; ++n) {
+        std::string t = "SWAMP" + std::to_string(n) + ".TLS", m = "SWAMP" + std::to_string(n) + ".MAP";
+        files.push_back(disk_file(("DEMO/" + t).c_str(), host_text(dir + t)));
+        files.push_back(disk_file(("DEMO/" + m).c_str(), host_text(dir + m)));
+    }
+    // (The demo disk's own, Red River Valley, is a song it takes: VGM 1.51, for the OPL3.)
+    std::string own = host_text(dir + "SWAMP.VGM");
+    CHECK(own.size() > 0x80 && own.compare(0, 4, "Vgm ") == 0 && own[8] == 0x51 && own[9] == 0x01);
+    CHECK(own[0x5C] != 0 || own[0x5D] != 0 || own[0x5E] != 0 || own[0x5F] != 0);
+    std::string song = host_text(std::string(REPO_DIR) + "/demo/vgm/WILHELM.VGM");
+    CHECK(song.size() == 14066 && static_cast<uint8_t>(song.back()) == 0x66);
+    auto le32 = [&](size_t at, uint32_t v) {
+        for (int i = 0; i < 4; ++i) song[at + i] = static_cast<char>(v >> (8 * i));
+    };
+    song.pop_back();                                      // no end command
+    uint32_t tags = static_cast<uint32_t>(song.size());   // "Gd3 ", version, length, no strings
+    song += std::string("Gd3 \x00\x01\x00\x00\x00\x00\x00\x00", 12);
+    le32(0x14, tags - 0x14);
+    le32(0x04, static_cast<uint32_t>(song.size()) - 4);
+    files.push_back(disk_file("DEMO/SWAMP.VGM", song));
+    Demo d("SWAMP", files);
+    if (!d.built) return;
+    pugputer::Opl3Device opl3;
+    d.s.bus.map_device("opl3", 0xFFE0, 4, &opl3);
+    d.type("SWAMP");
+    double seconds = 0;
+    while (d.cfg(VC_DC_CTRL)[0] != 0x07 && seconds < 20) {
+        d.run(0.1);
+        seconds += 0.1;
+    }
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x07);
+    // The file is in the PSRAM, from its start, with an end put where its tags start.
+    bool same = true;
+    for (uint32_t i = 0; i < tags; ++i) same = same && d.c().psram[i] == static_cast<uint8_t>(song[i]);
+    CHECK(same && d.c().psram[tags] == 0x66);
+    // It plays, and goes on playing after the song's 2.61 s (115101 samples) are up: started
+    // again, in the chip's time. Any stretch of exactly two plays holds two plays' writes,
+    // wherever it starts -- the song's 4342 each -- and Timer 1's ticks, every 4 ms (its flag
+    // cleared each time, a write).
+    d.run(0.5);
+    uint64_t w0 = opl3.register_writes();
+    CHECK(w0 > 0 && opl3.reg(0x04) == 0x21 && opl3.reg(0x02) == 256 - 50); // Timer 1 on, every 4 ms
+    double two = 2 * 115101 / 44100.0;
+    d.run(two);
+    int64_t got = static_cast<int64_t>(opl3.register_writes() - w0);
+    int64_t want = 2 * 4342 + static_cast<int64_t>(two / 0.004);
+    std::printf("  %lld register writes in two plays (%lld expected)\n", static_cast<long long>(got),
+                static_cast<long long>(want));
+    CHECK(got > want - 40 && got < want + 40);
+    // The scrolling keeps its pace with the music going: the bayou a pixel every 2 frames,
+    // the ground 2 a frame.
+    auto hs = [&](int n) { return be16(d.layer(n) + VC_L_HSCROLL); };
+    uint16_t bayou = hs(1), ground = hs(2);
+    d.run(1.0);
+    CHECK(hs(0) == 0 && hs(2) - ground >= 118 && hs(2) - ground <= 122 && hs(1) - bayou >= 29 && hs(1) - bayou <= 31);
+    // A key: quiet (the timers stopped, OPL2 mode, every key off), and back to the shell.
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(opl3.reg(0x04) == 0x60 && opl3.reg(0x105) == 0 && opl3.reg(0xB0) == 0 && opl3.reg(0x1B8) == 0);
     CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
 }
 
