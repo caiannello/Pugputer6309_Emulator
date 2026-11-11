@@ -42,7 +42,8 @@ inline constexpr DemoSource kDemoSources[] = {
     {"vidcard/vidcard.d", "ASM/VIDCARD.D"},
     {"vidcard/vidcard.d", "ASM/VIDEO/VIDCARD.D"},
     {"vidcard/README.md", "ASM/VIDEO/VIDCARD.TXT"},
-    // The game kit's editors (TILEKIT), with the include files they need beside them.
+    // The game kit's editors (TILEKIT) and SONGKIT's player (SONGPLAY, and sk_play.asm for
+    // games), with the include files they need beside them.
     {"gamekit/tilekit.asm", "ASM/GAMEKIT/TILEKIT.ASM"},
     {"gamekit/tk_draw.asm", "ASM/GAMEKIT/TK_DRAW.ASM"},
     {"gamekit/tk_file.asm", "ASM/GAMEKIT/TK_FILE.ASM"},
@@ -53,6 +54,8 @@ inline constexpr DemoSource kDemoSources[] = {
     {"gamekit/tk_ldlg.asm", "ASM/GAMEKIT/TK_LDLG.ASM"},
     {"gamekit/tk_proj.asm", "ASM/GAMEKIT/TK_PROJ.ASM"},
     {"gamekit/gk_ui.asm", "ASM/GAMEKIT/GK_UI.ASM"},
+    {"gamekit/songplay.asm", "ASM/GAMEKIT/SONGPLAY.ASM"},
+    {"gamekit/sk_play.asm", "ASM/GAMEKIT/SK_PLAY.ASM"},
     {"bios/defines.d", "ASM/GAMEKIT/DEFINES.D"},
     {"vidcard/vidcard.d", "ASM/GAMEKIT/VIDCARD.D"},
     {"gamekit/README.md", "ASM/GAMEKIT/README.TXT"},

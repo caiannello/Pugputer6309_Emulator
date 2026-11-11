@@ -19,6 +19,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pugputer/device.hpp"
 
@@ -59,6 +60,14 @@ public:
     uint64_t frames_made() const { return frames_made_; }
     uint64_t register_writes() const { return writes_; }
     uint8_t reg(uint16_t r) const { return regs_[r & 0x1FF]; } // last value written
+    // Every register write from now on, with when it came (CPU cycles since the device
+    // started), appended to *log (nullptr: none kept).
+    struct Write {
+        uint64_t cycle;
+        uint16_t reg;
+        uint8_t value;
+    };
+    void set_log(std::vector<Write>* log) { log_ = log; }
 
 private:
     void generate(size_t frames);
@@ -67,6 +76,7 @@ private:
 
     _opl3_chip* chip_;
     AudioSink* sink_ = nullptr;
+    std::vector<Write>* log_ = nullptr;
     uint32_t rate_;
     double cpu_hz_;
     uint16_t address_ = 0; // latched register number, 0..$1FF

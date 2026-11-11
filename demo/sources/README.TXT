@@ -34,10 +34,12 @@ Pugputer, byte for byte as they were built.
                                                           are in /DEMO, with its song,
                                                           SWAMP.VGM)
 
-  GAMEKIT/     TILEKIT, the tile set editor (README.TXT there), and the files it
-               includes:
+  GAMEKIT/     TILEKIT, the tile set editor (README.TXT there), and SONGPLAY,
+               which plays a SONGKIT song with the player a game includes
+               (SK_PLAY.ASM), and the files they include:
                  CD GAMEKIT
                  ASM -o TILEKIT.COM tilekit.asm
+                 ASM -o SONGPLAY.COM songplay.asm
 
   ASMLINK/     the assembler and the linker:
                  CD ASMLINK

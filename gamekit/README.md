@@ -2,7 +2,7 @@
 
 ![Fun with TILEKIT](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
 
-Tools for making a game's graphics (and, to come, its music) on the Pugputer itself, on the
+Tools for making a game's graphics and music on the Pugputer itself, on the
 video card's screen and with the card's mouse and keyboard. In the emulator those are the video
 window's: click into it and use it, not the terminal. (If the window is closed while one of
 these runs, the terminal's keys are given to the card instead, so Esc still works.) What they
@@ -20,12 +20,15 @@ make, a game loads straight into the card.
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
+| `sk_play.asm` | SONGKIT's player: plays a song on the OPL3, in a game as in the kit's own programs (below) |
+| `songplay.asm` | `SONGPLAY.COM`: plays a song file from the shell |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
-`compile.sh` (or `compile.bat`) assembles it with lwtools into `build/tilekit.bin`, which
-carries its own program header; `mkdiskimg` puts it in `/CMD` as `TILEKIT.COM`. On the
-Pugputer, the release disk's `/ASM/GAMEKIT` has the sources: `ASM -o TILEKIT.COM tilekit.asm`
-there makes the same program.
+`compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin` and
+`build/songplay.bin`, which carry their own program headers; `mkdiskimg` puts them in `/CMD` as
+`TILEKIT.COM` and `SONGPLAY.COM`. On the Pugputer, the release disk's `/ASM/GAMEKIT` has the
+sources: `ASM -o TILEKIT.COM tilekit.asm` (or `ASM -o SONGPLAY.COM songplay.asm`) there makes
+the same program.
 
 ## TILEKIT
 
@@ -319,4 +322,160 @@ font, at `$03F000`. The maps' undo steps are copies the card makes in its PSRAM 
 
 ### Still to come
 
-Metatiles (8x16, 32x32), and the music editor.
+Metatiles (8x16, 32x32).
+
+## SONGKIT
+
+SONGKIT is the kit's music, for the OPL3 (YMF262) music chip: a tracker-style editor of
+songs and of the chip's instruments (to come), and the player that plays them -- one piece of
+code, `sk_play.asm`, in a game and in the kit's own programs alike, so a song plays in a game
+as it does in the editor. What is here so far is the player, the song file it plays, and
+`SONGPLAY`.
+
+```
+SONGPLAY file           (".SNG" is added to a name without an extension)
+```
+
+plays a song from the shell: it is read into RAM pages of its own (up to 512KB) and played
+from there, timed by the OPL3's Timer 2. A key stops it; at its end, unless it loops, the last
+notes have a second to fade.
+
+### Songs
+
+A song is a list of **orders**, each naming a **pattern** to play; a pattern is up to 64 (in
+the file, 255) **rows**, and a row has a **cell** for each of the song's 20 **tracks**. A row
+lasts *speed* **ticks** (6, to start with), and the song plays *rate* ticks a second (60, to
+start with): so 10 rows a second, at first. At the end of its orders a song goes back to its
+**loop** order -- or, with none, ends.
+
+The tracks are the OPL3's channels:
+
+| Track | |
+|---|---|
+| 0-8 | channels 0-8 of the chip's first register array |
+| 9-17 | channels 0-8 of its second |
+| 18, 19 | only in rhythm mode (below) |
+
+Each array's channels 0 and 3, 1 and 4, 2 and 5 can be a **4-op pair**, as the song says:
+then the first is a channel of 4 operators, and the second isn't a track (its cells are left
+out). A 4-op channel plays a 4-op instrument as it is, and a 2-op one on its first two
+operators, as it would sound on a channel of its own.
+
+In **rhythm mode**, the first array's channels 6, 7 and 8 are the chip's five drums, each a
+track of its own:
+
+| Track | Drum | Its operators | Its pitch |
+|---|---|---|---|
+| 6 | bass drum | both of channel 6's: the instrument's two | channel 6's |
+| 7 | snare drum | channel 7's second: the instrument's second | channel 7's |
+| 8 | tom-tom | channel 8's first: the instrument's first | channel 8's |
+| 18 | cymbal | channel 8's second: the instrument's second | channel 8's (with the tom) |
+| 19 | hi-hat | channel 7's first: the instrument's first | channel 7's (with the snare) |
+
+Any instrument with a **fixed note** is a drum on any track too, as General MIDI banks make
+them: the note written then only says when it plays.
+
+### A cell
+
+| | |
+|---|---|
+| **note** | 1-96: C-0 to B-7 (A-4 is 440 Hz); $7F: the key let go (the note fades as its instrument does); 0: none |
+| **instrument** | 1-255; 0: none (the track's last). One given: its sound, at full volume |
+| **volume** | 1-64: 0-63 (63 loudest); 0: none |
+| **effect** | a character, `0`-`9` and `A`-`Z` (0: none), and its parameter, a byte: below |
+
+A note with an instrument (or after one, on that track) starts again: its key let go and
+pressed. Volume takes the carriers' levels down from the instrument's, a step (0.75 dB) for
+each below 63. An effect lasts its row.
+
+| Effect | |
+|---|---|
+| `0xy` | arpeggio: the note, x semitones up, y up, a tick each |
+| `1xx`, `2xx` | slide up, down xx/32 of a semitone a tick (00: as fast as the last slide) |
+| `3xx` | slide to the cell's note, xx/32 of a semitone a tick, the key held (00: the last speed) |
+| `4xy` | vibrato: x its speed, y its depth, up to 2 semitones (00: the last) |
+| `8xy` | the outputs: x left, y right (`810`, `801`, `811`); both 0: both |
+| `Axy` | volume up x, or down y, a tick (00: the last) |
+| `Bxx` | after this row, order xx |
+| `Cxx` | volume xx (0-3F) |
+| `Dxx` | after this row, the next order (or Bxx's), from its row xx |
+| `E1x`, `E2x` | up, down x/32 of a semitone, once |
+| `ECx` | silent at the row's tick x |
+| `EDx` | the cell plays at the row's tick x |
+| `Fxx` | 01-1F: ticks a row; 20-FF: ticks a second; 00: the song ends |
+
+### Instruments
+
+An instrument is 32 bytes: the chip's registers for its operators, and how SONGKIT plays it.
+
+| Offset | |
+|---|---|
+| 0 | flags: bit 0, 4 operators; bit 1, a fixed note (offset 23) |
+| 1 | `$C0` for its (first) channel: feedback (bits 1-3), connection (bit 0) |
+| 2 | `$C0` for a 4-op pair's second channel: its connection (bit 0) |
+| 3-7 | operator 1: its `$20` (tremolo, vibrato, sustain, KSR, multiple), `$40` (KSL, level), `$60` (attack, decay), `$80` (sustain level, release), `$E0` (waveform) |
+| 8-12 | operator 2 (in a 2-op channel, the carrier) |
+| 13-17, 18-22 | operators 3 and 4 (4-op only) |
+| 23 | a fixed note (1-96), or a transpose (semitones, signed) |
+| 24 | fine tune, in 32nds of a semitone (signed) |
+| 25 | the outputs: bit 4 left, bit 5 right (0: both) |
+| 26-31 | 0 (to come) |
+
+The carriers -- the operators heard, which volume turns down -- follow from the connections:
+in a 2-op channel the second (connection 0) or both (1); in a 4-op one, by the pair's two
+connections: 0 0, the fourth; 0 1, the second and fourth; 1 0, the first and fourth; 1 1, the
+first, third and fourth.
+
+### The song file (.SNG)
+
+Its numbers are high byte first.
+
+| Offset | |
+|---|---|
+| 0 | `PSG1` |
+| 4 | flags: bit 0, rhythm mode |
+| 5 | the 4-op pairs: register `$104`'s bits (0-2: array 0's 0+3, 1+4, 2+5; 3-5: array 1's) |
+| 6 | `$BD`'s bits 7 and 6: deep tremolo, deep vibrato |
+| 7 | ticks a second, 32-255 (others: 60) |
+| 8 | ticks a row, 1-31 (others: 6) |
+| 9, 10, 11 | how many instruments (0-255), patterns (1-255) and orders (1-255) |
+| 12 | the loop: the order it goes back to after the last ($FF: none, it ends) |
+| 13 | 3 bytes of 0 |
+| 16 | the title: 32 bytes, 0s after it |
+| 48 | the author: 32 bytes |
+| 80 | the orders: a byte each, a pattern's number |
+| then | the pattern table: for each pattern its rows (1-255; 0: 64), then where it is (3 bytes, from the file's start) |
+| then | the instruments, 32 bytes each |
+| then | the patterns, wherever the table says |
+
+A pattern is its rows one after another, and a row its cells that aren't empty, in any order,
+each a byte -- bits 0-4 its track, bit 5 a note and an instrument follow, bit 6 a volume
+follows, bit 7 an effect and its parameter follow -- and then the bytes it says. `$1F` ends a
+row; `$1E n` ends it and the `n` empty rows after it. So an empty row is a byte, and a run of
+them two.
+
+### In a game
+
+`sk_play.asm` is `INCLUDE`d after `DEFINES.D`, after the game's code (its variables, about
+1.1KB, are at its end). A song is the bytes of its file, in the game's memory or in RAM pages
+of its own:
+
+| | |
+|---|---|
+| `SK_START` | X: the song in memory: plays it from its start (carry set: it isn't a song) |
+| `SK_PSTART` | X: a list of the song's pages (a byte each, in order), A: how many, B: the bank (1-3) to see them through: the same, from the pages |
+| `SK_POLL` | call it often -- at least every few ms (a main loop waiting for the vertical blank can call it as it waits): when the OPL3's Timer 2 says a tick is due, it plays it |
+| `SK_TICK` | one tick, for a game that keeps the time itself |
+| `SK_STOP` | the song stopped, its notes let go |
+| `SK_OFF` | the chip silent and as it starts: before the game ends, and before `SK_POLL` with no song |
+| `SK_PLAYING` | (a byte) not 0 while the song plays |
+| `SK_TICKS`, `SK_RATE` | Timer 2's ticks so far (2 bytes), and the song's ticks a second |
+
+Timer 2 is the player's, and each tick clears the timers' flags: a game can't count on Timer
+1's while a song plays. With the song in pages, their bank is the player's while it plays.
+
+### SONGKIT's next steps
+
+The editor (patterns, orders, and the instruments, played from the keyboard as they are
+made), sound effects on channels kept from the music, export as VGM and as assembly source,
+and on the PC, instruments taken from other formats (and a starter library).

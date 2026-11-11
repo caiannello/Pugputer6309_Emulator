@@ -317,6 +317,9 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     CHECK(m.run("ASM -o TILEKIT.COM tilekit.asm").find("ERROR") == std::string::npos);
     CHECK(same("/ASM/GAMEKIT/TILEKIT.COM", host_text(repo("gamekit/build/tilekit.bin")),
                m.file("/ASM/GAMEKIT/TILEKIT.COM")));
+    CHECK(m.run("ASM -o SONGPLAY.COM songplay.asm").find("ERROR") == std::string::npos);
+    CHECK(same("/ASM/GAMEKIT/SONGPLAY.COM", host_text(repo("gamekit/build/songplay.bin")),
+               m.file("/ASM/GAMEKIT/SONGPLAY.COM")));
 }
 
 TEST(asm_assembles_itself_and_the_copy_works) {

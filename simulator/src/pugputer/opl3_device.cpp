@@ -58,6 +58,7 @@ void Opl3Device::write(uint16_t offset, uint8_t value) {
 void Opl3Device::write_register(uint16_t r, uint8_t v) {
     catch_up(); // the write lands at this moment in the sound
     ++writes_;
+    if (log_) log_->push_back({cycles_, r, v});
     if (r == 0x04) { // timer control (Nuked OPL3 has no timers: it isn't told)
         if (v & 0x80) {
             status_ = 0; // RST: the flags go, and the rest of the write is ignored
