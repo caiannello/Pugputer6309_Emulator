@@ -46,7 +46,8 @@ struct Demo {
     VideoDevice v;
     bool built = false;
 
-    explicit Demo(const std::string& n) : name(n) {
+    // (extra: more files for the disk -- what the demo reads)
+    explicit Demo(const std::string& n, std::vector<pugputer::Fat16File> extra = {}) : name(n) {
         std::string dir = std::string(DEMO_DIR) + "/ASM/VIDEO/";
         std::string src = host_text(dir + name + ".ASM");
         std::string lib = host_text(dir + "VIDLIB.ASM");
@@ -54,9 +55,11 @@ struct Demo {
         std::string asm_com = host_text(ASM_BIN_PATH);
         CHECK(!src.empty() && !lib.empty() && !inc.empty() && !asm_com.empty());
         std::string file = name + ".ASM";
-        img = build_image((name + ".img").c_str(), 32768, 4,
-                          {disk_file(file.c_str(), src), disk_file("VIDLIB.ASM", lib), disk_file("VIDCARD.D", inc),
-                           disk_file("ASM.COM", asm_com), disk_file("CMD/KEEP.TXT", "(so that /CMD is there)")});
+        std::vector<pugputer::Fat16File> files = {disk_file(file.c_str(), src), disk_file("VIDLIB.ASM", lib),
+                                                  disk_file("VIDCARD.D", inc), disk_file("ASM.COM", asm_com),
+                                                  disk_file("CMD/KEEP.TXT", "(so that /CMD is there)")};
+        files.insert(files.end(), extra.begin(), extra.end());
+        img = build_image((name + ".img").c_str(), 32768, 4, files);
         v.set_draw_all(true);
         s.attach_video(&v);
         CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
@@ -515,6 +518,93 @@ TEST(vidcard_demo_padmap_sets_up_a_pad_and_saves_it) {
     d.v.key(0x29, false);
     d.run(0.1);
     CHECK(d.prompt(100000000));
+}
+
+// SWAMP: its pictures are the TILEKIT project in demo/swamp, which the release disk has in
+// /DEMO; it reads them into the card and scrolls two of the three layers.
+TEST(vidcard_demo_swamp_scrolls_the_swamp) {
+    std::string dir = std::string(REPO_DIR) + "/demo/swamp/";
+    std::vector<std::string> tls, map;
+    std::vector<pugputer::Fat16File> files;
+    for (int n = 1; n <= 3; ++n) {
+        std::string t = "SWAMP" + std::to_string(n) + ".TLS", m = "SWAMP" + std::to_string(n) + ".MAP";
+        tls.push_back(host_text(dir + t));
+        map.push_back(host_text(dir + m));
+        CHECK(tls.back().size() > 528 && map.back().size() == 48 + 32 * 32 * 2);
+        files.push_back(disk_file(("DEMO/" + t).c_str(), tls.back()));
+        files.push_back(disk_file(("DEMO/" + m).c_str(), map.back()));
+    }
+    Demo d("SWAMP", files);
+    if (!d.built) return;
+    d.type("SWAMP");
+    double seconds = 0;
+    while (d.cfg(VC_DC_CTRL)[0] != 0x07 && seconds < 20) {
+        d.run(0.1);
+        seconds += 0.1;
+    }
+    std::printf("  loaded in about %.1f s\n", seconds);
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x07 && d.cfg(VC_DC_BACK)[0] == 0);
+    CHECK(d.s.received.find("Loading the swamp") != std::string::npos);
+    // The palette is the first set's; each layer has 48KB, its tiles at the start and its
+    // map (32x32 cells, 2KB) at the end: 16x16 tiles of 8 bits a pixel at 320x240.
+    for (int i = 0; i < 512; ++i) CHECK(d.c().cfg[0x200 + i] == static_cast<uint8_t>(tls[0][16 + i]));
+    auto addr = [](const uint8_t* p) { return static_cast<uint32_t>(p[0] << 16 | p[1] << 8 | p[2]); };
+    for (int n = 0; n < 3; ++n) {
+        const uint8_t* l = d.layer(n);
+        uint32_t tiles = 0xC000u * n, cells = tiles + 0xC000 - 2048;
+        CHECK(l[VC_L_MODE] == (VC_TILE | 3 << 3 | 0x20) && l[VC_L_MAP] == 0);
+        CHECK(addr(l + VC_L_TILEBASE) == tiles && addr(l + VC_L_MAPBASE) == cells);
+        CHECK(be16(l + VC_L_VSCROLL) == 0);
+        bool same = true;
+        for (uint32_t i = 528; i < tls[n].size(); ++i) same = same && d.vram(tiles + i - 528) == static_cast<uint8_t>(tls[n][i]);
+        for (uint32_t i = 48; i < map[n].size(); ++i) same = same && d.vram(cells + i - 48) == static_cast<uint8_t>(map[n][i]);
+        CHECK(same);
+    }
+    // The sky stays; the bayou moves a pixel every 2 frames, the ground 2 a frame.
+    auto hs = [&](int n) { return be16(d.layer(n) + VC_L_HSCROLL); };
+    d.run(0.5);
+    uint16_t bayou = hs(1), ground = hs(2);
+    CHECK(hs(0) == 0 && ground / 4 == bayou && ground >= 2);
+    d.run(0.5);
+    CHECK(hs(0) == 0 && hs(2) - ground >= 58 && hs(2) - ground <= 62 && hs(1) - bayou >= 14 && hs(1) - bayou <= 16);
+    // The picture is the three maps, front to back, at those scrolls -- each line, as the card
+    // may be part of the way down a frame: the lines above at these, those below at the frame
+    // before's.
+    auto matches = [&](int y, uint16_t s1, uint16_t s2) {
+        const uint16_t scroll[3] = {0, s1, s2};
+        for (int x = 0; x < 320; ++x) {
+            int color = 0;
+            for (int n = 2; n >= 0 && color == 0; --n) {
+                int mx = (x + scroll[n]) & 511;
+                uint32_t cell = 0xC000u * n + 0xC000 - 2048 + ((y / 16) * 32 + mx / 16) * 2;
+                uint16_t e = static_cast<uint16_t>(d.vram(cell) << 8 | d.vram(cell + 1));
+                int tx = mx % 16, ty = y % 16;
+                if (e & 0x400) tx = 15 - tx;
+                if (e & 0x800) ty = 15 - ty;
+                color = d.vram(0xC000u * n + (e & 1023) * 256 + ty * 16 + tx);
+            }
+            if (d.v.pixel(2 * x, 2 * y) != d.shown(color)) return false;
+        }
+        return true;
+    };
+    uint16_t s1 = hs(1), s2 = hs(2), p2 = static_cast<uint16_t>(s2 - 2), p1 = static_cast<uint16_t>(p2 / 4);
+    int lines = 0;
+    for (int y = 0; y < 240; ++y) lines += matches(y, s1, s2) || matches(y, p1, p2);
+    CHECK(lines == 240);
+    d.dump("1");
+    d.key();
+    CHECK(d.prompt(100000000));
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
+}
+
+// Without its pictures it says so, on the text screen, and goes back to the shell.
+TEST(vidcard_demo_swamp_says_when_its_pictures_are_missing) {
+    Demo d("SWAMP");
+    if (!d.built) return;
+    d.type("SWAMP");
+    CHECK(d.prompt(400000000));
+    CHECK(d.s.received.find("SWAMP: SWAMP1.TLS: not found (in /DEMO or here)") != std::string::npos);
+    CHECK(d.cfg(VC_DC_CTRL)[0] == 0x01);
 }
 
 // MANDEL: the MC6839 floating-point ROM sets up each pixel, 8.8 fixed point iterates. ASM

@@ -29,6 +29,9 @@ Pugputer, byte for byte as they were built.
                                                            also in /CMD, ready to run)
                  ASM -f com mandel.asm     then MANDEL    (the Mandelbrot set, with
                                                           the MC6839 floating-point ROM)
+                 ASM -f com swamp.asm      then SWAMP     (parallax scrolling; its
+                                                          pictures, SWAMP*.TLS and .MAP,
+                                                          are in /DEMO)
 
   GAMEKIT/     TILEKIT, the tile set editor (README.TXT there), and the files it
                includes:
