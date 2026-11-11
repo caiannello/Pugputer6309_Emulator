@@ -39,11 +39,15 @@ C_FX        equ  222
 ;------------------------------------------------------------------------------
 ; The buffer, and the song's pages.
 ;------------------------------------------------------------------------------
-; EMAP, NMAP: the pattern buffer's page, or the names', into the window. (All
-; kept.)
+; EMAP, NMAP, IMAP: the pattern buffer's page, the names', or the
+; instruments', into the window. (All kept.)
 EMAP        PSHS D,X
             PSHSW
             LDE  PBPG
+            BRA  EMAP1
+IMAP        PSHS D,X
+            PSHSW
+            LDE  INPG
             BRA  EMAP1
 NMAP        PSHS D,X
             PSHSW

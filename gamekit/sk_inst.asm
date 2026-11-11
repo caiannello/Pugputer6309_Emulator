@@ -35,21 +35,37 @@ F_OP        equ  7
 F_UP        equ  8          ; (then down, left and right)
 F_FIX       equ  4          ; the fixed-note field (its number)
 
-; SETIP: IP and NP, the instrument being edited and its name (a copy, in
-; CURNAME, of the names' page's: PUTNAME puts it back).
-SETIP       LDA  CURI
-            DECA
-            LDB  #SK_ILEN
-            MUL
-            ADDD #INST
-            STD  IP
+; SETIP: IP and NP, the instrument being edited and its name (copies, in
+; CURINST and CURNAME, of the instruments' and names' pages': PUTINST and
+; PUTNAME put them back).
+SETIP       LDX  #CURINST
+            STX  IP
             LDX  #CURNAME
             STX  NP
+            BSR  INSTAT
+            LDY  #CURINST
+            LDW  #SK_ILEN
+            TFM  X+,Y+
             BSR  NAMEAT
             LDY  #CURNAME
             LDW  #16
             TFM  X+,Y+
             CLR  ,Y
+            RTS
+PUTINST     BSR  INSTAT
+            TFR  X,Y
+            LDX  #CURINST
+            LDW  #SK_ILEN
+            TFM  X+,Y+
+            RTS
+; INSTAT: X, instrument CURI in the instruments' page (in the window).
+INSTAT      JSR  IMAP
+            LDA  CURI
+            DECA
+            LDB  #SK_ILEN
+            MUL
+            ADDD #WINDOW
+            TFR  D,X
             RTS
 PUTNAME     BSR  NAMEAT
             TFR  X,Y

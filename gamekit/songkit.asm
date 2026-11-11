@@ -19,6 +19,7 @@
             INCLUDE "defines.d"
             INCLUDE "vidcard.d"
 
+SK_EDITOR   equ  1          ; (the player's editor's parts too: sk_play.asm)
 KIT_BASE     equ  $8000      ; (banks 2 and 3: bank 1 is the song's window)
 KIT_STACK    equ  $EF00
 WBANK       equ  1          ; the song's pages, seen through bank 1
@@ -58,6 +59,10 @@ START       LDS  #KIT_STACK
             SWI2
             LBCS NOMEM
             STA  NMPG
+            LDA  #B_PAGE_ALLOC  ; and the instruments'
+            SWI2
+            LBCS NOMEM
+            STA  INPG
             JSR  NEWSONG
             LBCS NOMEM
             LDA  #B_ARGS        ; a file named?
@@ -345,6 +350,9 @@ QUITNOW     JSR  SK_OFF
             LDB  NMPG
             LDA  #B_PAGE_FREE
             SWI2
+            LDB  INPG
+            LDA  #B_PAGE_FREE
+            SWI2
             JSR  UIEND
             LDA  #B_EXIT
             SWI2
@@ -378,23 +386,25 @@ DUPINST     LDX  IP
 ADDINST     LDA  NINST
             CMPA #MAXINST
             BHS  ADD9
-            PSHS X
-            TFR  Y,X            ; (its name kept: Y may be CURNAME, about to change)
-            LDY  #NAMETMP
+            PSHS Y              ; (it and its name kept: they may be CURINST and
+            LDY  #IOBUF         ; CURNAME, about to change)
+            LDW  #SK_ILEN
+            TFM  X+,Y+
+            PULS X
             LDW  #16
             TFM  X+,Y+
             INC  NINST
             LDA  NINST
             STA  CURI
             JSR  SETIP
-            PULS X
+            LDX  #IOBUF
             LDY  IP
             LDW  #SK_ILEN
             TFM  X+,Y+
-            LDX  #NAMETMP
             LDY  NP
             LDW  #16
             TFM  X+,Y+
+            JSR  PUTINST
             JSR  PUTNAME
             JSR  USEINST
             LDA  #1
@@ -404,10 +414,12 @@ ADDINST     LDA  NINST
 ADD9        LDX  #S_FULL
             JMP  MSG
 ; USEINST: the player's instruments SONGKIT's (as they are edited).
-USEINST     LDX  #INST
-            STX  SK_IBASE
+USEINST     LDX  #WINDOW        ; (in their page: the player sees it while it
+            STX  SK_IBASE       ; reads one)
             LDA  NINST
             STA  SK_INUM
+            LDA  INPG
+            STA  SK_IPG
             RTS
 
 ;------------------------------------------------------------------------------
@@ -532,7 +544,8 @@ PU2         CLR  B,X
             JMP  SK_JAM
 ; JAMREF: every note of the instrument being edited -- the keys', the song's --
 ; sounding as it is now.
-JAMREF      LDE  CURI
+JAMREF      JSR  PUTINST        ; (into the instruments' page first)
+            LDE  CURI
             JMP  SK_IREF
 JAMTRK      FCB  0,1,2,9,10,11  ; the voices: the 4-op channels
 DRUMTRK     FCB  0,6,7,8,18,19  ; and Play on's drums
@@ -576,16 +589,18 @@ S_NOMEM     FCC  "SONGKIT: not enough memory"
 ;------------------------------------------------------------------------------
 MODE        RMB  1          ; 0 editing; 1 a line being typed; 2 a question
 PAGE        RMB  1          ; the page shown: 0 the patterns', 1 the instruments'
-PBPG        RMB  1          ; the pattern buffer's page, and the names'
-NMPG        RMB  1
+PBPG        RMB  1          ; the pattern buffer's page, the names', the
+NMPG        RMB  1          ; instruments'
+INPG        RMB  1
 PR_DO       RMB  2          ; what Enter does, after typing
 CF_DO       RMB  2          ; what Y does, to a question
 CHANGED     RMB  1          ; changes not saved
 SONGON      RMB  1          ; the song playing
 NINST       RMB  1          ; the instruments: how many, the one edited
 CURI        RMB  1
-IP          RMB  2          ; it, and its name (NP: CURNAME, a copy of the names'
-NP          RMB  2          ; page's)
+IP          RMB  2          ; it and its name (CURINST, CURNAME: copies of the
+NP          RMB  2          ; instruments' and names' pages')
+CURINST     RMB  SK_ILEN
 CURNAME     RMB  17
 NAMETMP     RMB  16
 PNI         RMB  1
@@ -714,8 +729,7 @@ RBUF        RMB  ROWB       ; a row read
 WBUF        RMB  6*SK_NTRK+4 ; a row packed
 ; (The large ones are only addresses, after the program's last byte.)
 IOBUF       equ  *          ; 1024
-INST        equ  IOBUF+1024 ; the instruments, 32 bytes each
-VAREND      equ  INST+MAXINST*SK_ILEN
+VAREND      equ  IOBUF+1024
             IFGT VAREND-(KIT_STACK-512)
             ERROR "SONGKIT's variables reach its stack"
             ENDC

@@ -682,9 +682,13 @@ TEST(songkit_editor_edits_and_plays_an_instrument) {
     if (!e.ok) return;
     CHECK(e.start());
     e.key(0x2B); // (Tab: the instrument page)
-    uint16_t inst = kit_sym("INST");
-    CHECK(inst != 0);
-    auto ib = [&](int i, int n) { return e.s.bus.read_cpu(static_cast<uint16_t>(inst + 32 * (i - 1) + n)); };
+    // (the instruments are in a RAM page of their own: INPG says which)
+    uint16_t inpg = kit_sym("INPG");
+    CHECK(inpg != 0);
+    auto ib = [&](int i, int n) {
+        size_t page = e.s.bus.read_cpu(inpg);
+        return e.s.bus.phys_ram()[page * 16384 + 32 * (i - 1) + n];
+    };
     // The first operator's attack is lit; right, then down: the second's decay; - makes it 2.
     CHECK(e.lit(9) == 17);
     e.key(kRight);

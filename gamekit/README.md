@@ -590,7 +590,13 @@ For an editor (SONGKIT uses these), notes played by hand, with a song playing or
 | `SK_JAM` | B: a track, A: a note (1-96; `$7F` the key let go), E: an instrument (0: the track's own): played now |
 | `SK_JREF` | B: a track, E: an instrument: its registers written again, the key as it is -- a held note sounds as the instrument is now |
 | `SK_IBASE`, `SK_INUM` | (2 bytes, 1) not 0: the instruments are `SK_INUM` of 32 bytes at `SK_IBASE`, not the song's own (`SK_START` and `SK_PSTART` make it 0) |
+
+And with `SK_EDITOR` defined before the `INCLUDE` (an editor's: a game doesn't carry them):
+
+| | |
+|---|---|
 | `SK_RESYNC` | the song changed in its memory while it plays (patterns or orders edited, the bytes after them moved along): its header read again, and its place found again -- the same order, the same row |
+| `SK_IPG` | (a byte) not 0: `SK_IBASE` is in this RAM page, seen in the bank `SK_IBASE`'s address is in while an instrument is read, that bank's own page put back after (SONGKIT keeps its instruments in a page of their own) |
 
 ### SONGKIT's next steps
 

@@ -4,8 +4,8 @@
 ;
 ; SONGKIT's files. The song is kept as its file is, in RAM pages of its own
 ; (PAGES, seen through bank 1), where the player plays it and the pattern page
-; edits it (sk_pat.asm); its instruments and their names are in INST and the
-; names' page (NMPG), to edit. Saving writes the file again with the
+; edits it (sk_pat.asm); its instruments and their names are in pages of their
+; own (INPG, NMPG), to edit. Saving writes the file again with the
 ; instruments as they are now (their names after the patterns, where the
 ; header's bytes 13-15 say), the patterns moved along as the instruments
 ; before them grow or shrink.
@@ -307,7 +307,7 @@ TABLES      LDA  WINDOW+11
             STD  DSTART
             RTS
 ; PARSE: the song in PAGES (SSIZE its size) SONGKIT's: its instruments and
-; their names into INST and the names' page; its first order's pattern into
+; their names into their pages; its first order's pattern into
 ; the pattern buffer, to edit.
 PARSE       BSR  PARSE0
             CLR  CURORD         ; its first order, row, track
@@ -352,20 +352,22 @@ PA2         JSR  NMAP           ; no names yet
             BNE  PA4
             LDA  #1             ; (none: the first one a new song has)
             STA  NINST
+            JSR  IMAP
             LDX  #DEFINST
-            LDY  #INST
+            LDY  #WINDOW
             LDW  #SK_ILEN
             TFM  X+,Y+
             RTS
-PA4         LDX  #WINDOW
-            LDD  ITAB
-            LEAX D,X
-            LDY  #INST
-            LDA  OLDNI
+PA4         LDA  OLDNI          ; from the song's first page to theirs
             LDB  #SK_ILEN
             MUL
-            TFR  D,W
-            TFM  X+,Y+
+            TFR  D,U
+            LDX  ITAB
+            LDY  #0
+            LDB  PAGES
+            LDE  INPG
+            LDA  #B_PAGE_COPY
+            SWI2
             LDD  NAMEOFS        ; their names, if it has them
             BNE  PA5
             TST  NAMEOFS+2
@@ -504,7 +506,8 @@ SV3         STA  ,Y
             TFR  D,Y
             JSR  FWRITE
             LBCS SVERR
-            LDX  #INST          ; the instruments
+            JSR  IMAP           ; the instruments
+            LDX  #WINDOW
             LDA  NINST
             LDB  #SK_ILEN
             MUL

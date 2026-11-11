@@ -28,11 +28,18 @@
 ;   SK_JREF    B: a track, E: an instrument -> its registers written again,
 ;              the key as it is (a held note changes as it is edited)
 ;   SK_IREF    E: an instrument -> the same, on every track playing it
+;   SK_IBASE   (2 bytes; SK_START and SK_PSTART make it 0) not 0: the
+;   SK_INUM    instruments are SK_INUM of 32 bytes there, not the song's own
+;
+; And with SK_EDITOR defined (before the INCLUDE) -- an editor's, so a game
+; doesn't carry them:
+;
 ;   SK_RESYNC  the song changed in its memory while it plays (patterns or
 ;              orders edited, moved along) -> its header read again, and its
 ;              place found again: the same order, the same row
-;   SK_IBASE   (2 bytes; SK_START and SK_PSTART make it 0) not 0: the
-;   SK_INUM    instruments are SK_INUM of 32 bytes there, not the song's own
+;   SK_IPG     (a byte) not 0: SK_IBASE is in this RAM page, seen in the bank
+;              SK_IBASE's address is in while an instrument is read (the
+;              bank's own page put back after)
 ;   SK_PLAYING (a byte) not 0 while the song plays
 ;   SK_TICKS   (2 bytes) Timer 2's ticks since SK_START, playing or not
 ;   SK_RATE    (a byte) ticks a second, as the song has them now
@@ -166,6 +173,7 @@ SKH1        JSR  SKGETB
             ANDCC #$FE
             RTS
 
+            IFDEF SK_EDITOR
 ; SK_RESYNC: the song changed where it lies (an editor's doing): its header
 ; read again, and its place in it found again -- the same order, the same row.
 SK_RESYNC   TST  SK_PLAYING
@@ -206,6 +214,7 @@ SKY5        LDA  SK_ROW     ; between rows, and past the pattern's end now: the
             INCA
             JMP  SKORDER
 SKY9        RTS
+            ENDC
 
 ; SK_JSETUP: the chip and the tracks for notes played by hand, with no song.
 SK_JSETUP   PSHS D
@@ -1305,6 +1314,10 @@ SKFE1       CLR  ,X+
             LDB  #SK_ILEN
             MUL
             LEAX D,X
+            IFDEF SK_EDITOR
+            TST  SK_IPG     ; in a page of the editor's: it seen while they're
+            LBNE SKFE4      ; read
+            ENDC
             LDY  #SK_IB
             LDW  #SK_ILEN
             TFM  X+,Y+
@@ -1336,6 +1349,34 @@ SKFE2       JSR  SKGETB
             LDB  SK_SPG
             JMP  SKMAP
 SKFE9       RTS
+            IFDEF SK_EDITOR
+SKFE4       PSHS X
+            LDA  SK_IBASE   ; its bank: the one its address is in
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            LSRA
+            STA  SK_IBK
+            TFR  A,B
+            LDA  #B_BANK_GET
+            SWI2
+            STA  SK_IOLD
+            LDB  SK_IBK
+            LDE  SK_IPG
+            LDA  #B_BANK_SET
+            SWI2
+            PULS X
+            LDY  #SK_IB
+            LDW  #SK_ILEN
+            TFM  X+,Y+
+            LDB  SK_IBK     ; (the bank's own page again)
+            LDE  SK_IOLD
+            LDA  #B_BANK_SET
+            SWI2
+            RTS
+            ENDC
 
 ;------------------------------------------------------------------------------
 ; Reading the song.
@@ -1516,6 +1557,11 @@ SK_TICKS    RMB  2
 SK_RATE     RMB  1
 SK_IBASE    RMB  2          ; the editor's instruments (0: the song's)
 SK_INUM     RMB  1
+            IFDEF SK_EDITOR
+SK_IPG      RMB  1          ;   in this page (0: in memory)
+SK_IBK      RMB  1          ;   (its bank, and the page that was there)
+SK_IOLD     RMB  1
+            ENDC
 SK_PAGED    RMB  1          ; the song: in pages (1) or in memory (0)
 SK_BASE     RMB  2          ;   in memory: where
 SK_PGT      RMB  2          ;   in pages: their list, how many, the bank, and its
