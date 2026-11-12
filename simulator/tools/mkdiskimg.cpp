@@ -8,7 +8,7 @@
 // program headers), TILEKIT.INI (TILEKIT's default palettes, gamekit/TILEKIT.INI) and
 // BASIC.COM (the BASIC_LOAD-$EFFF window of basic309's S-record, given a program
 // header: load BASIC_LOAD, entry $C000 -- see pugputer/basic309_layout.hpp and EXE_* in
-// bios/defines.d).
+// bios/defines.d); and in /BANKS, SONGKIT's instrument banks (gamekit/banks).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
 //
@@ -207,6 +207,9 @@ int main(int argc, char** argv) {
         add(std::move(f), " with its header");
         return true;
     };
+    // SONGKIT's banks, always (from the repository this was built in, or --sources's).
+    for (const auto& src : pugputer::kToolFiles)
+        if (!add_file(sources.empty() ? REPO_DIR_DEFAULT : sources, src)) return 1;
     if (!sources.empty()) {
         for (const auto& src : pugputer::kDemoSources)
             if (!add_file(sources, src)) return 1;

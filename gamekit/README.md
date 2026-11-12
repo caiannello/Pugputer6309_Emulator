@@ -26,7 +26,7 @@ make, a game loads straight into the card.
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
-| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next eight, and is its core's main part (the main loop, the keys, the overlays' loading and calls) |
+| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next nine, and is its core's main part (the main loop, the keys, the overlays' loading and calls) |
 | `sk_core.asm` | the core's share of what the overlays use: the song's pages, the window, a message |
 | `sk_ui.asm` | its screen (the card's text layer), the mouse and keys, a line of typing |
 | `sk_inst.asm` | its instrument page (overlay `OV_EDIT`) |
@@ -34,10 +34,13 @@ make, a game loads straight into the card.
 | `sk_file.asm` | its files: songs (`.SNG`) and instruments (`.INS`) (`OV_FILE`) |
 | `sk_help.asm` | its help screen (`OV_HELP`) |
 | `sk_block.asm` | a pattern's blocks: copied, cut, pasted, cleared (`OV_BLOCK`, with the clipboard) |
+| `sk_bank.asm` | its bank page: instrument banks (WOPL files) browsed, heard, taken from and added to (`OV_BANK`, with the bank being looked at) |
 | `sk_play.asm` | SONGKIT's player: plays a song on the OPL3, in a game as in the kit's own programs (below) |
 | `songplay.asm` | `SONGPLAY.COM`: plays a song file from the shell |
 | `tools/sk_fields.py` | makes the instrument page's table of fields in `sk_inst.asm`: where each is, and which is next to it |
 | `tools/sk_overlays.py` | checks that SONGKIT's code only reaches another overlay through a stub (below, "SONGKIT's memory") |
+| `banks/` | SONGKIT's instrument banks: The Fat Man's General MIDI banks, 2-op and 4-op (`FATMAN2.WOP`, `FATMAN4.WOP`), and a `README.TXT` with their credit and license; `mkdiskimg` puts them in `/BANKS` |
+| `tools/wopl_names.py` | (on a PC) gives a WOPL bank's unnamed instruments their General MIDI names, and its banks names -- the Fat Man's come with none |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
 `compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin`,
@@ -346,7 +349,8 @@ SONGKIT is the kit's music, for the OPL3 (YMF262) music chip: a tracker-style ed
 songs and of the chip's instruments, and the player that plays them -- one piece of code,
 `sk_play.asm`, in a game and in the kit's own programs alike, so a song plays in a game as it
 does in the editor. Here so far: the player, the song file it plays, `SONGPLAY`, and the
-editor, with a page for the song's patterns and one for its instruments.
+editor, with a page for the song's patterns, one for its instruments, and one for the
+instrument banks on the disk to take instruments from.
 
 ```
 SONGPLAY file           (".SNG" is added to a name without an extension)
@@ -362,7 +366,7 @@ SONGKIT [file]          a song (".SNG" is added to a name without an extension)
 
 opens the editor on a song's pattern page -- a new song's (one empty pattern of 64 rows, one
 instrument) if no file is named. Tab goes from the pattern page to the instrument page and
-back. On either, the keyboard's letters are a piano, Space plays the song (from the order
+back; Ctrl+B, from either, to the bank page (and Tab back). On any of them, the keyboard's letters are a piano, Space plays the song (from the order
 being edited) or stops it, and a change is heard at once, even while the song plays. The
 bottom row is the status line -- the octave, the instrument, the pattern, whether the song is
 playing -- where messages and questions come up too (a message until the next key); F1 shows
@@ -442,6 +446,7 @@ cursor moved without Shift, lets the block go.
 | Ctrl+P | Loop pattern on, off |
 | Ctrl+M | the cursor's track muted, or not |
 | Tab | the instrument page |
+| Ctrl+B | the bank page |
 | F1 | the help |
 | Space, Backspace, Ctrl+O, S, A, W | as on the instrument page |
 
@@ -470,7 +475,8 @@ keyboard's letters are a piano, so a note held while a setting changes changes w
   they are connected (FM, one modulating the next, or additive, each heard -- and the four
   ways of 4), the first operator's feedback; a fixed note (a drum) or a transpose, fine tune;
   the outputs (left, right, both); and what the keys play it on, a channel or one of the
-  chip's drums (SONGKIT's setting, not the instrument's).
+  chip's drums (SONGKIT's setting, not the instrument's). Then where it came from, if it was
+  taken from a bank (the bank page, below): the bank file, the bank, the program.
 - **The operators,** a column each: attack, decay, sustain level, release, level, multiple
   (of the note's frequency), waveform, key scale level and rate, sustained (held at the
   sustain level while the key is down, or not), vibrato and tremolo. The operators heard --
@@ -493,6 +499,7 @@ keyboard's letters are a piano, so a note held while a setting changes changes w
 | Ctrl+S, Ctrl+A | save the song; save it as another name |
 | Ctrl+W | save this instrument as a file of its own (`.INS`) |
 | Tab | the pattern page |
+| Ctrl+B | the bank page |
 | F1 | the help |
 | Esc | back to the shell (asked first, with changes not saved) |
 
@@ -501,6 +508,73 @@ notes sound at once, each on one of the chip's 4-op channels (so 4-op instrument
 are); on a drum, one at a time.
 
 An instrument changed while the song plays is heard at once, wherever the song is playing it.
+
+### The bank page
+
+Ctrl+B, from either page, shows the **instrument banks** on the disk: a bank is a WOPL file
+(`.WOP`, below), a set of banks of 128 instruments each -- *melodic* banks (instruments, as
+General MIDI's programs are) and *percussion* banks (drums, each on the key it is played
+with). The page starts in `/BANKS` (the shell's folder, if there is none), where the disk has
+The Fat Man's General MIDI banks: `FATMAN2.WOP` (2-op) and `FATMAN4.WOP` (4-op, for the OPL3),
+a melodic bank and a percussion bank each.
+
+On the left, the folder's bank files and folders (`../` the folder it is in); Enter on a
+folder lists it, on a bank file reads it -- its first bank's instruments are listed beside
+the files, the file read in orange. On the right, the instrument at the cursor (2 or 4
+operators, its note) and the song's instrument being edited.
+
+The piano's keys play the instrument at the cursor, as SONGKIT would have it, so it can be
+heard before it is taken (it is put after the song's instruments, one more, while it is being
+tried; with the song playing, it plays over it). Then:
+
+- **Enter** adds it to the song, after its last instrument, and makes it the one being edited
+  (the one the pattern page puts in, too).
+- **Ctrl+R** puts it over the song's instrument being edited (asked first): a song's sound
+  changed for another, its notes as they are.
+- **Ctrl+P** puts the song's instrument being edited into the bank file, at the cursor (asked
+  first) -- so a bank of your own, made with **Ctrl+N** (a new bank file in the folder: one
+  melodic bank of 128 blank instruments), fills up with favorites to use again. It is written
+  to the file at once.
+
+An instrument taken keeps where it came from -- the bank file, which bank, the program -- in
+the song (and in its `.INS`, if it is saved as one); the instrument page shows it. The song
+itself has the instrument's every setting, so it plays the same without the bank.
+
+| Keys | |
+|---|---|
+| Up, Down | the cursor, in its list |
+| Left, Right | the files; the instruments |
+| PgUp, PgDn, Home, End | a page up, down; the first, the last |
+| Enter | on a folder, list it; on a bank file, read it; on an instrument, add it to the song |
+| Ctrl+R | the instrument over the song's being edited |
+| Ctrl+P | the song's instrument being edited into the bank, here |
+| Ctrl+N | a new bank file |
+| Ctrl+Left, Ctrl+Right | the bank before, after (the file's melodic banks, then its percussion) |
+| Ctrl+Up, Ctrl+Down | the song's instrument before, after (the one being edited) |
+| Z-M, Q-P, `[` `]`, Space, Backspace | as on the instrument page (the keys play the one at the cursor) |
+| Ctrl+S, Ctrl+A | save the song; save it as another name |
+| Tab, Esc, Ctrl+B | back to the page before |
+| F1 | the bank page's help |
+
+A click picks a file or an instrument (a file or folder clicked again is opened); an
+instrument double-clicked goes over the song's instrument being edited, as Ctrl+R does but
+without asking -- quick to try one sound after another in a song as it plays. The wheel over
+a list moves its cursor. The cursor stays on the same program from one bank, or bank
+file, to the next -- to hear the 2-op and 4-op Grand Piano one after the other, say.
+
+A WOPL instrument is the chip's registers for two or four operators, as SONGKIT's is, and
+comes in as it is, with these differences:
+
+- A *pseudo 4-op* instrument (two 2-op voices together, one detuned) comes in as its first
+  voice -- SONGKIT plays one voice a note -- and its source says so ("voice 1 of 2").
+- A percussion bank's instrument (or one marked as a fixed note) has a fixed note: the key it
+  is played with. Another's key offset is its transpose (four octaves at most).
+- What a bank has for MIDI players and SONGKIT doesn't -- a velocity offset, the timings for
+  sharing out channels, a bank's volume model and its deep vibrato and tremolo -- is left out;
+  an instrument marked for one of the chip's drums in rhythm mode is played on that drum on
+  the bank page.
+- Into a bank, the other way round, a SONGKIT instrument loses its fine tune and its outputs
+  (a WOPL instrument has neither).
 
 ### Songs
 
@@ -534,8 +608,19 @@ track of its own:
 | 18 | cymbal | channel 8's second: the instrument's second | channel 8's (with the tom) |
 | 19 | hi-hat | channel 7's first: the instrument's first | channel 7's (with the snare) |
 
+The drums don't all sound like drums by themselves. The chip makes the **snare**, **hi-hat**
+and **cymbal** with its noise generator mixed in, so they sound like drums with almost any
+instrument. The **bass drum** is an ordinary FM voice of the instrument's two operators, and
+the **tom-tom** one operator at a pitch: their sound is all the instrument's. With a piano on
+the bass drum's track you hear a piano, and on the tom's a plain tone. They need instruments
+made for them -- a bank's 2-op bass drum, for one (The Fat Man's *Acou Bass Drum* or *Bass
+Drum 1*). Only the drum's bit in `$BD` keys it: nothing else sounds with it.
+
 Any instrument with a **fixed note** is a drum on any track too, as General MIDI banks make
-them: the note written then only says when it plays.
+them: the note written then only says when it plays. A percussion bank's instruments are
+made for that -- for whole channels, not the rhythm mode's drums -- so the easy way to the
+General MIDI drums is on ordinary tracks, rhythm mode off: any key plays each one's own drum,
+and the OPL3 has channels to spare.
 
 ### A cell
 
@@ -610,11 +695,48 @@ Its numbers are high byte first.
 | then | the instruments, 32 bytes each |
 | then | the patterns, wherever the table says |
 | then | (SONGKIT's) the instruments' names, 16 bytes each, 0s after each -- where offset 13 says |
+| then | (SONGKIT's, if any instrument came from a bank) `PSS1`, and each instrument's source, 16 bytes |
 
 A player stops before the names: a game can leave them out. SONGKIT writes the patterns
-after the instruments, and the names after them.
+after the instruments, then the names, then the sources if there are any. An instrument's
+source says where it was taken from:
 
-An instrument's own file (`.INS`) is `PSI1`, its 32 bytes, and its name (16).
+| Offset | |
+|---|---|
+| 0 | the bank file's name, up to 12 characters, 0s after it (0: none -- made in SONGKIT) |
+| 12 | the bank: bit 7 set, a percussion bank; the rest, which of the file's (melodic, or percussion), from 0 |
+| 13 | the program (0-127) |
+| 14 | flags: bit 0, a pseudo 4-op instrument's first voice |
+| 15 | 0 |
+
+An instrument's own file (`.INS`) is `PSI1`, its 32 bytes, its name (16), and -- if it came
+from a bank -- its source (16).
+
+### Instrument banks (.WOP)
+
+A bank file is WOPL, the format of Wohlstand's OPL3 Bank Editor and libADLMIDI (its
+specification: [github.com/Wohlstand/OPL3BankEditor](https://github.com/Wohlstand/OPL3BankEditor),
+`WOPL-and-OPLI-Specification.txt`); the editor makes WOPL files from many other kinds of OPL
+bank (`.op3`, `.ibk`, `.bnk`, `.tmb` ...), so they can be brought to the Pugputer, and a bank
+made on it can be used on a PC. SONGKIT reads versions 1-3, and makes version 3. What it uses:
+
+| | |
+|---|---|
+| header | `WOPL3-BANK`, 0; the version (2 bytes, low first); the melodic banks, the percussion banks (2 bytes each, high first); flags; the volume model -- 19 bytes |
+| then | (version 2 on) each bank's name (32 bytes) and MIDI bank number (2), the melodic first |
+| then | each bank's 128 instruments, the melodic banks first: 66 bytes each (62 before version 3) |
+
+| Instrument | |
+|---|---|
+| 0 | its name, 32 bytes |
+| 32 | its key offset (signed, 2 bytes, high first): a transpose, in semitones |
+| 38 | the key a drum is played with (MIDI's: 60 is C-4) |
+| 39 | flags: bit 0, 4 operators; 1, two 2-op voices (pseudo 4-op); 2, blank; 3-5, its drum in rhythm mode; 6, a fixed note |
+| 40, 41 | `$C0` (feedback, connection) for its first channel, its second |
+| 42-61 | its operators, 5 bytes each (`$20` `$40` `$60` `$80` `$E0`): in the order carrier 1, modulator 1, carrier 2, modulator 2 -- SONGKIT's 2, 1, 4, 3 |
+
+The Fat Man's banks come with no names in them; `tools/wopl_names.py` gave the copies here
+their General MIDI ones (and can do the same for another bank).
 
 A pattern is its rows one after another, and a row its cells that aren't empty, in any order,
 each a byte -- bits 0-4 its track, bit 5 a note and an instrument follow, bit 6 a volume
@@ -671,8 +793,8 @@ only its song, so it can go on growing:
 | | |
 |---|---|
 | bank 3 (`$C000`-`$EFFF`) | the core: the main loop, the keys, the screen, the player, every variable, the stack |
-| bank 2 (`$8000`-`$BFFF`) | an overlay, one at a time: `OV_EDIT` (the two pages' editing), `OV_FILE` (opening and saving), `OV_HELP` (the help), `OV_BLOCK` (a pattern's blocks copied and pasted, and the clipboard: in the overlay's own page, after its code) |
-| bank 1 (`$4000`-`$7FFF`) | the window: the song's pages, the pattern being edited, the instruments and their names |
+| bank 2 (`$8000`-`$BFFF`) | an overlay, one at a time: `OV_EDIT` (the two pages' editing), `OV_FILE` (opening and saving), `OV_HELP` (the help), `OV_BLOCK` (a pattern's blocks copied and pasted, and the clipboard: in the overlay's own page, after its code), `OV_BANK` (the bank page, and the bank being looked at, after its code) |
+| bank 1 (`$4000`-`$7FFF`) | the window: the song's pages, the pattern being edited, the instruments, their names and sources |
 
 `SONGKIT.COM` sets the program header's `EXE_MORE` flag (`../shell/README.md`): its body is
 only the core, loaded at `$C000`, and the overlays follow it in the file -- each one's code
@@ -690,6 +812,6 @@ another overlay without a stub; `--fix` changes a call that has one to use it.
 
 ### SONGKIT's next steps
 
-Sound effects on channels kept from the music,
-export as VGM and as assembly source, and on the PC, instruments taken from other formats
-(and a starter library).
+Sound effects on channels kept from the music. (Export as VGM or as assembly source can wait:
+a song, its instruments and a game's other assets stay files on the disk, which the tools on
+the Pugputer itself can open and change.)

@@ -10,9 +10,11 @@
 ; Two pages, Tab from one to the other: the song's patterns (its settings, its
 ; orders, and the pattern an order plays, a grid of rows and tracks: sk_pat.asm),
 ; and its instruments (every setting of the chip's for one, heard as it is
-; edited: sk_inst.asm). The keyboard's two rows of letters are a piano (Z-M,
-; and Q-P an octave up). Space plays the song as it is -- a change is heard at
-; once, while it plays -- by the player games use (sk_play.asm).
+; edited: sk_inst.asm); ^B, from either, a third: the instrument banks on the
+; disk (WOPL files), to take instruments from (sk_bank.asm). The keyboard's
+; two rows of letters are a piano (Z-M, and Q-P an octave up). Space plays the
+; song as it is -- a change is heard at once, while it plays -- by the player
+; games use (sk_play.asm).
 ;
 ;   ASM -o SONGKIT.COM songkit.asm     makes SONGKIT.COM
 ;------------------------------------------------------------------------------
@@ -30,9 +32,11 @@ OV_EDIT     equ  0          ; the overlays: the two pages' editing,
 OV_FILE     equ  1          ;   the files,
 OV_HELP     equ  2          ;   the help,
 OV_BLOCK    equ  3          ;   blocks of a pattern copied, pasted (the clipboard too)
-NOVL        equ  4
+OV_BANK     equ  4          ;   instrument banks (and a bank read, after its code)
+NOVL        equ  5
 MAXPG       equ  32         ; 512KB of song at most
 MAXINST     equ  255
+SRCOFS      equ  $1000      ; the instruments' sources: in the names' page, from here
 NVOICE      equ  6          ; notes played at once from the keys
 ;------------------------------------------------------------------------------
 ; SONGKIT.COM is bigger than 64KB could hold, in time: its core (this file, to
@@ -146,11 +150,15 @@ MAIN1       LDA  MODE           ; (the help over the page: nothing drawn under i
             TST  MODE           ; (a line being typed, a question: the mouse
             BNE  MAIN2          ; left until it's done, its clicks kept)
             JSR  POLLIN
-            TST  PAGE
+            LDA  PAGE
             BNE  MAIN1A
             JSR  O_PMOUSE
             BRA  MAIN2
-MAIN1A      JSR  MOUSE
+MAIN1A      CMPA #2
+            BNE  MAIN1B
+            JSR  O_BKMOUSE
+            BRA  MAIN2
+MAIN1B      JSR  MOUSE
 MAIN2       JSR  GETKEY
             BEQ  MAIN
             JSR  KEYDO
@@ -223,7 +231,7 @@ KDHELP      TSTB                ; the help: a key closes it (one let go: a note'
             CLR  MODE
             TST  PAGE
             LBEQ O_REDRAWUI
-            JMP  O_DRAWPAGE
+            JMP  DRAWCUR
 KD1         TSTB                ; a key let go: a note's end
             BPL  KD1B
 KD1A        JSR  O_PRECUP         ; (recording: the note's end put in)
@@ -235,8 +243,10 @@ KD1B        TST  MSGUP          ; (a message: the status back, from the next key
             PULS D
 KD1C        CMPA #K_F1
             LBEQ O_KHELP
-KD2         TST  PAGE           ; (the pattern page's own)
+KD2         LDF  PAGE           ; (the pattern page's own, the bank page's)
             LBEQ O_PKEY
+            CMPF #2
+            LBEQ O_BKEY
             LDB  KEYMODS
             BITB #VC_MOD_CTL
             BNE  KDCTL
@@ -304,6 +314,8 @@ CTLTAB      FCB  K_LEFT         ; ^Left, ^Right: PgUp, PgDn (no Fn key needed)
             FDB  O_SAVEAS
             FCB  $1A            ; ^W
             FDB  O_SAVEINS
+            FCB  $05            ; ^B: the bank page
+            FDB  O_BKOPEN
             FCB  0
 KUP         CLRA
             JMP  O_FMOVE
@@ -506,7 +518,7 @@ OLCLOSE     LDB  OVFH
             SWI2
             RTS
 ; OVLEN: each overlay's length, in the file's order.
-OVLEN       FDB  EDITEND-OWIN,FILEEND-OWIN,HELPEND-OWIN,BLOCKEND-OWIN
+OVLEN       FDB  EDITEND-OWIN,FILEEND-OWIN,HELPEND-OWIN,BLOCKEND-OWIN,BANKEND-OWIN
 ; OVFREE: bank 2 its own page again, the overlays' pages given back.
 OVFREE      LDB  #OBANK
             LDE  OHOME
@@ -655,27 +667,58 @@ O_BCLEAR    JSR  OVCALL
 O_BPASTE    JSR  OVCALL
             FCB  OV_BLOCK
             FDB  BPASTE
+O_BKOPEN    JSR  OVCALL
+            FCB  OV_BANK
+            FDB  BKOPEN
+O_BKDRAW    JSR  OVCALL
+            FCB  OV_BANK
+            FDB  BKDRAW
+O_BKEY      JSR  OVCALL
+            FCB  OV_BANK
+            FDB  BKEY
+O_BKMOUSE   JSR  OVCALL
+            FCB  OV_BANK
+            FDB  BKMOUSE
+O_NOTENAME  JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  NOTENAME
+O_FERR      JSR  OVCALL
+            FCB  OV_FILE
+            FDB  FERR
 
 ;------------------------------------------------------------------------------
 ; Instruments.
 ;------------------------------------------------------------------------------
 ; NEWINST: a new instrument (the first's sound to start from); DUPINST: a copy
-; of this one; either after the last, and the one edited.
+; of this one (where it came from too); either after the last, and the one
+; edited.
 NEWINST     LDX  #DEFINST
             LDY  #DEFNAME
+            LDU  #NOSRC
             BRA  ADDINST
 DUPINST     LDX  IP
             LDY  NP
-ADDINST     LDA  NINST
+            LDU  #CURSRC
+ADDINST     BSR  ADDINST0
+            BCS  ADD9
+            JSR  O_DRAWTITLE
+            JMP  O_DRAWVALS
+ADD9        LDX  #S_FULL
+            JMP  MSG
+; ADDINST0: the instrument at X, its name at Y, its source at U, after the last,
+; and the one edited (nothing drawn). Carry set if there are 255 already.
+ADDINST0    LDA  NINST
             CMPA #MAXINST
-            BHS  ADD9
-            PSHS Y              ; (it and its name kept: they may be CURINST and
-            LDY  #IOBUF         ; CURNAME, about to change)
+            BHS  ADD09
+            PSHS Y              ; (it, its name, its source kept: they may be
+            LDY  #IOBUF         ; CURINST, CURNAME, CURSRC, about to change)
             LDW  #SK_ILEN
             TFM  X+,Y+
             PULS X
             LDW  #16
             TFM  X+,Y+
+            LDW  #16
+            TFM  U+,Y+
             INC  NINST
             LDA  NINST
             STA  CURI
@@ -687,20 +730,31 @@ ADDINST     LDA  NINST
             LDY  NP
             LDW  #16
             TFM  X+,Y+
+            LDY  #CURSRC
+            LDW  #16
+            TFM  X+,Y+
             JSR  PUTINST
             JSR  PUTNAME
+            JSR  PUTSRC
             JSR  USEINST
             LDA  #1
             STA  CHANGED
-            JSR  O_DRAWTITLE
-            JMP  O_DRAWVALS
-ADD9        LDX  #S_FULL
-            JMP  MSG
-; USEINST: the player's instruments SONGKIT's (as they are edited).
+            ANDCC #$FE
+            RTS
+ADD09       ORCC #1
+            RTS
+; USEINST: the player's instruments SONGKIT's (as they are edited) -- on the
+; bank page, the one being tried after them too (BKJAM).
 USEINST     LDX  #WINDOW        ; (in their page: the player sees it while it
             STX  SK_IBASE       ; reads one)
             LDA  NINST
-            STA  SK_INUM
+            LDB  PAGE
+            CMPB #2
+            BNE  USE1
+            TST  BKJAM
+            BEQ  USE1
+            LDA  BKJAM
+USE1        STA  SK_INUM
             LDA  INPG
             STA  SK_IPG
             RTS
@@ -772,7 +826,12 @@ PD7A        PSHS A
             STB  A,X
 PD7B        LDA  PDNOTE
             LDE  CURI
-            JSR  SK_JAM
+            LDF  PAGE           ; (the bank page: the instrument being tried, if
+            CMPF #2             ; there is one)
+            BNE  PD7C
+            LDE  BKJAM
+            BEQ  PD8
+PD7C        JSR  SK_JAM
 PD8         ANDCC #$FE
             RTS
 PD9         ORCC #1
@@ -807,8 +866,10 @@ KTAB        LDA  PAGE
             JSR  JAMSET
 KTAB1       JMP  DRAWCUR
 ; DRAWCUR: the page being shown, drawn.
-DRAWCUR     TST  PAGE
+DRAWCUR     LDA  PAGE
             LBEQ O_DRAWPAT
+            CMPA #2
+            LBEQ O_BKDRAW
             JMP  O_DRAWPAGE
 ; PIANOUP: key A let go: its note too.
 PIANOUP     CLRB
@@ -851,6 +912,7 @@ DEFINST     FCB  0,$06,$00
             FCB  0,0,0,0,0,0,0,0,0
 DEFNAME     FCC  "Piano"
             FCB  0,0,0,0,0,0,0,0,0,0,0
+NOSRC       FCB  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ; (made here: no source)
 S_ASKNAME   FCC  "The instrument's name: "
             FCB  0
 S_ASKQUIT   FCC  "Changes not saved: quit anyway? (Y or N)"
@@ -884,7 +946,8 @@ PNEXT       RMB  1          ; (PRECUP's: the note's end in the row after)
 PTGT        RMB  1
 PSVROW      RMB  1
 PSVTRK      RMB  1
-PAGE        RMB  1          ; the page shown: 0 the patterns', 1 the instruments'
+PAGE        RMB  1          ; the page shown: 0 the patterns', 1 the instruments',
+                            ; 2 the banks'
 PBPG        RMB  1          ; the pattern buffer's page, the names', the
 NMPG        RMB  1          ; instruments'
 INPG        RMB  1
@@ -898,6 +961,8 @@ IP          RMB  2          ; it and its name (CURINST, CURNAME: copies of the
 NP          RMB  2          ; instruments' and names' pages')
 CURINST     RMB  SK_ILEN
 CURNAME     RMB  17
+CURSRC      RMB  16         ; (and where it came from: SRCAT)
+BKJAM       RMB  1          ; the bank page's instrument being tried (0: none)
 NAMETMP     RMB  16
 PNI         RMB  1
 CURF        RMB  1          ; the field being edited
@@ -1097,6 +1162,15 @@ CLIP        equ  BLOCKEND       ; (only addresses: not in the file)
 CLIPEND     equ  CLIP+MAXROWS*SK_NTRK*5
             IFGT CLIPEND-(OWIN+$4000)
             ERROR "OV_BLOCK and its clipboard are more than 16KB"
+            ENDC
+            ORG  OWIN           ; OV_BANK: banks, and a bank read after them
+            INCLUDE "sk_bank.asm"
+BANKEND     equ  *
+BKFILES     equ  BANKEND        ; (only addresses: not in the file) the files listed,
+BKDATA      equ  BKFILES+BK_MAXF*BK_FW ; the bank's 128 instruments
+BKDEND      equ  BKDATA+128*66
+            IFGT BKDEND-(OWIN+$4000)
+            ERROR "OV_BANK and its bank are more than 16KB"
             ENDC
 
             END  START

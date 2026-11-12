@@ -1949,6 +1949,8 @@ PCTLTAB     FCB  K_LEFT         ; ^Left, ^Right: the instrument before, after
             FDB  KLOOP
             FCB  $10            ; ^M: mute the track
             FDB  KMUTE
+            FCB  $05            ; ^B: the bank page
+            FDB  O_BKOPEN
             FCB  0
 
 ; The cursor: up, down, left, right; in the grid, or among the settings.

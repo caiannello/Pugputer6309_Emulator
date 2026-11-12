@@ -1260,21 +1260,22 @@ TEST(songkit_editor_keeps_its_code_in_overlays) {
     std::string mem = shell("MEM");
     CHECK(mem.find("KB free") != std::string::npos);
     // The file: the header (10 bytes, EXE_MORE), the core, then OV_EDIT, OV_FILE, OV_HELP,
-    // OV_BLOCK.
+    // OV_BLOCK, OV_BANK.
     auto be16 = [&](size_t at) { return static_cast<uint8_t>(bin[at]) << 8 | static_cast<uint8_t>(bin[at + 1]); };
     CHECK(be16(0) == 0x5058 && be16(2) == 0xC000 && be16(6) == 1);
     size_t core = be16(8);
-    uint16_t len[4] = {static_cast<uint16_t>(kit_sym("EDITEND") - 0x8000),
+    uint16_t len[5] = {static_cast<uint16_t>(kit_sym("EDITEND") - 0x8000),
                        static_cast<uint16_t>(kit_sym("FILEEND") - 0x8000),
                        static_cast<uint16_t>(kit_sym("HELPEND") - 0x8000),
-                       static_cast<uint16_t>(kit_sym("BLOCKEND") - 0x8000)};
+                       static_cast<uint16_t>(kit_sym("BLOCKEND") - 0x8000),
+                       static_cast<uint16_t>(kit_sym("BANKEND") - 0x8000)};
     CHECK(core == static_cast<size_t>(kit_sym("COREEND") - 0xC000));
-    CHECK(bin.size() == 10 + core + len[0] + len[1] + len[2] + len[3]);
+    CHECK(bin.size() == 10 + core + len[0] + len[1] + len[2] + len[3] + len[4]);
     CHECK(e.start());
     // Each overlay in its page, as the file has it; OV_EDIT in bank 2, the core in bank 3.
-    CHECK(var("NOVPG") == 4);
+    CHECK(var("NOVPG") == 5);
     size_t at = 10 + core;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         size_t page = e.s.bus.read_cpu(static_cast<uint16_t>(kit_sym("OVPG") + i));
         CHECK(page > 3 && std::memcmp(e.s.bus.phys_ram() + page * 16384, bin.data() + at, len[i]) == 0);
         at += len[i];
@@ -1413,5 +1414,242 @@ TEST(songkit_editor_copies_and_pastes_blocks) {
     CHECK(var("NORD") == 3 && e.row(3).find("00 00 01") != std::string::npos);
     alt(kDel);
     CHECK(var("NORD") == 2);
+    if (std::getenv("SONGKIT_SHOW")) e.show();
+}
+
+namespace {
+// A bank's instrument (WOPL, 66 bytes) as SONGKIT takes it: its operators MOD1 CAR1 MOD2
+// CAR2 (the file has CAR1 MOD1 CAR2 MOD2); a percussion bank's (or a fixed note's) its drum
+// key as the note (MIDI's 60 is C-4, SONGKIT's 49), or the key's offset as a transpose.
+Ins from_wopl(const uint8_t* w, bool perc, int prog) {
+    Ins i{};
+    uint8_t fl = w[39];
+    bool four = (fl & 1) && !(fl & 2);
+    i[0] = four ? 1 : 0;
+    i[1] = w[40] & 0x0F;
+    std::copy(w + 47, w + 52, i.begin() + 3);
+    std::copy(w + 42, w + 47, i.begin() + 8);
+    if (four) {
+        i[2] = w[41] & 1;
+        std::copy(w + 57, w + 62, i.begin() + 13);
+        std::copy(w + 52, w + 57, i.begin() + 18);
+    }
+    int koff = static_cast<int16_t>(w[32] << 8 | w[33]);
+    if (perc || (fl & 0x40)) {
+        int key = w[38] ? w[38] : prog;
+        i[0] |= 2;
+        i[23] = static_cast<uint8_t>(std::clamp((key & 0x7F) + koff - 11, 1, 96));
+    } else {
+        i[23] = static_cast<uint8_t>(std::clamp(koff, -48, 48));
+    }
+    return i;
+}
+} // namespace
+
+// The bank page (^B): /BANKS listed (its .WOP files and folders, nothing else); a folder
+// opened, a file in it that isn't a bank, back up; a bank read -- its instruments, the one at
+// the cursor played on the keys (put after the song's, one more); Enter adds it to the song,
+// where it came from kept with it (the instrument page shows it); the percussion bank, a
+// drum put over the song's instrument (^R, asked); a new bank file (^N), the song's
+// instrument put into it (^P, asked); the song saved with its instruments' sources, opened
+// again with them; an instrument's own file with its source; the help; the mouse.
+TEST(songkit_editor_takes_instruments_from_banks) {
+    std::string repo = REPO_DIR;
+    std::string fat4 = host_file(repo + "/gamekit/banks/FATMAN4.WOP");
+    std::string fat2 = host_file(repo + "/gamekit/banks/FATMAN2.WOP");
+    CHECK(fat4.size() == 16983 && fat2.size() == 16983);
+    Editor e({disk_file("BANKS/FATMAN2.WOP", fat2), disk_file("BANKS/FATMAN4.WOP", fat4),
+              disk_file("BANKS/README.TXT", "not a bank"), disk_file("BANKS/MORE/BAD.WOP", "nor this")});
+    if (!e.ok) return;
+    auto var = [&](const char* n) { return e.s.bus.read_cpu(kit_sym(n)); };
+    uint16_t inpg = kit_sym("INPG");
+    auto ins = [&](int i) {
+        Ins out;
+        size_t page = e.s.bus.read_cpu(inpg);
+        std::copy_n(e.s.bus.phys_ram() + page * 16384 + 32 * (i - 1), 32, out.begin());
+        return out;
+    };
+    auto rec = [&](const std::string& f, int bank, int prog) {
+        return reinterpret_cast<const uint8_t*>(f.data()) + 19 + 2 * 34 + (bank * 128 + prog) * 66;
+    };
+    auto has = [&](int r, const char* t) { return e.row(r).find(t) != std::string::npos; };
+    auto wait = [&] { e.frames(40); };
+    const uint8_t kCtlB = 0x05, kY = 0x1C, kPgDn = 0x4E, kHome = 0x4A, kTab = 0x2B;
+    const std::string nul(1, '\0');
+    CHECK(e.start());
+    // ^B: the bank page, /BANKS listed: the folder up, its two banks and its folder (not
+    // README.TXT).
+    e.key(kCtlB, true);
+    wait();
+    CHECK(var("PAGE") == 2 && has(2, "Folder /BANKS") && has(5, "Files") && has(5, "Instruments"));
+    CHECK(e.row(6).substr(2, 14) == "../           " && e.row(7).substr(2, 14) == "FATMAN2.WOP   ");
+    CHECK(e.row(8).substr(2, 14) == "FATMAN4.WOP   " && e.row(9).substr(2, 14) == "MORE/         ");
+    CHECK(e.row(10).substr(2, 14) == "              " && has(3, "No bank read") && e.lit(6) == 2);
+    // The folder: ../ and BAD.WOP -- not a bank; ../ back up.
+    for (int i = 0; i < 3; ++i) e.key(kDown);
+    e.key(kEnter);
+    wait();
+    CHECK(has(2, "Folder /BANKS/MORE ") && e.row(6).substr(2, 4) == "../ " && e.row(7).substr(2, 8) == "BAD.WOP ");
+    e.key(kDown);
+    e.key(kEnter);
+    wait();
+    CHECK(has(29, "/BANKS/MORE/BAD.WOP: not a WOPL bank") && has(3, "No bank read"));
+    e.key(kUp);
+    e.key(kEnter);
+    wait();
+    CHECK(has(2, "Folder /BANKS ") && e.row(8).substr(2, 11) == "FATMAN4.WOP");
+    // FATMAN4.WOP read: its melodic bank, the cursor on its first instrument.
+    e.key(kDown);
+    e.key(kDown);
+    e.key(kEnter);
+    wait();
+    CHECK(has(2, "File FATMAN4.WOP") && has(3, "melodic 0") && has(3, "Fat Man GM 4-op") && has(3, "(1 of 2)"));
+    CHECK(e.row(6).substr(17, 16) == "000 Grand Piano " && e.lit(6) == 17 && e.bg(8, 2) == 24);
+    CHECK(has(6, "4 operators") && has(7, "Transpose 0"));
+    // To 105, the banjo (a page down five times); Z plays it: instrument 2 for now, one more
+    // than the song's -- on track 0, its operators as SONGKIT has them.
+    for (int i = 0; i < 5; ++i) e.key(kPgDn);
+    CHECK(has(26, "105 Banjo") && e.lit(26) == 17);
+    Ins banjo = from_wopl(rec(fat4, 0, 105), false, 105);
+    CHECK(banjo[0] == 1 && banjo[3] == 0x11 && banjo[8] == 0x17); // (SWAMP's banjo)
+    CHECK(var("BKJAM") == 2 && ins(2) == banjo && var("NINST") == 1);
+    size_t mark = e.log.size();
+    e.key(kZ);
+    CHECK(writes_to(e.log, mark, 0x20) == V({0x11}) && writes_to(e.log, mark, 0x23) == V({0x17}));
+    CHECK(writes_to(e.log, mark, 0x28) == V({banjo[13]}) && writes_to(e.log, mark, 0x2B) == V({banjo[18]}));
+    // Enter: into the song, instrument 2 (the one edited); the next to try is 3.
+    e.key(kEnter);
+    CHECK(has(29, "Added to the song: instrument 2") && var("NINST") == 2 && var("CURI") == 2);
+    CHECK(ins(2) == banjo && var("BKJAM") == 3 && has(13, "Instrument 2 of 2") && has(14, "Banjo"));
+    CHECK(e.row(0).find("(a new song)*") != std::string::npos);
+    // Tab: back to the pattern page it came from; Tab, the instrument page: where it's from.
+    e.key(kTab);
+    CHECK(var("PAGE") == 0 && has(2, "Speed 6") && var("BKJAM") == 0);
+    e.key(kTab);
+    CHECK(has(2, "Instrument 2 of 2") && has(2, "Banjo"));
+    CHECK(has(7, "From") && e.row(7).substr(17, 44) == "FATMAN4.WOP  melodic bank 0  program 105    ");
+    e.key(0x4B); // PgUp: instrument 1, made here
+    CHECK(e.row(7).substr(17, 2) == "- ");
+    e.key(0x4E);
+    // ^B again: as it was. ^Right: the percussion bank; Home, then key 35: a drum.
+    e.key(kCtlB, true);
+    wait();
+    CHECK(has(3, "melodic 0") && has(26, "105 Banjo") && e.lit(26) == 17);
+    e.key(kRight, true);
+    wait();
+    CHECK(has(3, "percussion 0") && has(3, "Fat Man GM 4-op drums") && has(3, "(2 of 2)"));
+    e.key(kHome);
+    CHECK(e.row(6).substr(17, 4) == "000 " && e.v.card().vram[VC_RESET_TEXT_MAP + (6 * 128 + 21) * 4 + 1] == 240);
+    e.key(kPgDn);
+    for (int i = 0; i < 14; ++i) e.key(kDown);
+    CHECK(has(26, "035 Acou Bass Drum") && e.lit(26) == 17 && has(7, "Fixed note B-1"));
+    Ins kick = from_wopl(rec(fat4, 1, 35), true, 35);
+    CHECK(kick[0] == 2 && kick[23] == 24);
+    // ^R: over the song's instrument 2? N: no; ^R, Y: yes.
+    e.key(0x15, true);
+    CHECK(has(29, "Put it over instrument 2, Banjo? (Y or N)"));
+    e.key(0x11);
+    CHECK(ins(2) == banjo);
+    e.key(0x15, true);
+    e.key(kY);
+    CHECK(has(29, "Put over it: instrument 2") && ins(2) == kick && has(14, "Acou Bass Drum"));
+    // ^N: a new bank file, MINE.WOP -- one bank of 128 blank instruments, read (the cursor
+    // where it was: on 35, as in the other bank files, to compare them).
+    e.key(0x11, true);
+    CHECK(has(29, "A new bank file (.WOP): _"));
+    e.text("MINE");
+    e.key(kEnter);
+    wait();
+    for (int i = 0; i < 20 && !has(29, "Made"); ++i) wait();
+    CHECK(has(29, "Made MINE.WOP") && has(2, "File MINE.WOP") && has(3, "melodic 0") && has(3, "MINE"));
+    std::vector<uint8_t> mine = e.file("/BANKS/MINE.WOP");
+    CHECK(mine.size() == 19 + 34 + 128 * 66);
+    if (mine.size() != 19 + 34 + 128 * 66) return;
+    CHECK(std::string(mine.begin(), mine.begin() + 11) == "WOPL3-BANK" + nul && mine[11] == 3);
+    CHECK(mine[14] == 1 && mine[16] == 0 && mine[53 + 39] == 4 && mine[53 + 127 * 66 + 39] == 4);
+    CHECK(e.row(10).substr(2, 9) == "MINE.WOP " && e.bg(10, 2) == 24 && e.lit(26) == 17);
+    e.key(kHome);
+    CHECK(e.lit(6) == 17 && e.row(6).substr(17, 4) == "000 ");
+    // ^P: the song's instrument 2 (the drum) into it, at 000: asked, Y. As the bank's: its
+    // name, a fixed note (its key, 35), its operators the other way round.
+    e.key(0x13, true);
+    CHECK(has(29, "Put instrument 2, Acou Bass Drum into the bank, at 0? (Y or N)"));
+    e.key(kY);
+    wait();
+    CHECK(has(29, "Put into MINE.WOP") && has(6, "000 Acou Bass Drum"));
+    mine = e.file("/BANKS/MINE.WOP");
+    const uint8_t* w = mine.data() + 53;
+    CHECK(std::string(reinterpret_cast<const char*>(w)) == "Acou Bass Drum" && w[39] == 0x40 && w[38] == 35);
+    CHECK(from_wopl(w, false, 0) == kick);
+    // The song saved: its instruments' sources after the names ("PSS1", 16 bytes each).
+    e.key(0x16, true);
+    e.text("BANKED");
+    e.key(kEnter);
+    wait();
+    for (int i = 0; i < 20 && !has(29, "Saved"); ++i) wait();
+    std::vector<uint8_t> sng = e.file("/BANKED.SNG");
+    CHECK(sng.size() > 100);
+    if (sng.size() < 100) return;
+    std::string tail(sng.end() - 36, sng.end());
+    CHECK(tail.substr(0, 4) == "PSS1" && tail.substr(4, 16) == std::string(16, '\0'));
+    CHECK(tail.substr(20, 12) == "FATMAN4.WOP" + nul && tail[32] == '\x80' && tail[33] == 35);
+    // Back to the instrument page; the song opened again: the drum knows where it came from.
+    e.key(kEsc);
+    CHECK(var("PAGE") == 1);
+    e.key(0x12, true);
+    e.text("BANKED");
+    e.key(kEnter);
+    wait();
+    CHECK(has(29, "Opened BANKED.SNG"));
+    e.key(0x4E);
+    CHECK(has(2, "Instrument 2 of 2") && e.row(7).substr(17, 44) == "FATMAN4.WOP  percussion bank 0  program 35  ");
+    // Its own file (.INS): its source after its name -- 68 bytes.
+    e.key(0x1A, true);
+    e.text("KICK");
+    e.key(kEnter);
+    wait();
+    std::vector<uint8_t> kf = e.file("/KICK.INS");
+    CHECK(kf.size() == 68 && std::equal(kf.begin() + 4, kf.begin() + 36, kick.begin()));
+    CHECK(kf.size() == 68 && std::string(kf.begin() + 52, kf.begin() + 63) == "FATMAN4.WOP" && kf[64] == 0x80 &&
+          kf[65] == 35);
+    // ... opened into instrument 1: its source with it.
+    e.key(0x4B);
+    e.key(0x12, true);
+    e.text("KICK.INS");
+    e.key(kEnter);
+    wait();
+    CHECK(has(29, "Opened KICK.INS") && has(2, "Instrument 1 of 2") && ins(1) == kick);
+    CHECK(e.row(7).substr(17, 44) == "FATMAN4.WOP  percussion bank 0  program 35  ");
+    // F1 on the bank page: its own help.
+    e.key(kCtlB, true);
+    wait();
+    e.key(0x3A);
+    CHECK(has(2, "The bank page lists") && has(29, "Any key"));
+    e.key(kEsc);
+    CHECK(var("PAGE") == 2 && has(5, "Instruments"));
+    // The mouse: a click on an instrument puts the cursor there.
+    e.v.mouse_to(20 * 8 + 4, 9 * 16 + 8, 0);
+    e.frames();
+    e.v.mouse_to(20 * 8 + 4, 9 * 16 + 8, 1);
+    e.frames();
+    e.v.mouse_to(20 * 8 + 4, 9 * 16 + 8, 0);
+    e.frames();
+    CHECK(e.lit(9) == 17 && e.lit(6) == -1);
+    // Clicked twice, quickly: over the song's instrument being edited (1), as ^R -- not
+    // asked. (A blank one: nothing to take.) Twice, slowly: only the cursor.
+    auto click = [&](int c, int r) {
+        e.v.mouse_to(c * 8 + 4, r * 16 + 8, 1);
+        e.frames(2);
+        e.v.mouse_to(c * 8 + 4, r * 16 + 8, 0);
+        e.frames(2);
+    };
+    click(20, 9); // (just after the click above)
+    CHECK(has(29, "That one is blank"));
+    click(20, 6);
+    e.frames(40);
+    click(20, 6);
+    CHECK(e.lit(6) == 17 && has(29, "That one is blank") && has(13, "Instrument 1 of 2"));
+    click(20, 6);
+    CHECK(has(29, "Put over it: instrument 1") && ins(1) == kick && has(14, "Acou Bass Drum"));
     if (std::getenv("SONGKIT_SHOW")) e.show();
 }

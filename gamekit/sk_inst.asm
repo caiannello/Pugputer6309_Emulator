@@ -346,8 +346,9 @@ DRAWPAGE    JSR  TXCLR
             JSR  DRAWSTAT
             BRA  DRAWVALS
 ; DRAWVALS: every field, the instrument's number, the operators' headings
-; (those heard lit), and the note's label.
-DRAWVALS    CLRA
+; (those heard lit), the note's label, and where it came from.
+DRAWVALS    JSR  DRAWSRC
+            CLRA
 DV1         PSHS A
             JSR  DRAWF
             PULS A
@@ -418,6 +419,68 @@ DV6         STA  TXFG
             BLO  DV4
             RTS
 OPCOLS      FCB  17,25,33,41
+
+; DRAWSRC: where the instrument came from (its bank file, the bank, the
+; program), or "-": made here.
+DRAWSRC     LDD  #$1107
+            JSR  TXAT
+            CLR  TXBG
+            CLR  FTMP           ; (the characters so far)
+            LDA  #C_DIM
+            STA  TXFG
+            LDX  #S_NOSRC
+            TST  CURSRC
+            BEQ  DSR8
+            LDA  #C_VALUE
+            STA  TXFG
+            LDX  #CURSRC        ; the file (12 at most)
+            CLRB
+DSR1        LDA  ,X+
+            BEQ  DSR2
+            JSR  TXCH
+            INCB
+            CMPB #12
+            BLO  DSR1
+DSR2        STB  FTMP
+            LDA  #C_LABEL
+            STA  TXFG
+            LDX  #S_SMEL
+            LDA  CURSRC+12
+            BPL  DSR3
+            LDX  #S_SPER
+DSR3        BSR  DSRSTR
+            LDA  #C_VALUE
+            STA  TXFG
+            LDA  CURSRC+12
+            ANDA #$7F
+            JSR  TXDEC
+            ADDB FTMP
+            STB  FTMP
+            LDA  #C_LABEL
+            STA  TXFG
+            LDX  #S_SPRG
+            BSR  DSRSTR
+            LDA  #C_VALUE
+            STA  TXFG
+            LDA  CURSRC+13
+            JSR  TXDEC
+            ADDB FTMP
+            STB  FTMP
+            LDA  CURSRC+14
+            BITA #1
+            BEQ  DSR9
+            LDA  #C_LABEL
+            STA  TXFG
+            LDX  #S_SV1
+DSR8        BSR  DSRSTR
+DSR9        LDB  FTMP
+            NEGB
+            ADDB #62
+            JMP  TXSPC
+DSRSTR      JSR  PSTR
+            ADDB FTMP
+            STB  FTMP
+            RTS
 
 ; CARRIERS: A, the operators heard (bit 0: the first).
 CARRIERS    LDX  IP
@@ -676,6 +739,9 @@ LABELS      FCB  2,2,C_LABEL
             FCB  28,6,C_LABEL
             FCC  "Play on"
             FCB  0
+            FCB  2,7,C_LABEL
+            FCC  "From"
+            FCB  0
             FCB  2,9,C_LABEL
             FCC  "Attack"
             FCB  0
@@ -728,6 +794,16 @@ S_XPOSE     FCC  "Transpose"
 S_NOTE      FCC  "Note     "
             FCB  0
 S_OP        FCC  "Op "
+            FCB  0
+S_NOSRC     FCC  "-"
+            FCB  0
+S_SMEL      FCC  "  melodic bank "
+            FCB  0
+S_SPER      FCC  "  percussion bank "
+            FCB  0
+S_SPRG      FCC  "  program "
+            FCB  0
+S_SV1       FCC  "  (voice 1 of 2)"
             FCB  0
 S_NO        FCC  "no"
             FCB  0
