@@ -21,8 +21,6 @@
 ;   PMOUSE     the mouse on it
 ;   PLAYPOS    where the song is playing, shown when it moves on
 ;------------------------------------------------------------------------------
-MAXROWS     equ  128        ; the longest pattern edited here
-ROWB        equ  100        ; a row in the buffer: 20 cells of 5 bytes
 GX0         equ  5          ; the grid: its first track's column,
 GY0         equ  5          ;   its first row's row,
 GROWS       equ  24         ;   how many rows it shows,
@@ -39,24 +37,6 @@ C_FX        equ  222
 ;------------------------------------------------------------------------------
 ; The buffer, and the song's pages.
 ;------------------------------------------------------------------------------
-; EMAP, NMAP, IMAP: the pattern buffer's page, the names', or the
-; instruments', into the window. (All kept.)
-EMAP        PSHS D,X
-            PSHSW
-            LDE  PBPG
-            BRA  EMAP1
-IMAP        PSHS D,X
-            PSHSW
-            LDE  INPG
-            BRA  EMAP1
-NMAP        PSHS D,X
-            PSHSW
-            LDE  NMPG
-EMAP1       LDB  #WBANK
-            LDA  #B_BANK_SET
-            SWI2
-            PULSW
-            PULS D,X,PC
 ; PROWA: X, row A of the buffer (in the window). (A kept.)
 PROWA       PSHS A
             LDB  #ROWB
@@ -447,19 +427,6 @@ PSVFULL     LDX  #S_NOROOM
             JSR  MSG
             ORCC #1
             RTS
-; TICKPOLL: in the middle of long work (with the song as it should be), the
-; song's tick, if one is due -- the window the player's for it; the caller's
-; page to be put in it again after. (All kept.)
-TICKPOLL    TST  SONGON
-            BEQ  TKP9
-            PSHS D,X,Y,U
-            PSHSW
-            LDB  SK_PG
-            JSR  SKMAP
-            JSR  SK_POLL
-            PULSW
-            PULS D,X,Y,U
-TKP9        RTS
 ; RESYNC: the player told the song has changed, if it's playing.
 RESYNC      TST  SONGON
             BEQ  RSY9
@@ -1923,13 +1890,13 @@ PCTLTAB     FCB  K_LEFT         ; ^Left, ^Right: the instrument before, after
             FCB  $1B            ; ^X
             FDB  DELORD
             FCB  $12            ; ^O
-            FDB  OPEN
+            FDB  O_OPEN
             FCB  $16            ; ^S
-            FDB  SAVE
+            FDB  O_SAVE
             FCB  $04            ; ^A
-            FDB  SAVEAS
+            FDB  O_SAVEAS
             FCB  $1A            ; ^W
-            FDB  SAVEINS
+            FDB  O_SAVEINS
             FCB  $08            ; ^E: Record
             FDB  KREC
             FCB  $13            ; ^P: Loop pattern
@@ -2427,7 +2394,7 @@ KTX1        PSHS Y
             LDA  #2
             JSR  PRSTART
             LDX  #KTEXT2
-            STX  PR_DO
+            JSR  SETPRDO        ; (PR_DO, in this overlay)
             LDA  #1
             STA  MODE
             RTS

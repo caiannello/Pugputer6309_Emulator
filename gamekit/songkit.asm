@@ -20,21 +20,41 @@
             INCLUDE "vidcard.d"
 
 SK_EDITOR   equ  1          ; (the player's editor's parts too: sk_play.asm)
-KIT_BASE     equ  $8000      ; (banks 2 and 3: bank 1 is the song's window)
-KIT_STACK    equ  $EF00
-WBANK       equ  1          ; the song's pages, seen through bank 1
+KIT_BASE    equ  $C000      ; the core: bank 3, with the variables and the stack
+KIT_STACK   equ  $EF00
+WBANK       equ  1          ; the song's pages (and the others), seen through bank 1
 WINDOW      equ  $4000
+OBANK       equ  2          ; the overlays, seen through bank 2 one at a time
+OWIN        equ  $8000
+OV_EDIT     equ  0          ; the overlays: the two pages' editing,
+OV_FILE     equ  1          ;   the files,
+OV_HELP     equ  2          ;   the help
+NOVL        equ  3
 MAXPG       equ  32         ; 512KB of song at most
 MAXINST     equ  255
 NVOICE      equ  6          ; notes played at once from the keys
 ;------------------------------------------------------------------------------
-            ORG  KIT_BASE-EXE_HDRSIZE
+; SONGKIT.COM is bigger than 64KB could hold, in time: its core (this file, to
+; the variables' end) is the program's body, loaded at $C000 (bank 3); after it
+; in the file come the overlays, each the code for $8000 (bank 2) -- loaded
+; into pages of their own as it starts (EXE_MORE: the file is left open for
+; it), one of them in bank 2 at a time. The core calls into an overlay through
+; a stub (O_name, below: OVCALL), which puts that overlay in bank 2 and the
+; caller's back after; an overlay calls the core as it likes, and another
+; overlay through a stub too. Bank 1 is the window, for the song's pages and
+; the editor's others.
+;------------------------------------------------------------------------------
+            ORG  KIT_BASE-EXE_HDRSIZE-2
             FDB  EXE_MAGIC      ; the program header
-            FDB  KIT_BASE        ; load address
+            FDB  KIT_BASE       ; load address
             FDB  START          ; entry
-            FDB  0              ; flags
+            FDB  EXE_MORE       ; flags: the overlays after the body
+            FDB  COREEND-KIT_BASE ; the body: the core
 ;------------------------------------------------------------------------------
 START       LDS  #KIT_STACK
+            STB  OVFH           ; (the file, open at the first overlay)
+            JSR  OVLOAD
+            LBCS NOOVL
             CLR  NPG
             CLR  NNPG
             CLR  MODE
@@ -74,7 +94,7 @@ START       LDS  #KIT_STACK
             SWI2
             LBCS NOMEM
             STA  INPG
-            JSR  NEWSONG
+            JSR  O_NEWSONG
             LBCS NOMEM
             LDA  #B_ARGS        ; a file named?
             SWI2
@@ -101,7 +121,7 @@ ST3         CLR  ,Y
             JSR  DRAWCUR
             TST  PR_BUF
             BEQ  MAIN
-            JSR  OPENNAMED      ; (its name in PR_BUF)
+            JSR  O_OPENNAMED      ; (its name in PR_BUF)
 ;------------------------------------------------------------------------------
 ; The main loop: the song's ticks, the mouse, the keys.
 ;------------------------------------------------------------------------------
@@ -116,18 +136,18 @@ MAIN0       JSR  SK_POLL
             BNE  MAIN1
             CLR  SONGON
             JSR  JAMSET
-            JSR  DRAWSTAT
+            JSR  O_DRAWSTAT
 MAIN1       LDA  MODE           ; (the help over the page: nothing drawn under it)
             CMPA #3
             BEQ  MAIN2
-            JSR  PLAYPOS
-            JSR  RQSTEP         ; (the grid's rows not drawn yet)
+            JSR  O_PLAYPOS
+            JSR  O_RQSTEP         ; (the grid's rows not drawn yet)
             TST  MODE           ; (a line being typed, a question: the mouse
             BNE  MAIN2          ; left until it's done, its clicks kept)
             JSR  POLLIN
             TST  PAGE
             BNE  MAIN1A
-            JSR  PMOUSE
+            JSR  O_PMOUSE
             BRA  MAIN2
 MAIN1A      JSR  MOUSE
 MAIN2       JSR  GETKEY
@@ -140,7 +160,7 @@ MAIN2       JSR  GETKEY
 MOUSE       LDA  PRESSED
             BITA #VC_MB_LEFT
             BEQ  MOUSE2
-            JSR  FHIT
+            JSR  O_FHIT
             BCS  MOUSE2
             JSR  PICKF
             LDA  CURF
@@ -148,22 +168,22 @@ MOUSE       LDA  PRESSED
             JMP  RENAME
 MOUSE2      LDA  WHEEL
             BEQ  MOUSE9
-            JSR  FHIT
+            JSR  O_FHIT
             BCS  MOUSE9
             JSR  PICKF
             LDA  #1
             TST  WHEEL
             BPL  MOUSE3
             LDA  #-1
-MOUSE3      JMP  FSTEP
+MOUSE3      JMP  O_FSTEP
 MOUSE9      RTS
 ; PICKF: field A the one being edited.
 PICKF       LDB  CURF
             STA  CURF
             TFR  B,A
-            JSR  DRAWF
+            JSR  O_DRAWF
             LDA  CURF
-            JMP  DRAWF
+            JMP  O_DRAWF
 
 ;------------------------------------------------------------------------------
 ; The keys.
@@ -175,14 +195,16 @@ KEYDO       LDF  MODE
             CMPF #3
             BEQ  KDHELP
             TSTB                ; a question: Y does it, anything else doesn't
-            BMI  KD9
+            LBMI KD9
             CLR  MODE
             PSHS A
             JSR  CLRMSG
             PULS A
             CMPA #$1C           ; Y
             BNE  KD9
-            JMP  [CF_DO]
+            LDX  CF_DO          ; (in the overlay that asked)
+            LDA  CF_OV
+            JMP  OVGO
 KDTYPE      JSR  PRKEY          ; a line of typing
             TSTA
             BEQ  KD9
@@ -192,16 +214,18 @@ KDTYPE      JSR  PRKEY          ; a line of typing
             PULS A
             CMPA #1
             BNE  KD9
-            JMP  [PR_DO]
+            LDX  PR_DO
+            LDA  PR_OV
+            JMP  OVGO
 KDHELP      TSTB                ; the help: a key closes it (one let go: a note's end)
             BMI  KD1A
             CLR  MODE
             TST  PAGE
-            LBEQ REDRAWUI
-            JMP  DRAWPAGE
+            LBEQ O_REDRAWUI
+            JMP  O_DRAWPAGE
 KD1         TSTB                ; a key let go: a note's end
             BPL  KD1B
-KD1A        JSR  PRECUP         ; (recording: the note's end put in)
+KD1A        JSR  O_PRECUP         ; (recording: the note's end put in)
             JMP  PIANOUP
 KD1B        TST  MSGUP          ; (a message: the status back, from the next key)
             BEQ  KD1C
@@ -209,9 +233,9 @@ KD1B        TST  MSGUP          ; (a message: the status back, from the next key
             JSR  CLRMSG
             PULS D
 KD1C        CMPA #K_F1
-            LBEQ KHELP
+            LBEQ O_KHELP
 KD2         TST  PAGE           ; (the pattern page's own)
-            LBEQ PKEY
+            LBEQ O_PKEY
             LDB  KEYMODS
             BITB #VC_MOD_CTL
             BNE  KDCTL
@@ -272,35 +296,35 @@ CTLTAB      FCB  K_LEFT         ; ^Left, ^Right: PgUp, PgDn (no Fn key needed)
             FCB  $07            ; ^D
             FDB  DUPINST
             FCB  $12            ; ^O
-            FDB  OPEN
+            FDB  O_OPEN
             FCB  $16            ; ^S
-            FDB  SAVE
+            FDB  O_SAVE
             FCB  $04            ; ^A
-            FDB  SAVEAS
+            FDB  O_SAVEAS
             FCB  $1A            ; ^W
-            FDB  SAVEINS
+            FDB  O_SAVEINS
             FCB  0
 KUP         CLRA
-            JMP  FMOVE
+            JMP  O_FMOVE
 KDOWN       LDA  #1
-            JMP  FMOVE
+            JMP  O_FMOVE
 KLEFT       LDA  #2
-            JMP  FMOVE
+            JMP  O_FMOVE
 KRIGHT      LDA  #3
-            JMP  FMOVE
+            JMP  O_FMOVE
 KPLUS       LDA  #1
-            JMP  FSTEP
+            JMP  O_FSTEP
 KMINUS      LDA  #-1
-            JMP  FSTEP
+            JMP  O_FSTEP
 KOCTDN      LDA  OCT
             BEQ  KOCT9
             DEC  OCT
-            JMP  DRAWSTAT
+            JMP  O_DRAWSTAT
 KOCTUP      LDA  OCT
             CMPA #7
             BHS  KOCT9
             INC  OCT
-            JMP  DRAWSTAT
+            JMP  O_DRAWSTAT
 KOCT9       RTS
 KPREV       LDA  CURI
             CMPA #1
@@ -313,8 +337,8 @@ KNEXT       LDA  CURI
             INC  CURI
 KINST       JSR  SETIP
             TST  PAGE
-            LBEQ DRAWSTAT
-            JMP  DRAWVALS
+            LBEQ O_DRAWSTAT
+            JMP  O_DRAWVALS
 KENTER      TST  CURF           ; on the name: rename it
             BNE  KOCT9
 RENAME      LDX  #S_ASKNAME
@@ -322,7 +346,7 @@ RENAME      LDX  #S_ASKNAME
             CLRA
             JSR  PRSTART
             LDX  #RENAMED
-            STX  PR_DO
+            JSR  SETPRDO
             LDA  #1
             STA  MODE
             RTS
@@ -343,15 +367,15 @@ RN3         JSR  PUTNAME
             LDA  #1
             STA  CHANGED
             JSR  CLRMSG
-            JSR  DRAWTITLE
-            JMP  DRAWVALS
+            JSR  O_DRAWTITLE
+            JMP  O_DRAWVALS
 ; KSONG: the song played, or stopped.
 KSONG       TST  SONGON
             BEQ  KSONG1
             JSR  SK_STOP
             CLR  SONGON
             JSR  JAMSET
-            JMP  DRAWSTAT
+            JMP  O_DRAWSTAT
 KSONG1      JSR  CLRVOICES
             LDX  #PAGES
             LDA  NPG
@@ -368,12 +392,12 @@ KSONG1      JSR  CLRVOICES
             JSR  SKORDER
 KSONG2      LDA  #1
             STA  SONGON
-KSONG9      JMP  DRAWSTAT
+KSONG9      JMP  O_DRAWSTAT
 ; KHUSH: silence: the song stopped, every note cut off (even one that would
 ; never fade, with a release of 0), the chip set up again.
 KHUSH       CLR  SONGON
             JSR  JAMSET
-            JSR  DRAWSTAT
+            JSR  O_DRAWSTAT
             LDX  #S_HUSH
             JMP  MSG
 ; KQUIT: back to the shell -- asked first, with changes not saved.
@@ -394,17 +418,26 @@ QUITNOW     JSR  SK_OFF
             LDA  #B_PAGE_FREE
             SWI2
             JSR  UIEND
+            JSR  OVFREE
             LDA  #B_EXIT
             SWI2
 NOMEM       JSR  UIEND
+            JSR  OVFREE
             LDX  #S_NOMEM
-            LDB  #F_STDOUT
+NOMEM1      LDB  #F_STDOUT
             LDA  #B_PUTS
             SWI2
             LDA  #B_EXIT
             SWI2
-; ASK: the question at Y (Y or N); X what Y does.
+NOOVL       LDX  #S_NOMEM       ; (no page for an overlay, or the file short)
+            CMPA #ERR_NOSPACE
+            BEQ  NOMEM1
+            LDX  #S_BADOVL
+            BRA  NOMEM1
+; ASK: the question at Y (Y or N); X what Y does (in the caller's overlay).
 ASK         STX  CF_DO
+            LDA  CUROV
+            STA  CF_OV
             TFR  Y,X
             JSR  MSG
             LDA  #2
@@ -412,14 +445,206 @@ ASK         STX  CF_DO
             RTS
 ; CLRMSG: the message or question gone from the bottom row: the status back.
 CLRMSG      CLR  MSGUP
-            JMP  DRAWSTAT
-; KHELP (F1): the help, over the page, until a key.
-KHELP       LDA  #3
-            STA  MODE
-            JSR  TXCLR
-            JSR  DRAWTITLE
-            LDX  #HELPTXT
-            JMP  DRAWLAB
+            JMP  O_DRAWSTAT
+;------------------------------------------------------------------------------
+; The overlays.
+;------------------------------------------------------------------------------
+; OVLOAD: each overlay, from the file (OVFH: open at the first), into a page of
+; its own; the file closed, OV_EDIT in bank 2. Carry set (A: ERR_NOSPACE, no
+; page for one; or ERR_EOF, the file ends too soon) if not -- the pages given
+; back.
+OVLOAD      LDB  #OBANK         ; (bank 2's own page, for after)
+            LDA  #B_BANK_GET
+            SWI2
+            STA  OHOME
+            LDA  #$FF
+            STA  CUROV
+            CLR  NOVPG
+OL1         LDA  #B_PAGE_ALLOC
+            SWI2
+            BCS  OLERR
+            LDX  #OVPG
+            LDB  NOVPG
+            STA  B,X
+            INC  NOVPG
+            TFR  A,E
+            LDB  #OBANK
+            LDA  #B_BANK_SET
+            SWI2
+            LDB  NOVPG          ; its length
+            DECB
+            LSLB
+            LDX  #OVLEN
+            LDY  B,X
+            PSHS Y
+            LDX  #OWIN
+            LDB  OVFH
+            LDA  #B_FREAD
+            SWI2
+            BCS  OLSHORT
+            CMPX ,S++
+            BNE  OLSHORT1
+            LDA  NOVPG
+            CMPA #NOVL
+            BLO  OL1
+            BSR  OLCLOSE
+            LDA  #OV_EDIT
+            JSR  OVMAP
+            ANDCC #$FE
+            RTS
+OLSHORT     LEAS 2,S
+OLSHORT1    LDA  #ERR_EOF
+OLERR       PSHS A
+            BSR  OLCLOSE
+            BSR  OVFREE
+            PULS A
+            ORCC #1
+            RTS
+OLCLOSE     LDB  OVFH
+            LDA  #B_FCLOSE_NAME
+            SWI2
+            RTS
+; OVLEN: each overlay's length, in the file's order.
+OVLEN       FDB  EDITEND-OWIN,FILEEND-OWIN,HELPEND-OWIN
+; OVFREE: bank 2 its own page again, the overlays' pages given back.
+OVFREE      LDB  #OBANK
+            LDE  OHOME
+            LDA  #B_BANK_SET
+            SWI2
+            LDA  #$FF
+            STA  CUROV
+OF1         TST  NOVPG
+            BEQ  OF9
+            DEC  NOVPG
+            LDX  #OVPG
+            LDB  NOVPG
+            LDB  B,X
+            LDA  #B_PAGE_FREE
+            SWI2
+            BRA  OF1
+OF9         RTS
+; OVMAP: overlay A in bank 2 (if it isn't already). (All kept but CC.)
+OVMAP       CMPA CUROV
+            BEQ  OM9
+            PSHS D,X
+            PSHSW
+            STA  CUROV
+            LDX  #OVPG
+            LDE  A,X
+            LDB  #OBANK
+            LDA  #B_BANK_SET
+            SWI2
+            PULSW
+            PULS D,X
+OM9         RTS
+; OVCALL: from a stub (JSR OVCALL, then the overlay, FCB, and the address in
+; it, FDB): that called with its overlay in bank 2, the caller's put back
+; after -- every register passed to it, and back from it, as it left them.
+OVCALL      PSHS CC,D,X         ; (5,S: the stub's own: what follows its JSR)
+            LDX  5,S
+            LDA  CUROV          ; the caller's overlay kept there instead
+            STA  5,S
+            LDA  ,X
+            LDX  1,X
+            STX  OVADR
+            JSR  OVMAP
+            PULS CC,D,X
+            JSR  [OVADR]
+OVBACK      PSHS CC,A           ; (2,S: the caller's overlay)
+            LDA  2,S
+            JSR  OVMAP
+            PULS CC,A
+            LEAS 2,S
+            RTS                 ; (to the stub's caller)
+; OVGO: X in overlay A, called (the caller's overlay put back after) -- for
+; what was kept to do later, its overlay kept with it (PR_DO, CF_DO).
+OVGO        STX  OVADR
+            LDB  CUROV
+            EXG  A,B
+            PSHS D              ; (as OVCALL leaves it: the caller's, then junk)
+            TFR  B,A
+            JSR  OVMAP
+            JSR  [OVADR]
+            BRA  OVBACK
+; SETPRDO: PR_DO X, in the caller's overlay. (All kept.)
+SETPRDO     STX  PR_DO
+            PSHS A
+            LDA  CUROV
+            STA  PR_OV
+            PULS A,PC
+; The overlays' entries, for the core and for each other: O_name calls name.
+O_DRAWF     JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  DRAWF
+O_DRAWPAGE  JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  DRAWPAGE
+O_DRAWSTAT  JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  DRAWSTAT
+O_DRAWTITLE JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  DRAWTITLE
+O_DRAWVALS  JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  DRAWVALS
+O_FHIT      JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  FHIT
+O_FMOVE     JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  FMOVE
+O_FSTEP     JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  FSTEP
+O_DRAWPAT   JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  DRAWPAT
+O_PKEY      JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  PKEY
+O_PLAYPOS   JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  PLAYPOS
+O_PMOUSE    JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  PMOUSE
+O_PRECUP    JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  PRECUP
+O_REDRAWUI  JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  REDRAWUI
+O_RQSTEP    JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  RQSTEP
+O_MKTLIST   JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  MKTLIST
+O_PATLOAD   JSR  OVCALL
+            FCB  OV_EDIT
+            FDB  PATLOAD
+O_NEWSONG   JSR  OVCALL
+            FCB  OV_FILE
+            FDB  NEWSONG
+O_OPEN      JSR  OVCALL
+            FCB  OV_FILE
+            FDB  OPEN
+O_OPENNAMED JSR  OVCALL
+            FCB  OV_FILE
+            FDB  OPENNAMED
+O_SAVE      JSR  OVCALL
+            FCB  OV_FILE
+            FDB  SAVE
+O_SAVEAS    JSR  OVCALL
+            FCB  OV_FILE
+            FDB  SAVEAS
+O_SAVEINS   JSR  OVCALL
+            FCB  OV_FILE
+            FDB  SAVEINS
+O_KHELP     JSR  OVCALL
+            FCB  OV_HELP
+            FDB  KHELP
 
 ;------------------------------------------------------------------------------
 ; Instruments.
@@ -457,8 +682,8 @@ ADDINST     LDA  NINST
             JSR  USEINST
             LDA  #1
             STA  CHANGED
-            JSR  DRAWTITLE
-            JMP  DRAWVALS
+            JSR  O_DRAWTITLE
+            JMP  O_DRAWVALS
 ADD9        LDX  #S_FULL
             JMP  MSG
 ; USEINST: the player's instruments SONGKIT's (as they are edited).
@@ -573,8 +798,8 @@ KTAB        LDA  PAGE
 KTAB1       JMP  DRAWCUR
 ; DRAWCUR: the page being shown, drawn.
 DRAWCUR     TST  PAGE
-            LBEQ DRAWPAT
-            JMP  DRAWPAGE
+            LBEQ O_DRAWPAT
+            JMP  O_DRAWPAGE
 ; PIANOUP: key A let go: its note too.
 PIANOUP     CLRB
 PU1         LDX  #VKEY
@@ -626,239 +851,11 @@ S_FULL      FCC  "255 instruments: no room for more"
             FCB  0
 S_NOMEM     FCC  "SONGKIT: not enough memory"
             FCB  CR,LF,0
-; HELPTXT: the help screen (F1): its labels, as DRAWLAB draws them.
-HELPTXT
-            FCB  2,2,C_LABEL
-            FCC  "A song plays its orders in turn, each one a pattern of up to 128 rows; a row"
-            FCB  0
-            FCB  2,3,C_LABEL
-            FCC  "has a cell for each track: note, instrument, volume, effect. The keyboard's"
-            FCB  0
-            FCB  2,4,C_LABEL
-            FCC  "letters are a piano. With Record on, a note goes in at the cursor, which"
-            FCB  0
-            FCB  2,5,C_LABEL
-            FCC  "moves down; as the song plays, the cursor follows it, a note goes in the row"
-            FCB  0
-            FCB  2,6,C_LABEL
-            FCC  "playing, and letting its key go puts in its end. With Record off, the keys"
-            FCB  0
-            FCB  2,7,C_LABEL
-            FCC  "just play."
-            FCB  0
-            FCB  2,9,C_HEAD
-            FCC  "Both pages"
-            FCB  0
-            FCB  2,10,C_VALUE
-            FCC  "Z-M Q-P"
-            FCB  0
-            FCB  14,10,C_LABEL
-            FCC  "the piano's keys"
-            FCB  0
-            FCB  2,11,C_VALUE
-            FCC  "[ ]"
-            FCB  0
-            FCB  14,11,C_LABEL
-            FCC  "octave down, up"
-            FCB  0
-            FCB  2,12,C_VALUE
-            FCC  "Space"
-            FCB  0
-            FCB  14,12,C_LABEL
-            FCC  "play from the order; stop"
-            FCB  0
-            FCB  2,13,C_VALUE
-            FCC  "Bksp"
-            FCB  0
-            FCB  14,13,C_LABEL
-            FCC  "all notes off"
-            FCB  0
-            FCB  2,14,C_VALUE
-            FCC  "Tab"
-            FCB  0
-            FCB  14,14,C_LABEL
-            FCC  "the other page"
-            FCB  0
-            FCB  2,15,C_VALUE
-            FCC  "^O"
-            FCB  0
-            FCB  14,15,C_LABEL
-            FCC  "open a song or instrument"
-            FCB  0
-            FCB  2,16,C_VALUE
-            FCC  "^S ^A"
-            FCB  0
-            FCB  14,16,C_LABEL
-            FCC  "save the song; save as"
-            FCB  0
-            FCB  2,17,C_VALUE
-            FCC  "^W"
-            FCB  0
-            FCB  14,17,C_LABEL
-            FCC  "save the instrument"
-            FCB  0
-            FCB  2,18,C_VALUE
-            FCC  "F1"
-            FCB  0
-            FCB  14,18,C_LABEL
-            FCC  "this help"
-            FCB  0
-            FCB  2,19,C_VALUE
-            FCC  "Esc"
-            FCB  0
-            FCB  14,19,C_LABEL
-            FCC  "back to the shell"
-            FCB  0
-            FCB  2,21,C_HEAD
-            FCC  "The instrument page"
-            FCB  0
-            FCB  2,22,C_VALUE
-            FCC  "arrows"
-            FCB  0
-            FCB  14,22,C_LABEL
-            FCC  "the setting to change"
-            FCB  0
-            FCB  2,23,C_VALUE
-            FCC  "+ -"
-            FCB  0
-            FCB  14,23,C_LABEL
-            FCC  "change it"
-            FCB  0
-            FCB  2,24,C_VALUE
-            FCC  "Enter"
-            FCB  0
-            FCB  14,24,C_LABEL
-            FCC  "on the name: rename it"
-            FCB  0
-            FCB  2,25,C_VALUE
-            FCC  "PgUp PgDn"
-            FCB  0
-            FCB  14,25,C_LABEL
-            FCC  "instrument before, after"
-            FCB  0
-            FCB  2,26,C_VALUE
-            FCC  "^N ^D"
-            FCB  0
-            FCB  14,26,C_LABEL
-            FCC  "new instrument; a copy"
-            FCB  0
-            FCB  42,9,C_HEAD
-            FCC  "The pattern page"
-            FCB  0
-            FCB  42,10,C_VALUE
-            FCC  "arrows"
-            FCB  0
-            FCB  54,10,C_LABEL
-            FCC  "move; row 0 up: settings"
-            FCB  0
-            FCB  42,11,C_VALUE
-            FCC  "PgUp PgDn"
-            FCB  0
-            FCB  54,11,C_LABEL
-            FCC  "16 rows up, down"
-            FCB  0
-            FCB  42,12,C_VALUE
-            FCC  "Home End"
-            FCB  0
-            FCB  54,12,C_LABEL
-            FCC  "the first row, the last"
-            FCB  0
-            FCB  42,13,C_VALUE
-            FCC  "1"
-            FCB  0
-            FCB  54,13,C_LABEL
-            FCC  "the key let go (note off)"
-            FCB  0
-            FCB  42,14,C_VALUE
-            FCC  "0-9 A-F"
-            FCB  0
-            FCB  54,14,C_LABEL
-            FCC  "a digit (effects: 0-9 A-Z)"
-            FCB  0
-            FCB  42,15,C_VALUE
-            FCC  "Del"
-            FCB  0
-            FCB  54,15,C_LABEL
-            FCC  "the field cleared"
-            FCB  0
-            FCB  42,16,C_VALUE
-            FCC  "Ins ^Ins"
-            FCB  0
-            FCB  54,16,C_LABEL
-            FCC  "a row in: this track, all"
-            FCB  0
-            FCB  42,17,C_VALUE
-            FCC  "Sh+Del ^Del"
-            FCB  0
-            FCB  54,17,C_LABEL
-            FCC  "a row out: this track, all"
-            FCB  0
-            FCB  42,18,C_VALUE
-            FCC  "+ -"
-            FCB  0
-            FCB  54,18,C_LABEL
-            FCC  "pattern played; a setting"
-            FCB  0
-            FCB  42,19,C_VALUE
-            FCC  "^Up ^Dn"
-            FCB  0
-            FCB  54,19,C_LABEL
-            FCC  "the order before, after"
-            FCB  0
-            FCB  42,20,C_VALUE
-            FCC  "^N ^D"
-            FCB  0
-            FCB  54,20,C_LABEL
-            FCC  "new pattern; a copy of it"
-            FCB  0
-            FCB  42,21,C_VALUE
-            FCC  "^R ^X"
-            FCB  0
-            FCB  54,21,C_LABEL
-            FCC  "order again; order out"
-            FCB  0
-            FCB  42,22,C_VALUE
-            FCC  "^Lt ^Rt"
-            FCB  0
-            FCB  54,22,C_LABEL
-            FCC  "the instrument put in"
-            FCB  0
-            FCB  42,23,C_VALUE
-            FCC  "Enter"
-            FCB  0
-            FCB  54,23,C_LABEL
-            FCC  "on title, author: retype"
-            FCB  0
-            FCB  42,24,C_VALUE
-            FCC  "^E"
-            FCB  0
-            FCB  54,24,C_LABEL
-            FCC  "Record on, off"
-            FCB  0
-            FCB  42,25,C_VALUE
-            FCC  "^P"
-            FCB  0
-            FCB  54,25,C_LABEL
-            FCC  "Loop pattern on, off"
-            FCB  0
-            FCB  42,26,C_VALUE
-            FCC  "^M"
-            FCB  0
-            FCB  54,26,C_LABEL
-            FCC  "the track muted, or not"
-            FCB  0
-            FCB  2,28,C_LABEL
-            FCC  "Mouse: a click picks a field or ticks a box (a track's head: muted)."
-            FCB  0
-            FCB  2,29,C_MSG
-            FCC  "Any key: back to the page"
-            FCB  0
-            FCB  $FF,$FF
+S_BADOVL    FCC  "SONGKIT: SONGKIT.COM is damaged (its overlays can't be read)"
+            FCB  CR,LF,0
 ;------------------------------------------------------------------------------
+            INCLUDE "sk_core.asm"
             INCLUDE "sk_ui.asm"
-            INCLUDE "sk_inst.asm"
-            INCLUDE "sk_file.asm"
-            INCLUDE "sk_pat.asm"
             INCLUDE "sk_play.asm"
 ;------------------------------------------------------------------------------
 ; Variables.
@@ -924,7 +921,7 @@ WHEEL       RMB  1
 KEYMODS     RMB  1
 UI_BITS     RMB  2
 UI_EDGE     RMB  2
-PR_ASK      RMB  2
+PR_ASK      RMB  PR_ASKN    ; (PRSTART's question, copied)
 PR_FILE     RMB  1
 PR_MAXL     RMB  1
 PR_LEN      RMB  1
@@ -1018,11 +1015,43 @@ SLN         RMB  2
 ROWLEN      RMB  MAXROWS    ; each row's cells' bytes, packed
 RBUF        RMB  ROWB       ; a row read
 WBUF        RMB  6*SK_NTRK+4 ; a row packed
+OVFH        RMB  1          ; the overlays: the file (as it starts), bank 2's own page,
+OHOME       RMB  1
+CUROV       RMB  1          ;   the one in bank 2 ($FF: none), their pages,
+NOVPG       RMB  1
+OVPG        RMB  NOVL
+OVADR       RMB  2          ;   (OVCALL's)
+PR_OV       RMB  1          ; PR_DO's overlay, CF_DO's
+CF_OV       RMB  1
+COREEND     equ  *          ; (the core's last byte: the program's body is to here)
 ; (The large ones are only addresses, after the program's last byte.)
 IOBUF       equ  *          ; 1024
 VAREND      equ  IOBUF+1024
             IFGT VAREND-(KIT_STACK-512)
             ERROR "SONGKIT's variables reach its stack"
+            ENDC
+
+;------------------------------------------------------------------------------
+; The overlays: each one's code at $8000 (bank 2), after the core in the file.
+;------------------------------------------------------------------------------
+            ORG  OWIN           ; OV_EDIT: the two pages
+            INCLUDE "sk_inst.asm"
+            INCLUDE "sk_pat.asm"
+EDITEND     equ  *
+            IFGT EDITEND-(OWIN+$4000)
+            ERROR "OV_EDIT is more than 16KB"
+            ENDC
+            ORG  OWIN           ; OV_FILE: the files
+            INCLUDE "sk_file.asm"
+FILEEND     equ  *
+            IFGT FILEEND-(OWIN+$4000)
+            ERROR "OV_FILE is more than 16KB"
+            ENDC
+            ORG  OWIN           ; OV_HELP: the help
+            INCLUDE "sk_help.asm"
+HELPEND     equ  *
+            IFGT HELPEND-(OWIN+$4000)
+            ERROR "OV_HELP is more than 16KB"
             ENDC
 
             END  START

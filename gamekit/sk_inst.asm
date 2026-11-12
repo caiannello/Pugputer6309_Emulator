@@ -35,53 +35,6 @@ F_OP        equ  7
 F_UP        equ  8          ; (then down, left and right)
 F_FIX       equ  4          ; the fixed-note field (its number)
 
-; SETIP: IP and NP, the instrument being edited and its name (copies, in
-; CURINST and CURNAME, of the instruments' and names' pages': PUTINST and
-; PUTNAME put them back).
-SETIP       LDX  #CURINST
-            STX  IP
-            LDX  #CURNAME
-            STX  NP
-            BSR  INSTAT
-            LDY  #CURINST
-            LDW  #SK_ILEN
-            TFM  X+,Y+
-            BSR  NAMEAT
-            LDY  #CURNAME
-            LDW  #16
-            TFM  X+,Y+
-            CLR  ,Y
-            RTS
-PUTINST     BSR  INSTAT
-            TFR  X,Y
-            LDX  #CURINST
-            LDW  #SK_ILEN
-            TFM  X+,Y+
-            RTS
-; INSTAT: X, instrument CURI in the instruments' page (in the window).
-INSTAT      JSR  IMAP
-            LDA  CURI
-            DECA
-            LDB  #SK_ILEN
-            MUL
-            ADDD #WINDOW
-            TFR  D,X
-            RTS
-PUTNAME     BSR  NAMEAT
-            TFR  X,Y
-            LDX  #CURNAME
-            LDW  #16
-            TFM  X+,Y+
-            RTS
-; NAMEAT: X, instrument CURI's name in the names' page (in the window).
-NAMEAT      JSR  NMAP
-            LDA  CURI
-            DECA
-            LDB  #16
-            MUL
-            ADDD #WINDOW
-            TFR  D,X
-            RTS
 ; FADDR: Y, field A. (A kept.)
 FADDR       PSHS A
             LDB  #FSIZE
@@ -388,24 +341,10 @@ FHIT9       ANDCC #$FE
 ;------------------------------------------------------------------------------
 DRAWPAGE    JSR  TXCLR
             LDX  #LABELS
-            BSR  DRAWLAB
+            JSR  DRAWLAB
             JSR  DRAWTITLE
             JSR  DRAWSTAT
             BRA  DRAWVALS
-; DRAWLAB: the labels at X: each its column, its row, its color, its text
-; (the song's ticks let in as it goes: the window may be the player's after).
-DRAWLAB     JSR  TICKPOLL
-            LDD  ,X++
-            CMPA #$FF
-            BEQ  DL9
-            JSR  TXAT
-            PSHS A
-            LDA  ,X+
-            STA  TXFG
-            PULS A
-            JSR  TXSTR
-            BRA  DRAWLAB
-DL9         RTS
 ; DRAWVALS: every field, the instrument's number, the operators' headings
 ; (those heard lit), and the note's label.
 DRAWVALS    CLRA
@@ -706,19 +645,6 @@ DRAWSTAT    TST  MODE
 DS1         JMP  TXSTR
 DS9         RTS
 
-; MSG: the message at X on the bottom row (over the status, until the next
-; key).
-MSG         PSHS X
-            LDA  #1
-            STA  MSGUP
-            LDB  #29
-            JSR  TXROWCLR
-            CLRA
-            JSR  TXAT
-            LDA  #C_MSG
-            STA  TXFG
-            PULS X
-            JMP  TXSTR
 
 ;------------------------------------------------------------------------------
 ; The page's words.

@@ -1235,3 +1235,67 @@ TEST(songkit_editor_loops_records_and_mutes) {
     e.key(kSpace);
     if (std::getenv("SONGKIT_SHOW")) e.show();
 }
+
+// SONGKIT's code in overlays: SONGKIT.COM's body is its core (bank 3, at $C000), and after it
+// in the file come the overlays (EXE_MORE), each read into a page of its own as it starts;
+// OV_EDIT is the one in bank 2 as the pages are edited, and the help's own (OV_HELP) comes
+// and goes with F1. Quitting gives every page back, bank 2 its own again. A SONGKIT.COM cut
+// short says it is damaged, and leaves nothing behind.
+TEST(songkit_editor_keeps_its_code_in_overlays) {
+    std::string bin = host_file(std::string(REPO_DIR) + "/gamekit/build/songkit.bin");
+    Editor e({disk_file("SKSHORT.COM", bin.substr(0, bin.size() - 100))});
+    if (!e.ok) return;
+    auto var = [&](const char* n) { return e.s.bus.read_cpu(kit_sym(n)); };
+    auto shell = [&](const std::string& cmd) {
+        e.s.received.clear();
+        for (char ch : cmd) e.s.send_byte(static_cast<uint8_t>(ch));
+        e.s.send_byte('\r');
+        e.s.wait_for("/> ", 400000000);
+        return e.s.received;
+    };
+    std::string mem = shell("MEM");
+    CHECK(mem.find("KB free") != std::string::npos);
+    // The file: the header (10 bytes, EXE_MORE), the core, then OV_EDIT, OV_FILE, OV_HELP.
+    auto be16 = [&](size_t at) { return static_cast<uint8_t>(bin[at]) << 8 | static_cast<uint8_t>(bin[at + 1]); };
+    CHECK(be16(0) == 0x5058 && be16(2) == 0xC000 && be16(6) == 1);
+    size_t core = be16(8);
+    uint16_t len[3] = {static_cast<uint16_t>(kit_sym("EDITEND") - 0x8000),
+                       static_cast<uint16_t>(kit_sym("FILEEND") - 0x8000),
+                       static_cast<uint16_t>(kit_sym("HELPEND") - 0x8000)};
+    CHECK(core == static_cast<size_t>(kit_sym("COREEND") - 0xC000));
+    CHECK(bin.size() == 10 + core + len[0] + len[1] + len[2]);
+    CHECK(e.start());
+    // Each overlay in its page, as the file has it; OV_EDIT in bank 2, the core in bank 3.
+    CHECK(var("NOVPG") == 3);
+    size_t at = 10 + core;
+    for (int i = 0; i < 3; ++i) {
+        size_t page = e.s.bus.read_cpu(static_cast<uint16_t>(kit_sym("OVPG") + i));
+        CHECK(page > 3 && std::memcmp(e.s.bus.phys_ram() + page * 16384, bin.data() + at, len[i]) == 0);
+        at += len[i];
+    }
+    uint8_t edit = e.s.bus.read_cpu(kit_sym("OVPG"));
+    CHECK(var("CUROV") == 0 && e.s.bus.bank_register(2) == edit && e.s.bus.bank_register(3) == 3);
+    // F1: the help (from its overlay); a key: the page again, OV_EDIT in bank 2.
+    e.key(0x3A);
+    CHECK(e.row(2).find("A song plays") != std::string::npos);
+    CHECK(var("CUROV") == 0 && e.s.bus.bank_register(2) == edit);
+    e.key(0x29);
+    CHECK(e.row(2).find("Speed 6") != std::string::npos);
+    // ^S: a question from OV_FILE, typed into, answered there.
+    e.key(0x16, true);
+    CHECK(e.row(29).find("Save the song as: ") != std::string::npos);
+    e.text("OVL");
+    CHECK(e.row(29).find("Save the song as: OVL_") != std::string::npos);
+    e.key(0x28);
+    e.frames(30);
+    CHECK(e.row(29).find("Saved") != std::string::npos && var("CUROV") == 0);
+    // Esc: back to the shell, every page given back, bank 2 its own again.
+    e.key(0x29);
+    e.frames(60);
+    CHECK(e.v.input_ctrl() == 0 && e.s.bus.bank_register(2) == 2 && e.s.bus.bank_register(1) == 1);
+    CHECK(shell("MEM") == mem);
+    // Cut short: it says so, and gives back the pages it took.
+    std::string bad = shell("SKSHORT");
+    CHECK(bad.find("SONGKIT.COM is damaged") != std::string::npos);
+    CHECK(shell("MEM") == mem);
+}

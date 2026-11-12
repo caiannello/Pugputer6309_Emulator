@@ -26,14 +26,17 @@ make, a game loads straight into the card.
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
-| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next five |
+| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next seven, and is its core's main part (the main loop, the keys, the overlays' loading and calls) |
+| `sk_core.asm` | the core's share of what the overlays use: the song's pages, the window, a message |
 | `sk_ui.asm` | its screen (the card's text layer), the mouse and keys, a line of typing |
-| `sk_inst.asm` | its instrument page |
-| `sk_file.asm` | its files: songs (`.SNG`) and instruments (`.INS`) |
-| `sk_pat.asm` | its pattern page: the song's settings, orders and patterns |
+| `sk_inst.asm` | its instrument page (overlay `OV_EDIT`) |
+| `sk_pat.asm` | its pattern page: the song's settings, orders and patterns (`OV_EDIT`) |
+| `sk_file.asm` | its files: songs (`.SNG`) and instruments (`.INS`) (`OV_FILE`) |
+| `sk_help.asm` | its help screen (`OV_HELP`) |
 | `sk_play.asm` | SONGKIT's player: plays a song on the OPL3, in a game as in the kit's own programs (below) |
 | `songplay.asm` | `SONGPLAY.COM`: plays a song file from the shell |
 | `tools/sk_fields.py` | makes the instrument page's table of fields in `sk_inst.asm`: where each is, and which is next to it |
+| `tools/sk_overlays.py` | checks that SONGKIT's code only reaches another overlay through a stub (below, "SONGKIT's memory") |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
 `compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin`,
@@ -643,6 +646,32 @@ And with `SK_EDITOR` defined before the `INCLUDE` (an editor's: a game doesn't c
 | `SK_IPG` | (a byte) not 0: `SK_IBASE` is in this RAM page, seen in the bank `SK_IBASE`'s address is in while an instrument is read, that bank's own page put back after (SONGKIT keeps its instruments in a page of their own) |
 | `SK_PLOOP` | (a byte) not 0: at the end of the pattern playing (or at a `Bxx`), it is played again from its start (or `Dxx`'s row), not the next order |
 | `SK_WRAP` | (a byte) not 0: past the last order, with no loop, back to the first rather than over |
+
+### SONGKIT's memory
+
+The Pugputer's CPU card has 1MB of RAM or more, in 16KB pages; the CPU sees four of them at a
+time, one in each 16KB bank (bank 0 is the system's). SONGKIT keeps its code in pages too, not
+only its song, so it can go on growing:
+
+| | |
+|---|---|
+| bank 3 (`$C000`-`$EFFF`) | the core: the main loop, the keys, the screen, the player, every variable, the stack |
+| bank 2 (`$8000`-`$BFFF`) | an overlay, one at a time: `OV_EDIT` (the two pages' editing), `OV_FILE` (opening and saving), `OV_HELP` (the help) |
+| bank 1 (`$4000`-`$7FFF`) | the window: the song's pages, the pattern being edited, the instruments and their names |
+
+`SONGKIT.COM` sets the program header's `EXE_MORE` flag (`../shell/README.md`): its body is
+only the core, loaded at `$C000`, and the overlays follow it in the file -- each one's code
+assembled for `$8000`. As it starts, SONGKIT reads each into a page of its own (from the file,
+which DOS leaves open for it), and gives them back as it ends.
+
+The core calls into an overlay through a stub, `O_name` (in `songkit.asm`): it puts `name`'s
+overlay in bank 2, calls it with every register as it was, and puts the caller's overlay back
+after, every register as `name` left it. An overlay calls the core directly, and another
+overlay through a stub too. What waits to be done later -- after a line is typed, or a question
+answered -- is kept with its overlay (`SETPRDO`, `ASK`), and what the core reads from a caller
+later (the question before a line being typed) is copied, since its overlay may be gone from
+bank 2 by then. `python tools/sk_overlays.py` checks the sources for code that reaches into
+another overlay without a stub; `--fix` changes a call that has one to use it.
 
 ### SONGKIT's next steps
 

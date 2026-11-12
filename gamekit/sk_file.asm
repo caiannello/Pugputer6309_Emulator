@@ -76,7 +76,7 @@ OPEN        JSR  SONGOFF
             LDA  #1
             JSR  PRSTART
             LDX  #OPENNAMED
-            STX  PR_DO
+            JSR  SETPRDO        ; (PR_DO, in this overlay)
             LDA  #1
             STA  MODE
             RTS
@@ -281,31 +281,6 @@ VA2         ANDCC #$FE
             RTS
 VABAD       ORCC #1
             RTS
-; TABLES: from the header in the window: NORD, NPAT, OLDNI, ITAB, DSTART.
-TABLES      LDA  WINDOW+11
-            STA  NORD
-            LDA  WINDOW+10
-            STA  NPAT
-            LDA  WINDOW+9
-            STA  OLDNI
-            LDA  WINDOW+5
-            STA  SPAIRS
-            LDA  WINDOW+4
-            STA  SFLAGS
-            LDB  NPAT
-            CLRA
-            LSLD
-            LSLD
-            ADDD #SK_HLEN
-            ADDB NORD
-            ADCA #0
-            STD  ITAB
-            LDA  OLDNI
-            LDB  #SK_ILEN
-            MUL
-            ADDD ITAB
-            STD  DSTART
-            RTS
 ; PARSE: the song in PAGES (SSIZE its size) SONGKIT's: its instruments and
 ; their names into their pages; its first order's pattern into
 ; the pattern buffer, to edit.
@@ -324,8 +299,8 @@ PARSE       BSR  PARSE0
             CLR  MUTES
             CLR  MUTES+1
             CLR  MUTES+2
-            JSR  MKTLIST
-            JMP  PATLOAD
+            JSR  O_MKTLIST
+            JMP  O_PATLOAD
 PARSE0      JSR  MAP0
             JSR  TABLES
             LDD  WINDOW+13      ; its names, and where its patterns end
@@ -419,7 +394,7 @@ SAVEAS      JSR  SONGOFF
             LDA  #1
             JSR  PRSTART
             LDX  #SAVEAS2
-            STX  PR_DO
+            JSR  SETPRDO        ; (PR_DO, in this overlay)
             LDA  #1
             STA  MODE
             RTS
@@ -434,7 +409,7 @@ SAVEAS2     LDX  #PR_BUF
             LDX  #FNAME
             LDY  #SONGNAME
             JSR  STRCPY
-            JMP  DRAWTITLE
+            JMP  O_DRAWTITLE
 SA9         RTS
 ; SAVESNG: the song as FNAME. Carry set if it couldn't be.
 SAVESNG     JSR  SONGOFF
@@ -540,7 +515,7 @@ SV3         STA  ,Y
             SWI2
             LBCS FERR
             CLR  CHANGED
-            JSR  DRAWTITLE
+            JSR  O_DRAWTITLE
             LDX  #S_SAVED
             JSR  MSG
             LDX  #FNAME
@@ -561,7 +536,7 @@ SAVEINS     LDX  #S_ASKINS
             LDA  #1
             JSR  PRSTART
             LDX  #SAVEINS2
-            STX  PR_DO
+            JSR  SETPRDO        ; (PR_DO, in this overlay)
             LDA  #1
             STA  MODE
             RTS
@@ -664,79 +639,13 @@ WS8         RTS
 ;------------------------------------------------------------------------------
 ; The pages.
 ;------------------------------------------------------------------------------
-; MAP0, MAPPG: the song's page 0, or B, into the window. (All kept.)
-MAP0        PSHS B
-            CLRB
-            BSR  MAPPG
-            PULS B,PC
-MAPPG       PSHS D,X
-            PSHSW
-            STB  RPG            ; (past the last: the last shown, RPG as asked)
-            CMPB NPG
-            BLO  MP1
-            LDB  NPG
-            DECB
-MP1         LDX  #PAGES
-            LDE  B,X
-            LDB  #WBANK
-            LDA  #B_BANK_SET
-            SWI2
-            PULSW
-            PULS D,X,PC
-; RSEEK: to A:X in the song's bytes; RGETB: A, the next byte. (The rest kept.)
-RSEEK       PSHS D,X
-            TFR  X,D
-            ANDA #$3F
-            ADDD #WINDOW
-            STD  RPTR
-            LDA  2,S
-            LSRA
-            LSRA
-            LSRA
-            LSRA
-            LSRA
-            LSRA
-            LDB  ,S
-            LSLB
-            LSLB
-            STA  RPG
-            ORB  RPG
-            BSR  MAPPG
-            PULS D,X,PC
-RGETB       PSHS X
-            LDX  RPTR
-            LDA  ,X+
-            CMPX #WINDOW+$4000
-            BNE  RG1
-            PSHS B
-            LDB  RPG
-            INCB
-            BSR  MAPPG
-            PULS B
-            LDX  #WINDOW
-RG1         STX  RPTR
-            PULS X,PC
-; FREEPG: the song's pages given back; FREENEW: a new song's that wasn't one.
-FREEPG      LDB  #WBANK
-            LDE  WHOME
-            LDA  #B_BANK_SET
-            SWI2
-FP1         TST  NPG
-            BEQ  FP9
-            DEC  NPG
-            LDX  #PAGES
-            LDB  NPG
-            LDB  B,X
-            LDA  #B_PAGE_FREE
-            SWI2
-            BRA  FP1
-FP9         RTS
+; FREENEW: a new song's pages, that wasn't one, given back.
 FREENEW     LDB  #WBANK
             LDE  WHOME
             LDA  #B_BANK_SET
             SWI2
 FN1         TST  NNPG
-            BEQ  FP9
+            BEQ  FN9
             DEC  NNPG
             LDX  #NEWPG
             LDB  NNPG
@@ -744,14 +653,7 @@ FN1         TST  NNPG
             LDA  #B_PAGE_FREE
             SWI2
             BRA  FN1
-; SONGOFF: the song stopped, if it was playing (the window is wanted).
-SONGOFF     TST  SONGON
-            BEQ  SO9
-            JSR  SK_STOP
-            CLR  SONGON
-            JSR  JAMSET
-            JSR  DRAWSTAT
-SO9         RTS
+FN9         RTS
 
 ;------------------------------------------------------------------------------
 ; Names.

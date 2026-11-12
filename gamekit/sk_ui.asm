@@ -33,6 +33,7 @@ C_OUT       equ  214        ;   an operator that is heard (a carrier)
 C_HELP      equ  245        ;   the keys
 C_MSG       equ  222        ;   messages and questions
 PR_MAX      equ  40         ; the longest line PRKEY takes
+PR_ASKN     equ  48         ; the longest question before it, and its 0
 GRIDMAP     equ  $000000    ; the grid's layer's map: 128 x 128 cells (64KB)
 
 ; UISTART: the card reset (the text screen blank, xterm's colors), the
@@ -270,7 +271,16 @@ GETKEY9     RTS
 ; each key (A usage, B character) -- it answers A = 0 (go on), 1 (Enter:
 ; PR_BUF holds the line, 0 at its end) or 2 (Esc).
 ;------------------------------------------------------------------------------
-PRSTART     STX  PR_ASK
+PRSTART     PSHS A,Y            ; the question copied (it may be in an overlay that
+            LDY  #PR_ASK        ; won't be in bank 2 while it is shown again)
+            LDB  #PR_ASKN
+PRSTARTQ    LDA  ,X+
+            STA  ,Y+
+            BEQ  PRSTARTR
+            DECB
+            BNE  PRSTARTQ
+            CLR  -1,Y
+PRSTARTR    PULS A,Y
             STA  PR_FILE
             LDB  #PR_MAX        ; (a file's name 40 characters, a title 32,
             CMPA #1             ; others 16)
@@ -348,7 +358,7 @@ PRSHOW      LDB  #29
             JSR  TXAT
             LDA  #C_MSG
             STA  TXFG
-            LDX  PR_ASK
+            LDX  #PR_ASK
             JSR  TXSTR
             LDA  #C_VALUE
             STA  TXFG
