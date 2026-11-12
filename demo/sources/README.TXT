@@ -32,7 +32,9 @@ Pugputer, byte for byte as they were built.
                  ASM -f com swamp.asm      then SWAMP     (parallax scrolling; its
                                                           pictures, SWAMP*.TLS and .MAP,
                                                           are in /DEMO, with its song,
-                                                          SWAMP.VGM)
+                                                          SWAMP.SNG, which SONGKIT
+                                                          opens; SK_PLAY.ASM, beside
+                                                          it, plays it)
 
   GAMEKIT/     TILEKIT, the tile set editor (README.TXT there), SONGKIT, the
                music editor, and SONGPLAY, which plays a SONGKIT song with the

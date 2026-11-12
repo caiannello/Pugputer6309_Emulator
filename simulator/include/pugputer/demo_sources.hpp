@@ -42,6 +42,8 @@ inline constexpr DemoSource kDemoSources[] = {
     {"vidcard/vidcard.d", "ASM/VIDCARD.D"},
     {"vidcard/vidcard.d", "ASM/VIDEO/VIDCARD.D"},
     {"vidcard/README.md", "ASM/VIDEO/VIDCARD.TXT"},
+    // SONGKIT's player, beside SWAMP (which plays its music with it) as in GAMEKIT.
+    {"gamekit/sk_play.asm", "ASM/VIDEO/SK_PLAY.ASM"},
     // The game kit's editors (TILEKIT, SONGKIT) and SONGKIT's player (SONGPLAY, and
     // sk_play.asm for games), with the include files they need beside them.
     {"gamekit/tilekit.asm", "ASM/GAMEKIT/TILEKIT.ASM"},
@@ -90,8 +92,8 @@ inline constexpr DemoProgram kDemoPrograms[] = {
 };
 
 // Files the demo programs use, copied to /DEMO as they are: the songs VGMPLAY plays, and
-// SWAMP's pictures (a TILEKIT project: TILEKIT SWAMP.TKT opens it) and music (Red River
-// Valley, a traditional song, from a MIDI file by midi2vgm_opl3).
+// SWAMP's pictures (a TILEKIT project: TILEKIT SWAMP.TKT opens it) and music (Old Joe
+// Clark, a SONGKIT song: SONGKIT SWAMP.SNG opens it).
 inline constexpr DemoSource kDemoFiles[] = {
     {"demo/vgm/HAL9000.VGM", "DEMO/VGMPLAY/HAL9000.VGM"},
     {"demo/vgm/JFK.VGM", "DEMO/VGMPLAY/JFK.VGM"},
@@ -103,7 +105,7 @@ inline constexpr DemoSource kDemoFiles[] = {
     {"demo/swamp/SWAMP2.MAP", "DEMO/SWAMP2.MAP"},
     {"demo/swamp/SWAMP3.TLS", "DEMO/SWAMP3.TLS"},
     {"demo/swamp/SWAMP3.MAP", "DEMO/SWAMP3.MAP"},
-    {"demo/swamp/SWAMP.VGM", "DEMO/SWAMP.VGM"},
+    {"demo/swamp/SWAMP.SNG", "DEMO/SWAMP.SNG"},
 };
 
 } // namespace pugputer

@@ -17,4 +17,4 @@ mkdir -p build
 "$LWASM" programs/ASM/VIDEO/VIDPAD.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/vidpad.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/PADMAP.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/padmap.bin || exit 1
 "$LWASM" programs/ASM/VIDEO/MANDEL.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/mandel.bin || exit 1
-"$LWASM" programs/ASM/VIDEO/SWAMP.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --output=build/swamp.bin || exit 1
+"$LWASM" programs/ASM/VIDEO/SWAMP.ASM --6309 --format=raw --includedir=../vidcard --includedir=programs/ASM/VIDEO --includedir=../gamekit --output=build/swamp.bin || exit 1
