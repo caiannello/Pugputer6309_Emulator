@@ -345,8 +345,8 @@ TEST(bios_a_crashing_program_lands_back_in_the_shell_with_the_machine_put_right)
         s.received.clear();
         s.type("ver");
         spent = 0;
-        while (!has(s.received, "DOS 2.2") && spent < 100000000) spent += s.bus.run(20000);
-        CHECK(has(s.received, "Pugputer 6309 DOS 2.2"));
+        while (!has(s.received, "DOS 2.3") && spent < 100000000) spent += s.bus.run(20000);
+        CHECK(has(s.received, "Pugputer 6309 DOS 2.3"));
         spent = 0;
         while (!ends_with(s.received, "/> ") && spent < 100000000) spent += s.bus.run(20000);
     };

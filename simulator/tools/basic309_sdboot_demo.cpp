@@ -505,6 +505,11 @@ int main(int argc, char** argv) {
         VideoOut::Input in;
         while (screen.poll(in)) {
             bool keys_to_card = (vcard.input_ctrl() & 0x02) != 0;
+            // (A key pressed, a button, the wheel: the silence before a note it plays was
+            // the person's, not a rest in the music -- the note shouldn't wait for it.)
+            if ((in.kind == VideoOut::Input::Key && in.down) || in.kind == VideoOut::Input::Char ||
+                in.kind == VideoOut::Input::Wheel || (in.kind == VideoOut::Input::Mouse && in.buttons))
+                opl3.heard_input();
             switch (in.kind) {
             case VideoOut::Input::Char:
                 if (!keys_to_card && !console_on_card) uart.rx_enqueue(in.code);
@@ -542,6 +547,7 @@ int main(int argc, char** argv) {
                 std::fflush(stdout);
             }
             if (!to_card) told_keys = false;
+            if (!typed.empty()) opl3.heard_input();
             if (to_card) type_into_card(vcard, typed);
             else
                 for (char ch : typed) uart.rx_enqueue(static_cast<uint8_t>(ch));

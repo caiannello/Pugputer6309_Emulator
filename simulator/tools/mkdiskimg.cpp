@@ -1,9 +1,10 @@
 // Builds basic309/disk.img: a fresh FAT16 disk image (see
 // pugputer/fat16_image.hpp) containing dos/dos.bin in its reserved
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
-// EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM and TILEKIT.COM (shell/shell.bin,
-// edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, utils/hexdump.bin,
-// utils/move.bin and gamekit/build/tilekit.bin as assembled -- they carry their own
+// EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM, SONGKIT.COM and
+// SONGPLAY.COM (shell/shell.bin, edit/edit.bin, asmlink/asm.bin, asmlink/link.bin,
+// utils/hexdump.bin, utils/move.bin and gamekit/build/{tilekit,songkit,songplay}.bin as
+// assembled -- they carry their own
 // program headers), TILEKIT.INI (TILEKIT's default palettes, gamekit/TILEKIT.INI) and
 // BASIC.COM (the BASIC_LOAD-$EFFF window of basic309's S-record, given a program
 // header: load BASIC_LOAD, entry $C000 -- see pugputer/basic309_layout.hpp and EXE_* in
@@ -16,7 +17,8 @@
 //             --shell path/to/shell.bin --edit path/to/edit.bin
 //             --asm path/to/asm.bin --link path/to/link.bin
 //             --hexdump path/to/hexdump.bin --move path/to/move.bin
-//             --tilekit path/to/tilekit.bin
+//             --tilekit path/to/tilekit.bin --songplay path/to/songplay.bin
+//             --songkit path/to/songkit.bin
 //             --out path/to/disk.img
 //             [--sources path/to/repository] [--demo NAME]... [--add-dir path/to/folder]...
 //
@@ -97,6 +99,8 @@ int main(int argc, char** argv) {
                                      {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"},
                                      {"--move", MOVE_BIN_DEFAULT, "MOVE.COM"},
                                      {"--tilekit", TILEKIT_BIN_DEFAULT, "TILEKIT.COM"},
+                                     {"--songplay", SONGPLAY_BIN_DEFAULT, "SONGPLAY.COM"},
+                                     {"--songkit", SONGKIT_BIN_DEFAULT, "SONGKIT.COM"},
                                      {"--tilekit-ini", TILEKIT_INI_DEFAULT, "TILEKIT.INI"}};
     for (int i = 1; i < argc; ++i) {
         bool program = false;

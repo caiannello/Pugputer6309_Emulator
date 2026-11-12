@@ -68,6 +68,48 @@ scream", the stock sound effect first heard in *Distant Drums* (Warner Bros., 19
 (`WILHELM.VGM`). The recordings remain the property of their owners; these few seconds of each,
 remade by an FM synthesizer, are included as a demonstration of the hardware.
 
+## The Fat Man -- OPL3 instruments, and Old Joe Clark in SWAMP
+
+`demo/swamp/SWAMP.SNG`, the music of the SWAMP demo (and an example song for SONGKIT), is
+*Old Joe Clark*, a traditional American fiddle tune, as **R. G. Allen** sequenced it in a MIDI
+file ("Old Joe Clark - sequenced by R. G. Allen"): his banjo, bass, rhythm guitar, solo guitar
+and mandolin parts, note for note, set on the OPL3's channels (the chords thinned to three
+notes, as the chip has room for). The credit is his for the arrangement; the tune is in the
+public domain.
+
+Its instruments are from **The Fat Man**'s OPL3 tone libraries, developed by **K. Weston
+Phelan** and **George Alistair Sanger** -- the 4-operator banjo, acoustic bass and steel guitar,
+and a 2-operator cut of the steel guitar -- as published, with George Sanger's written
+permission, at <https://github.com/Wohlstand/TheFatManOPL>, under the MIT License:
+
+```
+Tone libraries for OPL2 and OPL3 chips produced by The Fat Man.
+
+Developed by K. Weston Phelan and George Alistair Sanger
+
+Copyright (c) 1993-2025 The Fat Man (TM)
+----
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## The MC6839 floating-point ROM
 
 `demo/programs/ASM/VIDEO/MANDEL.ASM` carries a copy of Motorola's MC6839 floating-point ROM

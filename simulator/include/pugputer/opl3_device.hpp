@@ -13,12 +13,15 @@
 // been silent, with no writes, for a second. The rest of the time nothing is made, the
 // sink isn't called, and the emulator runs as fast as it can. When a write comes less
 // than ten seconds (of CPU time) after it went idle, that was a rest in the music: the
-// silence is sent first, so the music keeps its time. Without a sink the chip is kept
+// silence is sent first, so the music keeps its time -- unless someone pressed a key or a
+// button meanwhile (heard_input()): then it was theirs, a note played by hand (as an
+// editor does), and it sounds at once. Without a sink the chip is kept
 // (timers, registers) but no sound is made at all.
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pugputer/device.hpp"
 
@@ -59,6 +62,19 @@ public:
     uint64_t frames_made() const { return frames_made_; }
     uint64_t register_writes() const { return writes_; }
     uint8_t reg(uint16_t r) const { return regs_[r & 0x1FF]; } // last value written
+    // Every register write from now on, with when it came (CPU cycles since the device
+    // started), appended to *log (nullptr: none kept).
+    struct Write {
+        uint64_t cycle;
+        uint16_t reg;
+        uint8_t value;
+    };
+    void set_log(std::vector<Write>* log) { log_ = log; }
+    // Someone at the machine pressed a key or a button (the emulator's window or terminal
+    // says so): a silence until the next write is theirs, not a rest (see above).
+    void heard_input() {
+        if (!active_) input_ = true;
+    }
 
 private:
     void generate(size_t frames);
@@ -67,6 +83,8 @@ private:
 
     _opl3_chip* chip_;
     AudioSink* sink_ = nullptr;
+    std::vector<Write>* log_ = nullptr;
+    bool input_ = false; // heard_input() since it went idle
     uint32_t rate_;
     double cpu_hz_;
     uint16_t address_ = 0; // latched register number, 0..$1FF

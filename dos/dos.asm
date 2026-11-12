@@ -2101,7 +2101,9 @@ DOS_VERSION LDA  #DOS_API_VERSION
 ;==============================================================================
 ; Programs. A program file is an 8-byte header (see EXE_* in defines.d) followed by
 ; the body. B_EXEC loads the body where the header says and jumps to the entry
-; address; a program ends with B_EXIT, which starts the shell again.
+; address; a program ends with B_EXIT, which starts the shell again. With the
+; EXE_MORE flag the header has a body length too, the file is left open past the
+; body, and the program starts with its handle in B, to read the rest itself.
 ;==============================================================================
 ; IN: X = the program's path, Y = its command tail (NUL-terminated string in the
 ; caller's memory) or 0. On success: does not return -- the program is running,
@@ -2141,32 +2143,41 @@ EX_ARGEND   CLR  ,X
             LDD  HDRBUF
             CMPD #EXE_MAGIC
             LBNE EX_BAD
-            LDD  HDRBUF+6         ; flags: none defined yet
+            LDD  HDRBUF+6         ; flags: 0, or EXE_MORE
+            BEQ  EX_WHOLE
+            CMPD #EXE_MORE
             LBNE EX_BAD
-            LDD  HDRBUF+2
-            STD  EX_LOAD
-            LDD  HDRBUF+4
-            STD  EX_ENTRY
-            LDX  CUR_SLOT
+            LDD  #HDRBUF+EXE_HDRSIZE ; EXE_MORE: the body's length, after the header
+            STD  IO_BUF
+            LDD  #2
+            STD  IO_LEN
+            JSR  FILE_READ
+            LBCS EX_FAIL
+            LDD  IO_CNT
+            CMPD #2
+            LBNE EX_BAD
+            LDW  HDRBUF+EXE_HDRSIZE ; (the rest of the file is the program's)
+            BRA  EX_LENOK
+EX_WHOLE    LDX  CUR_SLOT
             LDQ  fslot.size,X     ; the body is the rest of the file
             SUBW #EXE_HDRSIZE
             SBCD #0
             TSTD
             LBNE EX_TOOBIG
-            STW  EX_LEN
-            LDD  EX_LOAD
+EX_LENOK    STW  EX_LEN
+            LDD  HDRBUF+2
             CMPD #DOS_END
             LBLO EX_TOOBIG        ; it would overwrite the BIOS or DOS
             ADDD EX_LEN
             LBCS EX_TOOBIG
             CMPD #EXE_MAXTOP
             LBHI EX_TOOBIG        ; ... or run into the ROM
-            LDD  EX_ENTRY
-            SUBD EX_LOAD
+            LDD  HDRBUF+4
+            SUBD HDRBUF+2
             LBLO EX_BAD           ; the entry must lie inside the body
             CMPD EX_LEN
             LBHS EX_BAD
-            LDD  EX_LOAD
+            LDD  HDRBUF+2
             STD  IO_BUF
             LDD  EX_LEN
             STD  IO_LEN
@@ -2180,8 +2191,10 @@ EX_ARGEND   CLR  ,X
             CMPD EX_LEN
             BNE  EX_LOADFAIL
             LDB  EX_H
+            TST  HDRBUF+7
+            BNE  EX_GO            ; EXE_MORE: the file left open, its handle in B
             JSR  DOS_CLOSE
-            JMP  [EX_ENTRY]       ; the program has the machine
+EX_GO       JMP  [HDRBUF+4]       ; the program has the machine
 EX_LOADFAIL LDB  EX_H             ; (the caller's memory may be half overwritten)
             JSR  DOS_CLOSE
             JMP  DOS_EXIT
@@ -2823,11 +2836,9 @@ DATALBA       RMB  4
 BOOT_SP       RMB  2        ; the stack DOS started on: programs start on it
 ARGBUF        RMB  ARGMAX+1 ; the command tail of the program being started
 PATHVAR       RMB  PATHVARMAX+1 ; the program search path (B_PATH)
-HDRBUF        RMB  EXE_HDRSIZE
+HDRBUF        RMB  EXE_HDRSIZE+2 ; (+2: EXE_MORE's body length)
 EX_PATH       RMB  2
 EX_H          RMB  1
-EX_LOAD       RMB  2
-EX_ENTRY      RMB  2
 EX_LEN        RMB  2
 EX_ERR        RMB  1
 SICW          RMB  2        ; CLUS_SIC_TO_LBA: sector within the cluster
