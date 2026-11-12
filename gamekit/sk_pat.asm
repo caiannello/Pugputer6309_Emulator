@@ -30,6 +30,7 @@ NORDV       equ  23         ; orders shown at once
 NSETF       equ  13         ; the song's settings (SETTAB)
 C_ROWBG     equ  236        ; the cursor's row, behind it
 C_PLAYBG    equ  22         ; the row playing, behind it
+C_SELBG     equ  54         ; a block's cells, behind them
 C_INS       equ  117        ; a cell's instrument, volume, effect
 C_VOL       equ  114
 C_FX        equ  222
@@ -90,6 +91,7 @@ PBC1        CLR  ,X+
 ; edited: there's no such pattern, or it has more than MAXROWS rows.
 PATLOAD     BSR  PBCLR
             CLR  PATOK
+            CLR  SELON          ; (no block in it yet)
             LDA  #64
             STA  PROWS
             JSR  MAP0
@@ -891,7 +893,8 @@ KPT9        RTS
 ;------------------------------------------------------------------------------
 ; MKTLIST: TLIST, the song's tracks in order (NTL of them): the channels that
 ; aren't a 4-op pair's second, and in rhythm mode the cymbal and the hi-hat.
-MKTLIST     LDX  #TLIST
+MKTLIST     CLR  SELON          ; (the tracks may be others now: no block)
+            LDX  #TLIST
             CLRB
 MKT1        TFR  B,A
             CLRF
@@ -1340,12 +1343,13 @@ DRW1        CMPB PLROW
             BNE  DRW2
             LDA  #C_PLAYBG
 DRW2        STA  DRBG
+            STA  DRBGR
             STA  TXBG
             TST  PATOK
             LBEQ DRWBL
             LDA  DRR
             CMPA PROWS
-            BHS  DRWBL
+            LBHS DRWBL
             LDB  #2
             JSR  TXSPC
             LDB  #C_DIM         ; its number: each fourth brighter
@@ -1384,12 +1388,30 @@ DRW4        LDA  LTRK
             BNE  DRW5
             LDA  CCOL
 DRW5        STA  DRF
+            LDA  DRBGR          ; behind it: the row's color, or the block's
+            TST  SELON
+            BEQ  DRW6
+            LDB  DRR
+            CMPB SBR0
+            BLO  DRW6
+            CMPB SBR1
+            BHI  DRW6
+            LDB  LTRK
+            ADDB DRS
+            CMPB SBT0
+            BLO  DRW6
+            CMPB SBT1
+            BHI  DRW6
+            LDA  #C_SELBG
+DRW6        STA  DRBG
             BSR  DRAWCELL
             INC  DRS
             LDA  DRS
             CMPA #GTRKS
             BLO  DRW4
-DRW7        LDA  DRS
+DRW7        LDA  DRBGR
+            STA  TXBG
+            LDA  DRS
             LDB  #GTW
             MUL
             NEGB
@@ -1800,18 +1822,39 @@ PKEY        LDB  KEYMODS
             BSR  TFIND
             BCS  PKY9
             JMP  [1,X]
-PKY1        BITB #VC_MOD_SHF    ; Shift+Delete: the row out, in this track
-            BEQ  PKY2
+PKY1        BITB #VC_MOD_ALT    ; Alt+Insert, Alt+Delete: the order again, out
+            BEQ  PKYSH
+            CMPA #K_INSERT
+            LBEQ REPORD
             CMPA #K_DELETE
-            BNE  PKY2
+            LBEQ DELORD
+PKYSH       BITB #VC_MOD_SHF
+            BEQ  PKY2
+            CMPA #K_DELETE      ; Shift+Delete: the row out, in this track
+            BNE  PKYSH1
             CLRA
             JMP  ROWDEL
-PKY2        LDX  #PKEYTAB
+PKYSH1      LDX  #PMOVTAB       ; Shift and a cursor key: a block
+            BSR  TFIND
+            LBCC SELEXT
+PKY2        LDX  #PMOVTAB       ; the cursor moved (the block let go)
+            BSR  TFIND
+            BCS  PKY2A
+            PSHS X
+            JSR  SELOFF
+            PULS X
+            JMP  [1,X]
+PKY2A       LDX  #PKEYTAB
             BSR  TFIND
             BCS  PKY3
             JMP  [1,X]
 PKY3        TST  AREA           ; the rest: what's typed into a cell
             BNE  PKY9
+            CMPA #K_LCTRL       ; (Shift, Ctrl, Alt alone: nothing, the block kept)
+            BHS  PKY9
+            PSHS A              ; (the block let go)
+            JSR  SELOFF
+            PULS A
             JMP  PENTRY
 PKY9        RTS
 ; TFIND: key A in the table at X (a byte each, its routine after it): X its
@@ -1826,7 +1869,7 @@ TFD1        ANDCC #$FE
             RTS
 TFD9        ORCC #1
             RTS
-PKEYTAB     FCB  K_UP
+PMOVTAB     FCB  K_UP           ; (with Shift: SELEXT)
             FDB  PUP
             FCB  K_DOWN
             FDB  PDOWN
@@ -1842,7 +1885,8 @@ PKEYTAB     FCB  K_UP
             FDB  PHOME
             FCB  K_END
             FDB  PEND
-            FCB  $2E            ; = (and +)
+            FCB  0
+PKEYTAB     FCB  $2E            ; = (and +)
             FDB  PPLUS
             FCB  $57            ; + on the keypad
             FDB  PPLUS
@@ -1865,7 +1909,7 @@ PKEYTAB     FCB  K_UP
             FCB  K_ENTER
             FDB  PENTER
             FCB  K_ESC
-            FDB  KQUIT
+            FDB  PESC
             FCB  K_BKSP
             FDB  KHUSH
             FCB  0
@@ -1885,10 +1929,12 @@ PCTLTAB     FCB  K_LEFT         ; ^Left, ^Right: the instrument before, after
             FDB  NEWPAT
             FCB  $07            ; ^D
             FDB  DUPPAT
-            FCB  $15            ; ^R
-            FDB  REPORD
-            FCB  $1B            ; ^X
-            FDB  DELORD
+            FCB  $06            ; ^C, ^X, ^V: the block copied, cut, pasted
+            FDB  PCOPY
+            FCB  $1B
+            FDB  PCUT
+            FCB  $19
+            FDB  PPASTE
             FCB  $12            ; ^O
             FDB  O_OPEN
             FCB  $16            ; ^S
@@ -2065,9 +2111,7 @@ PENO2       JSR  CELLX
             STA  1,X
             JSR  PAUDIT
             BRA  PEDONE
-PEDIG       TST  RECORD
-            LBEQ PEN9
-            JSR  KEYHEX
+PEDIG       JSR  KEYHEX         ; (Record or not: only the note column plays)
             LBCS PEN9
             LDB  CCOL
             CMPB #5
@@ -2138,8 +2182,8 @@ CELHI       FCB  0,1,0,1,0,0,1,0 ;   and whether it's the high digit
 ; the instrument, the volume, the effect and its parameter).
 PDEL        TST  AREA
             BNE  PEN9
-            TST  RECORD
-            BEQ  PEN9
+            TST  SELON          ; (a block: all of it)
+            LBNE PCLEAR
             TST  PATOK
             BEQ  PEN9
             JSR  CELLX
@@ -2205,6 +2249,201 @@ PAU1        STB  VTRK
             LDE  CURI
             JMP  SK_JAM
 
+;------------------------------------------------------------------------------
+; Blocks: Shift and the cursor's keys (or the mouse, dragged) select one --
+; whole cells, from where it began to where the cursor is taken; ^C, ^X, ^V
+; copy, cut, paste (sk_block.asm, its own overlay, has the clipboard); Delete
+; clears it; Esc, or the cursor moved without Shift, lets it go. Its corners
+; are kept apart from the cursor, which may go on with the song.
+;------------------------------------------------------------------------------
+; SELEXT: Shift and cursor key A: the cursor moved (a row up, down, 16, to the
+; first or last; a track left, right), the block's far corner with it -- the
+; block begun at the cursor, if there's none.
+SELEXT      TST  AREA
+            LBNE SX9
+            TST  PATOK
+            LBEQ SX9
+            PSHS A
+            JSR  SELSAVE
+            TST  SELON
+            BNE  SX1
+            LDA  CROW
+            STA  SELR
+            LDA  CTRK
+            STA  SELT
+SX1         PULS A
+            LDB  CROW           ; B the row it's to be on, E the track
+            LDE  CTRK
+            CMPA #K_UP
+            BNE  SX2
+            TSTB
+            BEQ  SXGO
+            DECB
+            BRA  SXGO
+SX2         CMPA #K_DOWN
+            BNE  SX3
+            INCB
+            CMPB PROWS
+            BLO  SXGO
+            DECB
+            BRA  SXGO
+SX3         CMPA #K_PGUP
+            BNE  SX4
+            SUBB #16
+            BCC  SXGO
+            CLRB
+            BRA  SXGO
+SX4         CMPA #K_PGDN
+            BNE  SX5
+            ADDB #16
+            CMPB PROWS
+            BLO  SXGO
+SXLAST      LDB  PROWS
+            DECB
+            BRA  SXGO
+SX5         CMPA #K_END
+            BEQ  SXLAST
+            CMPA #K_HOME
+            BNE  SX6
+            CLRB
+            BRA  SXGO
+SX6         CMPA #K_LEFT
+            BNE  SX7
+            TSTE
+            BEQ  SXGO
+            DECE
+            BRA  SXGO
+SX7         INCE                ; (K_RIGHT)
+            CMPE NTL
+            BLO  SXGO
+            DECE
+SXGO        STB  SELR2
+            STE  SELT2
+; SELTO: the block to its far corner (SELR2, SELT2, after SELSAVE): the
+; cursor there, and what has changed drawn again.
+SELTO       LDA  #1
+            STA  SELON
+            JSR  SELBOX
+            LDA  CROW           ; (the rows it was and is on drawn)
+            LDB  SELR2
+            STB  CROW
+            LDB  SELT2
+            STB  CTRK
+            JSR  CURMOVED
+            JMP  SELDIFF
+SX9         RTS
+; SELSAVE: the block as it is drawn now kept (OBON, OB*), for SELDIFF.
+SELSAVE     LDA  SELON
+            STA  OBON
+            LDD  SBR0
+            STD  OBR0
+            LDD  SBT0
+            STD  OBT0
+            RTS
+; SELOFF: no block (any there was, its rows drawn again without it).
+SELOFF      TST  SELON
+            BEQ  SX9
+            BSR  SELSAVE
+            CLR  SELON
+; SELDIFF: the rows that look different now -- in the block before (SELSAVE)
+; or in it now, not both; or in both, if its tracks have changed -- drawn
+; again: those shown at once, the others queued (as DRAWGRID does).
+SELDIFF     CLR  SDQ
+            CLR  SDR
+SD1         LDA  SDR
+            CMPA PROWS
+            BHS  SD8
+            CLRB                ; B: 1 in it before, 2 now
+            TST  OBON
+            BEQ  SD2
+            CMPA OBR0
+            BLO  SD2
+            CMPA OBR1
+            BHI  SD2
+            INCB
+SD2         TST  SELON
+            BEQ  SD3
+            CMPA SBR0
+            BLO  SD3
+            CMPA SBR1
+            BHI  SD3
+            ADDB #2
+SD3         TSTB
+            BEQ  SD7
+            CMPB #3
+            BNE  SD4
+            LDB  OBT0
+            CMPB SBT0
+            BNE  SD4
+            LDB  OBT1
+            CMPB SBT1
+            BEQ  SD7
+SD4         SUBA TOPROW         ; shown?
+            ANDA #MAXROWS-1
+            CMPA #GROWS
+            BHS  SD6
+            LDA  SDR
+            JSR  DRAWROW
+            BRA  SD7
+SD6         INC  SDQ
+SD7         INC  SDR
+            BRA  SD1
+SD8         TST  SDQ
+            BEQ  SD9
+            LDA  TOPROW
+            ADDA #GROWS
+            ANDA #MAXROWS-1
+            STA  RQR
+            LDA  #MAXROWS-GROWS
+            STA  RQN
+SD9         RTS
+; PESC: Esc: a block let go; with none, back to the shell (KQUIT).
+PESC        TST  SELON
+            LBEQ KQUIT
+            LBRA SELOFF
+; PCOPY (^C): the block (or the cursor's cell) into the clipboard.
+PCOPY       TST  AREA
+            BNE  PBK9
+            TST  PATOK
+            BEQ  PBK9
+            JSR  SELBOX
+            CLRA
+            JMP  O_BCOPY
+; PCUT (^X): the same, then cleared.
+PCUT        BSR  PBKOK
+            BCS  PBK9
+            JSR  SELBOX
+            LDA  #1
+            JSR  O_BCOPY
+            JSR  O_BCLEAR
+            BRA  PBKDONE
+; PCLEAR (Delete, with a block): the block cleared.
+PCLEAR      BSR  PBKOK
+            BCS  PBK9
+            JSR  SELBOX
+            JSR  O_BCLEAR
+            BRA  PBKDONE
+; PPASTE (^V): the clipboard into the pattern at the cursor (the block, then,
+; what it went into).
+PPASTE      BSR  PBKOK
+            BCS  PBK9
+            JSR  O_BPASTE
+            BCS  PBK9
+PBKDONE     JSR  ROWSALL        ; packed into the song
+            JSR  PATSAVE
+            JMP  DRAWGRID
+; PBKOK: may the pattern be changed (the grid's, and one edited here)? Carry
+; set if not. (Record off too: a block's change is asked for, not played along.)
+PBKOK       TST  AREA
+            BNE  PBKNO
+            TST  PATOK
+            BNE  PBKYES
+PBKNO       ORCC #1
+            RTS
+PBKYES      ANDCC #$FE
+            RTS
+PBK9        RTS
+
 ; PINS1, PINSALL: Insert, ^Insert: a blank row at the cursor, those below it
 ; down one (the pattern's last lost) -- in the cursor's track, or in all.
 PINS1       CLRA
@@ -2212,8 +2451,6 @@ PINS1       CLRA
 PINSALL     LDA  #1
 ROWINS      STA  PALL
             TST  PATOK
-            BEQ  RWI9
-            TST  RECORD         ; (Record off: no changes)
             BEQ  RWI9
             JSR  EMAP
             BSR  TRKOFS
@@ -2239,8 +2476,6 @@ RWI2        LDA  CROW
 PDELALL     LDA  #1
 ROWDEL      STA  PALL
             TST  PATOK
-            BEQ  RWI9
-            TST  RECORD         ; (Record off: no changes)
             BEQ  RWI9
             JSR  EMAP
             BSR  TRKOFS
@@ -2438,8 +2673,16 @@ PMOUSE      LDD  MOUSEY
             STB  MCOL
             LDA  PRESSED
             BITA #VC_MB_LEFT
+            BEQ  PMS4
+            JSR  PMCLICK
+PMS4        LDA  BUTTONS        ; held (from a click on a cell): a block dragged
+            BITA #VC_MB_LEFT
+            BNE  PMS4A
+            CLR  DRAG
+            BRA  PMS5
+PMS4A       TST  DRAG
             BEQ  PMS5
-            BSR  PMCLICK
+            JSR  PMDRAG
 PMS5        LDA  WHEEL
             BEQ  PMS9
             LDB  MROW
@@ -2458,6 +2701,7 @@ PMS5A       JMP  KSET
 PMS6        CMPB #GY0
             BLO  PMS9
             CLR  AREA
+            JSR  SELOFF
             TST  WHEEL
             LBPL GUP
             JMP  GDOWN
@@ -2466,33 +2710,20 @@ PMCLICK     LDB  MROW
             CMPB #29
             LBEQ PMSTAT
             CMPB #3
-            BEQ  PMORD
+            LBEQ PMORD
             LBLO PMSET
             CMPB #GY0-1
             LBEQ PMHEAD
-            SUBB #GY0
-            LBLO PMC9
-            CMPB #GROWS
-            LBHS PMC9
-            ADDB TOPROW
-            ANDB #MAXROWS-1
-            CMPB PROWS
-            LBHS PMC9
-            STB  PTMP           ; the row
-            LDB  MCOL
-            SUBB #GX0
-            LBLO PMC9
-            CLRA
-            DIVD #GTW           ; B the track shown, A where in its cell
-            CMPB #GTRKS
-            LBHS PMC9
-            ADDB LTRK
-            CMPB NTL
-            LBHS PMC9
+            JSR  MGRID          ; a cell: the cursor on it (the block let go), and a
+            LBCS PMC9           ; block begun there, if the mouse is dragged
+            JSR  SELOFF
+            JSR  MGRID
             STB  CTRK
-            LDX  #COLFLD
-            LDA  A,X
+            STB  SELT
+            STB  SELT2
             STA  CCOL
+            LDA  #1
+            STA  DRAG
             TST  AREA           ; (from the settings: the one picked not lit now)
             BEQ  PMC1
             CLR  AREA
@@ -2501,7 +2732,54 @@ PMCLICK     LDB  MROW
 PMC1        LDA  CROW
             LDB  PTMP
             STB  CROW
+            STB  SELR
+            STB  SELR2
             JMP  CURMOVED
+; MGRID: the cell under the mouse: carry clear, PTMP its row, B its track (of
+; TLIST), A its field; carry set if it isn't over one.
+MGRID       LDB  MROW
+            SUBB #GY0
+            BLO  MGNO
+            CMPB #GROWS
+            BHS  MGNO
+            ADDB TOPROW
+            ANDB #MAXROWS-1
+            CMPB PROWS
+            BHS  MGNO
+            STB  PTMP           ; the row
+            LDB  MCOL
+            SUBB #GX0
+            BLO  MGNO
+            CLRA
+            DIVD #GTW           ; B the track shown, A where in its cell
+            CMPB #GTRKS
+            BHS  MGNO
+            ADDB LTRK
+            CMPB NTL
+            BHS  MGNO
+            LDX  #COLFLD
+            LDA  A,X
+            ANDCC #$FE
+            RTS
+MGNO        ORCC #1
+            RTS
+; PMDRAG: the mouse held from a click on a cell: over another, the block from
+; that one to this (the cursor here).
+PMDRAG      BSR  MGRID
+            BCS  PMD9
+            CMPB SELT2
+            BNE  PMD1
+            LDA  PTMP
+            CMPA SELR2
+            BEQ  PMD9
+PMD1        PSHS B
+            JSR  SELSAVE
+            PULS B
+            STB  SELT2
+            LDA  PTMP
+            STA  SELR2
+            JMP  SELTO
+PMD9        RTS
 PMORD       LDB  MCOL
             SUBB #9
             BLO  PMC9

@@ -943,10 +943,14 @@ TEST(songkit_editor_edits_patterns) {
     CHECK(e.row(5).substr(5, 13) == "... .. .. ...");
     e.key(kUp, true);
     CHECK(e.row(29).find("Pat 00/02") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
-    // ^R: this order again; ^X: out again; + and -: the order's pattern.
-    e.key(0x15, true);
+    // Alt+Insert: this order again; Alt+Delete: out again; + and -: the order's pattern.
+    e.v.key(0xE2, true);
+    e.frames(2);
+    e.key(kIns);
     CHECK(e.row(3).find(">00 00 01 ") != std::string::npos);
-    e.key(0x1B, true);
+    e.key(kDel);
+    e.v.key(0xE2, false);
+    e.frames(2);
     CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(29).find("Pat 01/02") != std::string::npos);
     e.key(kMinus);
     CHECK(e.row(3).find(">00 00 ") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
@@ -1204,7 +1208,7 @@ TEST(songkit_editor_loops_records_and_mutes) {
     e.frames();
     CHECK(e.row(4).substr(19, 5) == "[M] 1");
     // Stopped, Record off (as a song opened starts): a note is heard but doesn't go in, the
-    // cursor stays; Delete clears nothing.
+    // cursor stays; Delete, plainly an edit, still clears.
     e.key(kSpace);
     e.key(kHome);
     CHECK(e.row(29).find("[ ] Record") != std::string::npos);
@@ -1214,7 +1218,7 @@ TEST(songkit_editor_loops_records_and_mutes) {
     CHECK(var("CROW") == 1 && cell(1, 0)[0] == 0 && keyed(mark, 0xB0) == 1);
     e.key(kUp);
     e.key(kDel);
-    CHECK(cell(0, 0)[0] == N("C-4") && var("CROW") == 0);
+    CHECK(cell(0, 0)[0] == 0 && var("CROW") == 1);
     // ^E: Record on. On track 2, as order 0 plays round: Z held goes in the row playing;
     // let go a few rows on, its end goes in there.
     e.key(kCtlE, true);
@@ -1255,20 +1259,22 @@ TEST(songkit_editor_keeps_its_code_in_overlays) {
     };
     std::string mem = shell("MEM");
     CHECK(mem.find("KB free") != std::string::npos);
-    // The file: the header (10 bytes, EXE_MORE), the core, then OV_EDIT, OV_FILE, OV_HELP.
+    // The file: the header (10 bytes, EXE_MORE), the core, then OV_EDIT, OV_FILE, OV_HELP,
+    // OV_BLOCK.
     auto be16 = [&](size_t at) { return static_cast<uint8_t>(bin[at]) << 8 | static_cast<uint8_t>(bin[at + 1]); };
     CHECK(be16(0) == 0x5058 && be16(2) == 0xC000 && be16(6) == 1);
     size_t core = be16(8);
-    uint16_t len[3] = {static_cast<uint16_t>(kit_sym("EDITEND") - 0x8000),
+    uint16_t len[4] = {static_cast<uint16_t>(kit_sym("EDITEND") - 0x8000),
                        static_cast<uint16_t>(kit_sym("FILEEND") - 0x8000),
-                       static_cast<uint16_t>(kit_sym("HELPEND") - 0x8000)};
+                       static_cast<uint16_t>(kit_sym("HELPEND") - 0x8000),
+                       static_cast<uint16_t>(kit_sym("BLOCKEND") - 0x8000)};
     CHECK(core == static_cast<size_t>(kit_sym("COREEND") - 0xC000));
-    CHECK(bin.size() == 10 + core + len[0] + len[1] + len[2]);
+    CHECK(bin.size() == 10 + core + len[0] + len[1] + len[2] + len[3]);
     CHECK(e.start());
     // Each overlay in its page, as the file has it; OV_EDIT in bank 2, the core in bank 3.
-    CHECK(var("NOVPG") == 3);
+    CHECK(var("NOVPG") == 4);
     size_t at = 10 + core;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         size_t page = e.s.bus.read_cpu(static_cast<uint16_t>(kit_sym("OVPG") + i));
         CHECK(page > 3 && std::memcmp(e.s.bus.phys_ram() + page * 16384, bin.data() + at, len[i]) == 0);
         at += len[i];
@@ -1298,4 +1304,114 @@ TEST(songkit_editor_keeps_its_code_in_overlays) {
     std::string bad = shell("SKSHORT");
     CHECK(bad.find("SONGKIT.COM is damaged") != std::string::npos);
     CHECK(shell("MEM") == mem);
+}
+
+// Blocks: Shift and the cursor's keys select one (shown in purple); ^C copies it, and ^V
+// pastes it at the cursor -- the block then what it went into; ^X cuts it; Delete clears it;
+// Esc lets it go (and doesn't quit). A paste past the pattern's end, or its last track, is
+// cut short; Record off makes no difference (the note column only plays). A drag of the mouse
+// selects one too. The orders' ^R and ^X are Alt+Insert and Alt+Delete now.
+TEST(songkit_editor_copies_and_pastes_blocks) {
+    Song song;
+    song.ins = {kPiano};
+    song.orders = {0, 1};
+    Pattern p0, p1;
+    p0.rows = 16;
+    p1.rows = 16;
+    for (int r = 0; r < 16; r += 4) {
+        p0.put(r, 0, {N("C-4"), 1});
+        p0.put(r, 1, {N("G-4"), 1, 0x21});
+    }
+    song.pats = {p0, p1};
+    Editor e({disk_file("TUNE.SNG", song.bytes())});
+    if (!e.ok) return;
+    CHECK(e.start("tune"));
+    e.frames(40);
+    auto var = [&](const char* n) { return e.s.bus.read_cpu(kit_sym(n)); };
+    auto trk = [&](int t) { return e.s.bus.read_cpu(static_cast<uint16_t>(kit_sym("TLIST") + t)); };
+    auto cell = [&](int row, int t) {
+        size_t page = var("PBPG");
+        return e.s.bus.phys_ram() + page * 16384 + row * 100 + trk(t) * 5;
+    };
+    auto box = [&](int r0, int r1, int t0, int t1) {
+        return var("SELON") == 1 && var("SBR0") == r0 && var("SBR1") == r1 && var("SBT0") == t0 &&
+               var("SBT1") == t1;
+    };
+    constexpr uint8_t kC = 0x06, kV = 0x19, kCtlE = 0x08, kDel = 0x4C, kHome = 0x4A, kEnd = 0x4D, kIns = 0x49;
+    constexpr uint8_t kSel = 54;
+    e.key(kHome);
+    e.key(kCtlE, true); // Record on
+    // Shift+Down x3, Shift+Right: rows 0-3 of tracks 0 and 1, in purple.
+    for (int i = 0; i < 3; ++i) e.key(kDown, false, true);
+    e.key(kRight, false, true);
+    CHECK(box(0, 3, 0, 1) && var("CROW") == 3 && var("CTRK") == 1);
+    CHECK(e.bg(5, 6) == kSel && e.bg(8, 23) == kSel && e.bg(9, 6) != kSel && e.bg(5, 34) != kSel); // (not the cursor's field)
+    // ^C: copied, said so; the block stays.
+    e.key(kC, true);
+    CHECK(e.row(29).find("Copied: 4 rows, 2 tracks") != std::string::npos && var("SELON") == 1);
+    CHECK(var("CBROWS") == 4 && var("CBTRKS") == 2);
+    // Down (no Shift): the block let go; to row 6, track 2; ^V: pasted there.
+    e.key(kDown);
+    CHECK(var("SELON") == 0 && e.bg(5, 6) != kSel);
+    e.key(kDown);
+    e.key(kDown);
+    for (int i = 0; i < 8; ++i) e.key(kRight);
+    CHECK(var("CROW") == 6 && var("CTRK") == 2 && var("CCOL") == 0);
+    e.key(kV, true);
+    CHECK(e.row(29).find("Pasted: 4 rows, 2 tracks") != std::string::npos);
+    CHECK(cell(6, 2)[0] == N("C-4") && cell(6, 2)[1] == 1 && cell(6, 3)[0] == N("G-4") && cell(6, 3)[2] == 0x21);
+    CHECK(cell(7, 2)[0] == 0 && cell(10, 2)[0] == 0 && cell(6, 4)[0] == 0);
+    CHECK(box(6, 9, 2, 3) && var("CROW") == 6 && var("CTRK") == 2 && var("CHANGED") == 1);
+    CHECK(e.row(11).substr(33, 3) == "C-4" && e.bg(11, 37) == kSel);
+    // ^X: cut (not an order out any more); Esc: the block let go, not quitting.
+    e.key(0x1B, true);
+    CHECK(e.row(29).find("Cut: 4 rows, 2 tracks") != std::string::npos && var("NORD") == 2);
+    CHECK(cell(6, 2)[0] == 0 && cell(6, 3)[0] == 0 && e.row(11).substr(33, 3) == "...");
+    e.key(0x29);
+    CHECK(var("SELON") == 0 && e.row(29).find("quit") == std::string::npos && e.row(0).find("SONGKIT") != std::string::npos);
+    // A drag of the mouse, from row 0 of track 0 to row 2 of track 1: a block.
+    e.v.mouse_to(6 * 8 + 4, 5 * 16 + 8, 0);
+    e.frames();
+    e.v.mouse_to(6 * 8 + 4, 5 * 16 + 8, 1);
+    e.frames();
+    e.v.mouse_to(20 * 8 + 4, 7 * 16 + 8, 1);
+    e.frames();
+    CHECK(box(0, 2, 0, 1) && var("CROW") == 2 && var("CTRK") == 1 && e.bg(7, 23) == kSel);
+    e.v.mouse_to(20 * 8 + 4, 7 * 16 + 8, 0);
+    e.frames();
+    CHECK(var("DRAG") == 0 && box(0, 2, 0, 1));
+    // The last row of the last track: ^V cut short to one cell (what was cut: C-4 first).
+    e.key(kEnd);
+    for (int i = 0; i < 300 && var("CTRK") + 1 < var("NTL"); ++i) e.key(kRight);
+    int last = var("NTL") - 1;
+    CHECK(var("CROW") == 15 && var("CTRK") == last);
+    e.key(kV, true);
+    CHECK(e.row(29).find("Pasted: 1 row, 1 track") != std::string::npos && cell(15, last)[0] == N("C-4"));
+    // Record off (the note column only plays): a block is still copied, pasted, cut, cleared.
+    e.key(kCtlE, true);
+    e.key(kUp);
+    e.key(kV, true);
+    CHECK(e.row(29).find("Pasted: 2 rows, 1 track") != std::string::npos && cell(14, last)[0] == N("C-4"));
+    CHECK(cell(15, last)[0] == 0 && box(14, 15, last, last));
+    e.key(kC, true);
+    CHECK(e.row(29).find("Copied: 2 rows, 1 track") != std::string::npos);
+    e.key(0x1B, true);
+    CHECK(e.row(29).find("Cut: 2 rows, 1 track") != std::string::npos && cell(14, last)[0] == 0);
+    e.key(kV, true);
+    CHECK(cell(14, last)[0] == N("C-4") && box(14, 15, last, last));
+    e.key(kDel);
+    CHECK(cell(14, last)[0] == 0 && var("SELON") == 1 && var("RECORD") == 0);
+    // Alt+Insert: this order again; Alt+Delete: out.
+    auto alt = [&](uint8_t usage) {
+        e.v.key(0xE2, true);
+        e.frames(2);
+        e.key(usage);
+        e.v.key(0xE2, false);
+        e.frames(2);
+    };
+    alt(kIns);
+    CHECK(var("NORD") == 3 && e.row(3).find("00 00 01") != std::string::npos);
+    alt(kDel);
+    CHECK(var("NORD") == 2);
+    if (std::getenv("SONGKIT_SHOW")) e.show();
 }

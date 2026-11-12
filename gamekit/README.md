@@ -26,13 +26,14 @@ make, a game loads straight into the card.
 | `TILEKIT.INI` | the palettes a new tile set starts with (below); `mkdiskimg` puts it in `/CMD` |
 | `tk_draw.asm` | its screen |
 | `tk_file.asm` | its files, and the questions it asks |
-| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next seven, and is its core's main part (the main loop, the keys, the overlays' loading and calls) |
+| `songkit.asm` | `SONGKIT.COM`, the music editor (below); it includes the next eight, and is its core's main part (the main loop, the keys, the overlays' loading and calls) |
 | `sk_core.asm` | the core's share of what the overlays use: the song's pages, the window, a message |
 | `sk_ui.asm` | its screen (the card's text layer), the mouse and keys, a line of typing |
 | `sk_inst.asm` | its instrument page (overlay `OV_EDIT`) |
 | `sk_pat.asm` | its pattern page: the song's settings, orders and patterns (`OV_EDIT`) |
 | `sk_file.asm` | its files: songs (`.SNG`) and instruments (`.INS`) (`OV_FILE`) |
 | `sk_help.asm` | its help screen (`OV_HELP`) |
+| `sk_block.asm` | a pattern's blocks: copied, cut, pasted, cleared (`OV_BLOCK`, with the clipboard) |
 | `sk_play.asm` | SONGKIT's player: plays a song on the OPL3, in a game as in the kit's own programs (below) |
 | `songplay.asm` | `SONGPLAY.COM`: plays a song file from the shell |
 | `tools/sk_fields.py` | makes the instrument page's table of fields in `sk_inst.asm`: where each is, and which is next to it |
@@ -389,11 +390,14 @@ each order's pattern as the song gets there.
 
 The status line has two boxes to tick (with the keys, or a click):
 
-- **Record** (Ctrl+E; off to start with, and as a song is opened): notes and digits go in where the cursor is. As the
-  song plays, a note goes in the row playing -- once, however long its key is held -- and
-  letting the key go puts in its end (`===`) in the row playing then (let go in the row it
-  went in: in the row after, unless a note is there). Off, the piano's keys only play, on the
-  cursor's track with the instrument being used, and nothing in the grid can be changed.
+- **Record** (Ctrl+E; off to start with, and as a song is opened): the piano's keys put notes
+  in, where the cursor is (and 1, a key let go). As the song plays, a note goes in the row
+  playing -- once, however long its key is held -- and letting the key go puts in its end
+  (`===`) in the row playing then (let go in the row it went in: in the row after, unless a
+  note is there). Off, the note column only plays: the piano's keys are heard, on the cursor's
+  track with the instrument being used, and nothing goes in -- to play along, or try a line
+  out. What is plainly an edit still is one, Record or not: a digit in the other fields,
+  Delete, a row in or out, a block cut, cleared or pasted.
 - **Loop pattern** (Ctrl+P): the order playing is played again and again, not the next; ticked
   off as it plays, the song goes on from there.
 
@@ -406,6 +410,14 @@ plays (Ctrl+Up, Ctrl+Down, a click, a new or repeated order) is played from its 
 with no loop, played in the editor, goes back to its first order at its end, rather than
 stopping.
 
+A block of cells -- some rows of some tracks -- is selected with Shift and the cursor's keys
+(Shift+Left, Shift+Right a track at a time), or by dragging the mouse across it; it is shown in
+purple. Ctrl+C copies it (with no block, the cursor's cell), Ctrl+X cuts it (copied, then
+cleared), Delete clears it; Ctrl+V pastes what was copied at the cursor, as much of it as fits
+in the pattern's rows and the song's tracks, and the block is then what it went into. What was
+copied stays, from pattern to pattern and song to song, until something else is. Esc, or the
+cursor moved without Shift, lets the block go.
+
 | Keys | |
 |---|---|
 | arrows | the cursor: a field, a row; up from the first row to the settings (left and right pick one, + and - change it, down goes back) |
@@ -413,13 +425,16 @@ stopping.
 | Z-M, Q-P (the piano's keys) | in the note field: that note, with the instrument being used, heard as it goes in |
 | 1 | in the note field: the key let go |
 | 0-9, A-F | in the other fields: that digit (an effect: 0-9 or A-Z) |
-| Delete | the field cleared (a note with its instrument; an effect with its parameter) |
+| Delete | the field cleared (a note with its instrument; an effect with its parameter); a block, all of it |
+| Shift+arrows, PgUp, PgDn, Home, End | a block, from the cursor to where it's taken |
+| Ctrl+C, Ctrl+X, Ctrl+V | the block copied, cut; pasted at the cursor |
+| Esc | a block let go (none: as on the instrument page) |
 | Insert, Ctrl+Insert | a blank row at the cursor, the rows below down one (the last lost): in this track, in all |
 | Shift+Delete, Ctrl+Delete | the row at the cursor out, the rows below up one: in this track, in all |
 | Ctrl+Up, Ctrl+Down | the order before, after |
 | + (=), - | this order plays the pattern after, before (in the settings: the setting changed) |
 | Ctrl+N, Ctrl+D | a new pattern (empty), a copy of this one: played by a new order after this one |
-| Ctrl+R, Ctrl+X | this order again (after it); this order out (its pattern stays) |
+| Alt+Insert, Alt+Delete | this order again (after it); this order out (its pattern stays) |
 | Ctrl+Left, Ctrl+Right | the instrument notes go in with: before, after |
 | `[` `]` | the octave down, up |
 | Enter | on the title, the author: type it again |
@@ -428,10 +443,10 @@ stopping.
 | Ctrl+M | the cursor's track muted, or not |
 | Tab | the instrument page |
 | F1 | the help |
-| Space, Backspace, Esc, Ctrl+O, S, A, W | as on the instrument page |
+| Space, Backspace, Ctrl+O, S, A, W | as on the instrument page |
 
 A click picks a cell, an order, or a setting (the title or the author: typed again), or ticks
-a box (Record, Loop pattern, a track's head: muted); the wheel over a setting changes it, over the grid moves the cursor. Rhythm mode and the 4-op
+a box (Record, Loop pattern, a track's head: muted); dragged from a cell, it selects a block; the wheel over a setting changes it, over the grid moves the cursor. Rhythm mode and the 4-op
 pairs change the song's tracks: the song stops first. SONGKIT edits patterns of up to 128
 rows (a longer one, from elsewhere, is played and kept as it is).
 
@@ -656,7 +671,7 @@ only its song, so it can go on growing:
 | | |
 |---|---|
 | bank 3 (`$C000`-`$EFFF`) | the core: the main loop, the keys, the screen, the player, every variable, the stack |
-| bank 2 (`$8000`-`$BFFF`) | an overlay, one at a time: `OV_EDIT` (the two pages' editing), `OV_FILE` (opening and saving), `OV_HELP` (the help) |
+| bank 2 (`$8000`-`$BFFF`) | an overlay, one at a time: `OV_EDIT` (the two pages' editing), `OV_FILE` (opening and saving), `OV_HELP` (the help), `OV_BLOCK` (a pattern's blocks copied and pasted, and the clipboard: in the overlay's own page, after its code) |
 | bank 1 (`$4000`-`$7FFF`) | the window: the song's pages, the pattern being edited, the instruments and their names |
 
 `SONGKIT.COM` sets the program header's `EXE_MORE` flag (`../shell/README.md`): its body is
@@ -675,6 +690,6 @@ another overlay without a stub; `--fix` changes a call that has one to use it.
 
 ### SONGKIT's next steps
 
-Copying and pasting blocks of a pattern, sound effects on channels kept from the music,
+Sound effects on channels kept from the music,
 export as VGM and as assembly source, and on the PC, instruments taken from other formats
 (and a starter library).

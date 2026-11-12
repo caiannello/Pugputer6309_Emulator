@@ -2,7 +2,7 @@
 
 SONGKIT's core (songkit.asm up to its variables' end, sk_core.asm, sk_ui.asm, sk_play.asm)
 is always there, in bank 3; each overlay (OV_EDIT: sk_inst.asm and sk_pat.asm; OV_FILE:
-sk_file.asm; OV_HELP: sk_help.asm) is in bank 2 only while it is the one mapped there. So:
+sk_file.asm; OV_HELP: sk_help.asm; OV_BLOCK: sk_block.asm) is in bank 2 only while it is the one mapped there. So:
 
 - an overlay may use the core's labels, and its own;
 - anything else -- the core using an overlay's label, or an overlay another's -- must go
@@ -26,6 +26,7 @@ REGIONS = {
     'sk_inst.asm': 'OV_EDIT', 'sk_pat.asm': 'OV_EDIT',
     'sk_file.asm': 'OV_FILE',
     'sk_help.asm': 'OV_HELP',
+    'sk_block.asm': 'OV_BLOCK',
 }
 MAIN = 'songkit.asm'           # all core (its overlays are only its INCLUDEs)
 LABEL = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)')

@@ -165,7 +165,7 @@ HELPTXT
             FCC  "Del"
             FCB  0
             FCB  54,15,C_LABEL
-            FCC  "the field cleared"
+            FCC  "field (or block) cleared"
             FCB  0
             FCB  42,16,C_VALUE
             FCC  "Ins ^Ins"
@@ -198,7 +198,7 @@ HELPTXT
             FCC  "new pattern; a copy of it"
             FCB  0
             FCB  42,21,C_VALUE
-            FCC  "^R ^X"
+            FCC  "Alt+Ins Del"
             FCB  0
             FCB  54,21,C_LABEL
             FCC  "order again; order out"
@@ -216,25 +216,25 @@ HELPTXT
             FCC  "on title, author: retype"
             FCB  0
             FCB  42,24,C_VALUE
-            FCC  "^E"
+            FCC  "^E ^P ^M"
             FCB  0
             FCB  54,24,C_LABEL
-            FCC  "Record on, off"
+            FCC  "Record; Loop pattern; mute"
             FCB  0
             FCB  42,25,C_VALUE
-            FCC  "^P"
+            FCC  "Sh+arrows"
             FCB  0
             FCB  54,25,C_LABEL
-            FCC  "Loop pattern on, off"
+            FCC  "a block (Esc: let go)"
             FCB  0
             FCB  42,26,C_VALUE
-            FCC  "^M"
+            FCC  "^C ^X ^V"
             FCB  0
             FCB  54,26,C_LABEL
-            FCC  "the track muted, or not"
+            FCC  "copy, cut, paste a block"
             FCB  0
             FCB  2,28,C_LABEL
-            FCC  "Mouse: a click picks a field or ticks a box (a track's head: muted)."
+            FCC  "Mouse: a click picks a field or ticks a box (a head: mute); a drag, a block."
             FCB  0
             FCB  2,29,C_MSG
             FCC  "Any key: back to the page"

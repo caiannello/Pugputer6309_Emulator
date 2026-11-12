@@ -28,8 +28,9 @@ OBANK       equ  2          ; the overlays, seen through bank 2 one at a time
 OWIN        equ  $8000
 OV_EDIT     equ  0          ; the overlays: the two pages' editing,
 OV_FILE     equ  1          ;   the files,
-OV_HELP     equ  2          ;   the help
-NOVL        equ  3
+OV_HELP     equ  2          ;   the help,
+OV_BLOCK    equ  3          ;   blocks of a pattern copied, pasted (the clipboard too)
+NOVL        equ  4
 MAXPG       equ  32         ; 512KB of song at most
 MAXINST     equ  255
 NVOICE      equ  6          ; notes played at once from the keys
@@ -505,7 +506,7 @@ OLCLOSE     LDB  OVFH
             SWI2
             RTS
 ; OVLEN: each overlay's length, in the file's order.
-OVLEN       FDB  EDITEND-OWIN,FILEEND-OWIN,HELPEND-OWIN
+OVLEN       FDB  EDITEND-OWIN,FILEEND-OWIN,HELPEND-OWIN,BLOCKEND-OWIN
 ; OVFREE: bank 2 its own page again, the overlays' pages given back.
 OVFREE      LDB  #OBANK
             LDE  OHOME
@@ -645,6 +646,15 @@ O_SAVEINS   JSR  OVCALL
 O_KHELP     JSR  OVCALL
             FCB  OV_HELP
             FDB  KHELP
+O_BCOPY     JSR  OVCALL
+            FCB  OV_BLOCK
+            FDB  BCOPY
+O_BCLEAR    JSR  OVCALL
+            FCB  OV_BLOCK
+            FDB  BCLEAR
+O_BPASTE    JSR  OVCALL
+            FCB  OV_BLOCK
+            FDB  BPASTE
 
 ;------------------------------------------------------------------------------
 ; Instruments.
@@ -1023,6 +1033,33 @@ OVPG        RMB  NOVL
 OVADR       RMB  2          ;   (OVCALL's)
 PR_OV       RMB  1          ; PR_DO's overlay, CF_DO's
 CF_OV       RMB  1
+SELON       RMB  1          ; a block selected (sk_pat.asm's): its corners,
+SELR        RMB  1          ;   where it began and where it's taken to (the
+SELT        RMB  1          ;   cursor, as it was then)
+SELR2       RMB  1
+SELT2       RMB  1
+SBR0        RMB  1          ; the block from them (SELBOX): its rows, tracks
+SBR1        RMB  1
+SBT0        RMB  1
+SBT1        RMB  1
+OBON        RMB  1          ; (as it was drawn before: SELSAVE)
+OBR0        RMB  1
+OBR1        RMB  1
+OBT0        RMB  1
+OBT1        RMB  1
+SDR         RMB  1          ; (SELDIFF's)
+SDQ         RMB  1
+DRAG        RMB  1          ; a block being dragged with the mouse
+DRBGR       RMB  1          ; (DRAWROW's: the row's own background)
+CBROWS      RMB  1          ; the clipboard's rows (0: empty) and tracks
+CBTRKS      RMB  1
+BKCUT       RMB  1          ; (sk_block.asm's)
+BKR         RMB  1
+BKNR        RMB  1
+BKNT        RMB  1
+BKRB        RMB  1
+BKI         RMB  1
+BKJ         RMB  1
 COREEND     equ  *          ; (the core's last byte: the program's body is to here)
 ; (The large ones are only addresses, after the program's last byte.)
 IOBUF       equ  *          ; 1024
@@ -1052,6 +1089,14 @@ FILEEND     equ  *
 HELPEND     equ  *
             IFGT HELPEND-(OWIN+$4000)
             ERROR "OV_HELP is more than 16KB"
+            ENDC
+            ORG  OWIN           ; OV_BLOCK: blocks, and the clipboard after them
+            INCLUDE "sk_block.asm"
+BLOCKEND    equ  *
+CLIP        equ  BLOCKEND       ; (only addresses: not in the file)
+CLIPEND     equ  CLIP+MAXROWS*SK_NTRK*5
+            IFGT CLIPEND-(OWIN+$4000)
+            ERROR "OV_BLOCK and its clipboard are more than 16KB"
             ENDC
 
             END  START

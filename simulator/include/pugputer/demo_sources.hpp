@@ -61,6 +61,7 @@ inline constexpr DemoSource kDemoSources[] = {
     {"gamekit/sk_core.asm", "ASM/GAMEKIT/SK_CORE.ASM"},
     {"gamekit/sk_ui.asm", "ASM/GAMEKIT/SK_UI.ASM"},
     {"gamekit/sk_help.asm", "ASM/GAMEKIT/SK_HELP.ASM"},
+    {"gamekit/sk_block.asm", "ASM/GAMEKIT/SK_BLOCK.ASM"},
     {"gamekit/sk_inst.asm", "ASM/GAMEKIT/SK_INST.ASM"},
     {"gamekit/sk_file.asm", "ASM/GAMEKIT/SK_FILE.ASM"},
     {"gamekit/sk_pat.asm", "ASM/GAMEKIT/SK_PAT.ASM"},

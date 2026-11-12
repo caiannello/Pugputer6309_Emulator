@@ -220,3 +220,30 @@ MSG         PSHS X
             STA  TXFG
             PULS X
             JMP  TXSTR
+
+; SELBOX: the block -- rows SBR0-SBR1, tracks SBT0-SBT1 (TLIST's) -- from its
+; corners (SELR, SELT and SELR2, SELT2, either way round); with none (SELON
+; 0), the cursor's cell.
+SELBOX      TST  SELON
+            BNE  SBX1
+            LDA  CROW
+            STA  SBR0
+            STA  SBR1
+            LDA  CTRK
+            STA  SBT0
+            STA  SBT1
+            RTS
+SBX1        LDA  SELR
+            LDB  SELR2
+            BSR  SBXORD
+            STD  SBR0
+            LDA  SELT
+            LDB  SELT2
+            BSR  SBXORD
+            STD  SBT0
+            RTS
+SBXORD      PSHS B              ; A, B the smaller, the larger
+            CMPA ,S+
+            BLS  SBX9
+            EXG  A,B
+SBX9        RTS
