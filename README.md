@@ -1,8 +1,11 @@
 # Vibe-Coded Pugputer 6309 Simulator
 
 A homebrew computer built around the Hitachi **HD6309** CPU, 1MB RAM, UART, SD Card, OPL3 Sound chip, an RP2350-based color video card, with its complete software stack --
-BIOS, DOS, shell, a text editor, an assembler and linker, and BASIC -- and a cycle-counted emulator that runs all of
-it on a PC.
+BIOS, DOS, shell, a text editor, an assembler and linker, tile/map and music editors for making games(!), and BASIC -- and a cycle-counted emulator that runs all of
+it on a PC. 
+
+Parity with the real-hardware Pugputer 6309 is pretty decent, so you can try it out without having to build anything!
+(If you do build one for yourself, I'd love to hear about it!) 
 
 ![tilekit editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
 
