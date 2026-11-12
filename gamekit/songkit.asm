@@ -40,6 +40,8 @@ START       LDS  #KIT_STACK
             CLR  MODE
             CLR  PAGE
             CLR  SETF
+            CLR  RQN
+            CLR  MSGUP
             CLR  SONGON
             CLR  PLAYON
             LDA  #4
@@ -106,10 +108,14 @@ MAIN0       JSR  SK_POLL
             CLR  SONGON
             JSR  JAMSET
             JSR  DRAWSTAT
-MAIN1       JSR  PLAYPOS
+MAIN1       LDA  MODE           ; (the help over the page: nothing drawn under it)
+            CMPA #3
+            BEQ  MAIN2
+            JSR  PLAYPOS
+            JSR  RQSTEP         ; (the grid's rows not drawn yet)
+            TST  MODE           ; (a line being typed, a question: the mouse
+            BNE  MAIN2          ; left until it's done, its clicks kept)
             JSR  POLLIN
-            TST  MODE
-            BNE  MAIN2
             TST  PAGE
             BNE  MAIN1A
             JSR  PMOUSE
@@ -157,23 +163,43 @@ KEYDO       LDF  MODE
             BEQ  KD1
             CMPF #1
             BEQ  KDTYPE
+            CMPF #3
+            BEQ  KDHELP
             TSTB                ; a question: Y does it, anything else doesn't
             BMI  KD9
             CLR  MODE
+            PSHS A
+            JSR  CLRMSG
+            PULS A
             CMPA #$1C           ; Y
-            BNE  KDNO
+            BNE  KD9
             JMP  [CF_DO]
-KDNO        JMP  CLRMSG
 KDTYPE      JSR  PRKEY          ; a line of typing
             TSTA
             BEQ  KD9
             CLR  MODE
+            PSHS A
+            JSR  CLRMSG
+            PULS A
             CMPA #1
-            BNE  KDNO
+            BNE  KD9
             JMP  [PR_DO]
+KDHELP      TSTB                ; the help: a key closes it (one let go: a note's end)
+            BMI  KD1A
+            CLR  MODE
+            TST  PAGE
+            LBEQ REDRAWUI
+            JMP  DRAWPAGE
 KD1         TSTB                ; a key let go: a note's end
-            BPL  KD2
-            JMP  PIANOUP
+            BPL  KD1B
+KD1A        JMP  PIANOUP
+KD1B        TST  MSGUP          ; (a message: the status back, from the next key)
+            BEQ  KD1C
+            PSHS D
+            JSR  CLRMSG
+            PULS D
+KD1C        CMPA #K_F1
+            LBEQ KHELP
 KD2         TST  PAGE           ; (the pattern page's own)
             LBEQ PKEY
             LDB  KEYMODS
@@ -370,8 +396,16 @@ ASK         STX  CF_DO
             LDA  #2
             STA  MODE
             RTS
-CLRMSG      LDB  #29
-            JMP  TXROWCLR
+; CLRMSG: the message or question gone from the bottom row: the status back.
+CLRMSG      CLR  MSGUP
+            JMP  DRAWSTAT
+; KHELP (F1): the help, over the page, until a key.
+KHELP       LDA  #3
+            STA  MODE
+            JSR  TXCLR
+            JSR  DRAWTITLE
+            LDX  #HELPTXT
+            JMP  DRAWLAB
 
 ;------------------------------------------------------------------------------
 ; Instruments.
@@ -578,6 +612,216 @@ S_FULL      FCC  "255 instruments: no room for more"
             FCB  0
 S_NOMEM     FCC  "SONGKIT: not enough memory"
             FCB  CR,LF,0
+; HELPTXT: the help screen (F1): its labels, as DRAWLAB draws them.
+HELPTXT
+            FCB  2,2,C_LABEL
+            FCC  "A song plays its orders in turn, each one a pattern of up to 128 rows; a row"
+            FCB  0
+            FCB  2,3,C_LABEL
+            FCC  "has a cell for each track: note, instrument, volume, effect. With the cursor"
+            FCB  0
+            FCB  2,4,C_LABEL
+            FCC  "on a note, the keyboard's letters are a piano: the note goes in, heard as it"
+            FCB  0
+            FCB  2,5,C_LABEL
+            FCC  "does, and the cursor moves down a row. As the song plays the cursor follows"
+            FCB  0
+            FCB  2,6,C_LABEL
+            FCC  "it, and a note typed goes in the row playing. The instrument page has all of"
+            FCB  0
+            FCB  2,7,C_LABEL
+            FCC  "an instrument's settings, heard as they change."
+            FCB  0
+            FCB  2,9,C_HEAD
+            FCC  "Both pages"
+            FCB  0
+            FCB  2,10,C_VALUE
+            FCC  "Z-M Q-P"
+            FCB  0
+            FCB  14,10,C_LABEL
+            FCC  "the piano's keys"
+            FCB  0
+            FCB  2,11,C_VALUE
+            FCC  "[ ]"
+            FCB  0
+            FCB  14,11,C_LABEL
+            FCC  "octave down, up"
+            FCB  0
+            FCB  2,12,C_VALUE
+            FCC  "Space"
+            FCB  0
+            FCB  14,12,C_LABEL
+            FCC  "play from the order; stop"
+            FCB  0
+            FCB  2,13,C_VALUE
+            FCC  "Bksp"
+            FCB  0
+            FCB  14,13,C_LABEL
+            FCC  "all notes off"
+            FCB  0
+            FCB  2,14,C_VALUE
+            FCC  "Tab"
+            FCB  0
+            FCB  14,14,C_LABEL
+            FCC  "the other page"
+            FCB  0
+            FCB  2,15,C_VALUE
+            FCC  "^O"
+            FCB  0
+            FCB  14,15,C_LABEL
+            FCC  "open a song or instrument"
+            FCB  0
+            FCB  2,16,C_VALUE
+            FCC  "^S ^A"
+            FCB  0
+            FCB  14,16,C_LABEL
+            FCC  "save the song; save as"
+            FCB  0
+            FCB  2,17,C_VALUE
+            FCC  "^W"
+            FCB  0
+            FCB  14,17,C_LABEL
+            FCC  "save the instrument"
+            FCB  0
+            FCB  2,18,C_VALUE
+            FCC  "F1"
+            FCB  0
+            FCB  14,18,C_LABEL
+            FCC  "this help"
+            FCB  0
+            FCB  2,19,C_VALUE
+            FCC  "Esc"
+            FCB  0
+            FCB  14,19,C_LABEL
+            FCC  "back to the shell"
+            FCB  0
+            FCB  2,21,C_HEAD
+            FCC  "The instrument page"
+            FCB  0
+            FCB  2,22,C_VALUE
+            FCC  "arrows"
+            FCB  0
+            FCB  14,22,C_LABEL
+            FCC  "the setting to change"
+            FCB  0
+            FCB  2,23,C_VALUE
+            FCC  "+ -"
+            FCB  0
+            FCB  14,23,C_LABEL
+            FCC  "change it"
+            FCB  0
+            FCB  2,24,C_VALUE
+            FCC  "Enter"
+            FCB  0
+            FCB  14,24,C_LABEL
+            FCC  "on the name: rename it"
+            FCB  0
+            FCB  2,25,C_VALUE
+            FCC  "PgUp PgDn"
+            FCB  0
+            FCB  14,25,C_LABEL
+            FCC  "instrument before, after"
+            FCB  0
+            FCB  2,26,C_VALUE
+            FCC  "^N ^D"
+            FCB  0
+            FCB  14,26,C_LABEL
+            FCC  "new instrument; a copy"
+            FCB  0
+            FCB  42,9,C_HEAD
+            FCC  "The pattern page"
+            FCB  0
+            FCB  42,10,C_VALUE
+            FCC  "arrows"
+            FCB  0
+            FCB  54,10,C_LABEL
+            FCC  "move; row 0 up: settings"
+            FCB  0
+            FCB  42,11,C_VALUE
+            FCC  "PgUp PgDn"
+            FCB  0
+            FCB  54,11,C_LABEL
+            FCC  "16 rows up, down"
+            FCB  0
+            FCB  42,12,C_VALUE
+            FCC  "Home End"
+            FCB  0
+            FCB  54,12,C_LABEL
+            FCC  "the first row, the last"
+            FCB  0
+            FCB  42,13,C_VALUE
+            FCC  "1"
+            FCB  0
+            FCB  54,13,C_LABEL
+            FCC  "the key let go (note off)"
+            FCB  0
+            FCB  42,14,C_VALUE
+            FCC  "0-9 A-F"
+            FCB  0
+            FCB  54,14,C_LABEL
+            FCC  "a digit (effects: 0-9 A-Z)"
+            FCB  0
+            FCB  42,15,C_VALUE
+            FCC  "Del"
+            FCB  0
+            FCB  54,15,C_LABEL
+            FCC  "the field cleared"
+            FCB  0
+            FCB  42,16,C_VALUE
+            FCC  "Ins ^Ins"
+            FCB  0
+            FCB  54,16,C_LABEL
+            FCC  "a row in: this track, all"
+            FCB  0
+            FCB  42,17,C_VALUE
+            FCC  "Sh+Del ^Del"
+            FCB  0
+            FCB  54,17,C_LABEL
+            FCC  "a row out: this track, all"
+            FCB  0
+            FCB  42,18,C_VALUE
+            FCC  "+ -"
+            FCB  0
+            FCB  54,18,C_LABEL
+            FCC  "pattern played; a setting"
+            FCB  0
+            FCB  42,19,C_VALUE
+            FCC  "^Up ^Dn"
+            FCB  0
+            FCB  54,19,C_LABEL
+            FCC  "the order before, after"
+            FCB  0
+            FCB  42,20,C_VALUE
+            FCC  "^N ^D"
+            FCB  0
+            FCB  54,20,C_LABEL
+            FCC  "new pattern; a copy of it"
+            FCB  0
+            FCB  42,21,C_VALUE
+            FCC  "^R ^X"
+            FCB  0
+            FCB  54,21,C_LABEL
+            FCC  "order again; order out"
+            FCB  0
+            FCB  42,22,C_VALUE
+            FCC  "^Lt ^Rt"
+            FCB  0
+            FCB  54,22,C_LABEL
+            FCC  "the instrument put in"
+            FCB  0
+            FCB  42,23,C_VALUE
+            FCC  "Enter"
+            FCB  0
+            FCB  54,23,C_LABEL
+            FCC  "on title, author: retype"
+            FCB  0
+            FCB  2,28,C_LABEL
+            FCC  "The mouse: a click picks a field; the wheel over one changes it."
+            FCB  0
+            FCB  2,29,C_MSG
+            FCC  "Any key: back to the page"
+            FCB  0
+            FCB  $FF,$FF
 ;------------------------------------------------------------------------------
             INCLUDE "sk_ui.asm"
             INCLUDE "sk_inst.asm"
@@ -587,7 +831,8 @@ S_NOMEM     FCC  "SONGKIT: not enough memory"
 ;------------------------------------------------------------------------------
 ; Variables.
 ;------------------------------------------------------------------------------
-MODE        RMB  1          ; 0 editing; 1 a line being typed; 2 a question
+MODE        RMB  1          ; 0 editing; 1 a line being typed; 2 a question; 3 the help
+MSGUP       RMB  1          ; a message on the bottom row (the status back at the next key)
 PAGE        RMB  1          ; the page shown: 0 the patterns', 1 the instruments'
 PBPG        RMB  1          ; the pattern buffer's page, the names', the
 NMPG        RMB  1          ; instruments'
@@ -685,6 +930,8 @@ OTOP        RMB  1          ; the first order shown
 PLORD       RMB  1          ; where the song is playing, as shown ($FF: not)
 PLROW       RMB  1
 PPOLD       RMB  2
+RQR         RMB  1          ; the grid's rows still to draw: the next, how many
+RQN         RMB  1
 TLIST       RMB  SK_NTRK    ; the song's tracks, how many
 NTL         RMB  1
 MROW        RMB  1          ; the mouse's cell

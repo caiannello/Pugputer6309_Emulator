@@ -353,7 +353,10 @@ SONGKIT [file]          a song (".SNG" is added to a name without an extension)
 opens the editor on a song's pattern page -- a new song's (one empty pattern of 64 rows, one
 instrument) if no file is named. Tab goes from the pattern page to the instrument page and
 back. On either, the keyboard's letters are a piano, Space plays the song (from the order
-being edited) or stops it, and a change is heard at once, even while the song plays.
+being edited) or stops it, and a change is heard at once, even while the song plays. The
+bottom row is the status line -- the octave, the instrument, the pattern, whether the song is
+playing -- where messages and questions come up too (a message until the next key); F1 shows
+the help, every key and a few words on how it goes, until a key is pressed.
 
 ### The pattern page
 
@@ -371,7 +374,10 @@ C-4 01 30 A0F       note, instrument, volume, effect and its parameter (all in h
 ```
 
 The cursor is on a field of a cell (lit); typing there puts in a note, or a digit, and moves
-down a row. The row being played is shown in green as the song plays.
+down a row. The row being played is shown in green as the song plays, and the cursor
+follows it: it is kept in the middle of the rows shown, the grid moving on under it and on to
+each order's pattern as the song gets there -- so a note typed as the song plays goes in the
+row playing.
 
 | Keys | |
 |---|---|
@@ -391,6 +397,7 @@ down a row. The row being played is shown in green as the song plays.
 | `[` `]` | the octave down, up |
 | Enter | on the title, the author: type it again |
 | Tab | the instrument page |
+| F1 | the help |
 | Space, Backspace, Esc, Ctrl+O, S, A, W | as on the instrument page |
 
 A click picks a cell, an order, or a setting (the title or the author: typed again); the
@@ -401,6 +408,13 @@ rows (a longer one, from elsewhere, is played and kept as it is).
 The song is kept in RAM as its file has it: each change to a pattern is packed into it at
 once (what comes after moved along), and the player is told (`SK_RESYNC`), so it goes on
 from the same order and row.
+
+The grid is a text layer of its own (the card's layer 0, behind the rest of the screen on
+layer 1, seen where that is left clear): the whole pattern, all its 128 rows, scrolled by the
+card to the rows shown -- so following the song costs a register written a row, not the
+grid drawn again. The rows in view are drawn at once, the others a few at a time as the
+editor goes round; and work as long as a new pattern's lets the song's ticks in as it goes,
+so the song keeps its time.
 
 ### The instrument page
 
@@ -434,6 +448,7 @@ keyboard's letters are a piano, so a note held while a setting changes changes w
 | Ctrl+S, Ctrl+A | save the song; save it as another name |
 | Ctrl+W | save this instrument as a file of its own (`.INS`) |
 | Tab | the pattern page |
+| F1 | the help |
 | Esc | back to the shell (asked first, with changes not saved) |
 
 A click picks a setting (on the name, renames it); the wheel over one changes it. Up to six

@@ -392,8 +392,10 @@ DRAWPAGE    JSR  TXCLR
             JSR  DRAWTITLE
             JSR  DRAWSTAT
             BRA  DRAWVALS
-; DRAWLAB: the labels at X: each its column, its row, its color, its text.
-DRAWLAB     LDD  ,X++
+; DRAWLAB: the labels at X: each its column, its row, its color, its text
+; (the song's ticks let in as it goes: the window may be the player's after).
+DRAWLAB     JSR  TICKPOLL
+            LDD  ,X++
             CMPA #$FF
             BEQ  DL9
             JSR  TXAT
@@ -665,11 +667,25 @@ DT2         JSR  TXCH
             CLR  TXBG
             RTS
 
-; DRAWSTAT: the octave the keys play, and whether the song is playing (and
-; on the pattern page, more: PSTAT).
-DRAWSTAT    TST  PAGE
+; DRAWSTAT: the bottom row, the status: the octave the keys play, and whether
+; the song is playing (on the pattern page, more: PSTAT); F1 for the help.
+; (Nothing while a message, a question or the help is up.)
+DRAWSTAT    TST  MODE
+            BNE  DS9
+            TST  MSGUP
+            BNE  DS9
+            LDB  #29
+            JSR  TXROWCLR
+            LDD  #$481D
+            JSR  TXAT
+            CLR  TXBG
+            LDA  #C_HELP
+            STA  TXFG
+            LDX  #S_F1
+            JSR  TXSTR
+            TST  PAGE
             LBEQ PSTAT
-            LDD  #$0218
+            LDD  #$021D
             JSR  TXAT
             CLR  TXBG
             LDA  #C_LABEL
@@ -688,9 +704,13 @@ DRAWSTAT    TST  PAGE
             BNE  DS1
             LDX  #S_STOPPED
 DS1         JMP  TXSTR
+DS9         RTS
 
-; MSG: the message at X on the bottom row.
+; MSG: the message at X on the bottom row (over the status, until the next
+; key).
 MSG         PSHS X
+            LDA  #1
+            STA  MSGUP
             LDB  #29
             JSR  TXROWCLR
             CLRA
@@ -772,16 +792,9 @@ LABELS      FCB  2,2,C_LABEL
             FCB  2,23,C_HELP
             FCC  "Attack, decay, release: 15 is fastest. Level, sustain level: 0 is loudest."
             FCB  0
-            FCB  2,26,C_HELP
-            FCC  "Z-M, Q-P: play   [ ]: octave   arrows: choose   + -: change   Enter: rename"
-            FCB  0
-            FCB  2,27,C_HELP
-            FCC  "PgUp PgDn (^arrows): instrument  ^N new  ^D copy  Space: song  Bksp: hush"
-            FCB  0
-            FCB  2,28,C_HELP
-            FCC  "^O open  ^S save  ^A save as  ^W save instrument  Tab: patterns  Esc: quit"
-            FCB  0
             FCB  $FF,$FF
+S_F1        FCC  "F1: help"
+            FCB  0
 S_OF        FCC  " of "
             FCB  0
 S_XPOSE     FCC  "Transpose"
@@ -847,9 +860,9 @@ S_NEWSONG   FCC  "(a new song)"
             FCB  0
 S_OCT       FCC  "Octave "
             FCB  0
-S_PLAYING   FCC  "   playing the song"
+S_PLAYING   FCC  "   playing"
             FCB  0
-S_STOPPED   FCC  "                   "
+S_STOPPED   FCC  "          "
             FCB  0
 
 ;------------------------------------------------------------------------------

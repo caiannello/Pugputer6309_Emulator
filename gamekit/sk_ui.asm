@@ -2,13 +2,18 @@
 ; PROJECT: Pugputer 6309 game kit
 ;    FILE: sk_ui.asm
 ;
-; SONGKIT's screen and input: the card's text layer 0 (80x30 cells of 8x16,
-; the map at VC_TEXTMAP as the card starts), the mouse and keys, the mouse
-; pointer (sprite 0), and a line of typing on the bottom row.
+; SONGKIT's screen and input: two text layers -- layer 1, in front: the
+; screen (80x30 cells of 8x16, its map at VC_TEXTMAP, where the card starts
+; it), and layer 0, behind it: the pattern page's grid (GRIDMAP, 128 rows,
+; scrolled to the rows shown: sk_pat.asm), seen where the screen's cells are
+; left clear -- the mouse and keys, the mouse pointer (sprite 0), and a line of
+; typing on the bottom row. A cell drawn on the screen with background 0 has
+; the backdrop's color, not nothing: the grid doesn't show through.
 ;
 ;   UISTART            the card as SONGKIT has it (reset, the pointer, the keys)
 ;   UIEND              the card as it was, for the shell
 ;   TXAT TXCH TXSTR    text: the cell at column A, row B; a character; a string
+;   GXAT               the cell at column A, row B of the grid's layer
 ;   TXSPC TXDEC TXSGN  spaces; a number; a signed one
 ;   TXCLR TXROWCLR     the screen, a row, blank
 ;   POLLIN GETKEY      the mouse, and the next key event
@@ -28,6 +33,7 @@ C_OUT       equ  214        ;   an operator that is heard (a carrier)
 C_HELP      equ  245        ;   the keys
 C_MSG       equ  222        ;   messages and questions
 PR_MAX      equ  40         ; the longest line PRKEY takes
+GRIDMAP     equ  $000000    ; the grid's layer's map: 128 x 128 cells (64KB)
 
 ; UISTART: the card reset (the text screen blank, xterm's colors), the
 ; backdrop, the pointer (sprite 0, which the card moves), the keys the
@@ -44,10 +50,17 @@ UISTART     LDA  #$80
             LDY  #VC_DATA0
             LDW  #8
             TFM  X+,Y
+            LDA  #VC_CFG/$10000 ; the layers: 0 the grid, 1 the screen
+            LDX  #LAYER0
+            JSR  UIPORT
+            LDX  #UILAYERS
+            LDY  #VC_DATA0
+            LDW  #32
+            TFM  X+,Y
             LDA  #VC_CFG/$10000
             LDX  #DC_CTRL
             JSR  UIPORT
-            LDA  #$09           ; layer 0 and the sprites on
+            LDA  #$0B           ; layers 0 and 1, and the sprites, on
             STA  VC_DATA0
             LDA  #UI_BACK
             STA  VC_DATA0
@@ -69,6 +82,14 @@ UIPORT      STA  VC_ADDR0
             RTS
 UISPR0      FDB  UI_PTRIMG/32,320,240
             FCB  SS_W16+SS_H16+SS_FRONT,SC_8BPP
+UILAYERS    FCB  LM_TEXT+LM_HIRES+LM_BIG,LW_128+LH_128 ; layer 0: the grid
+            FCB  GRIDMAP/$10000,(GRIDMAP/$100)&$FF,GRIDMAP&$FF
+            FCB  VC_FONT/$10000,(VC_FONT/$100)&$FF,VC_FONT&$FF
+            FCB  0,0,0,0,0,0,0,0
+            FCB  LM_TEXT+LM_HIRES+LM_BIG,LW_128+LH_32 ; layer 1: the screen
+            FCB  VC_TEXTMAP/$10000,(VC_TEXTMAP/$100)&$FF,VC_TEXTMAP&$FF
+            FCB  VC_FONT/$10000,(VC_FONT/$100)&$FF,VC_FONT&$FF
+            FCB  0,0,0,0,0,0,0,0
 
 ;------------------------------------------------------------------------------
 ; Text. Each character in TXFG on TXBG (0: the backdrop shows).
@@ -90,13 +111,32 @@ TXAT        PSHS D,X
             LDA  #VC_TEXTMAP/$10000
             JSR  UIPORT
             PULS D,X,PC
-; TXCH: character A. (All kept.)
+; GXAT: the same, in the grid's layer's map. (All kept.)
+GXAT        PSHS D,X
+            STA  TXCOL
+            TFR  B,A
+            CLRB
+            LSLA
+            STD  TXTMP
+            LDB  TXCOL
+            CLRA
+            LSLD
+            LSLD
+            ADDD TXTMP
+            ADDD #GRIDMAP&$FFFF
+            TFR  D,X
+            LDA  #GRIDMAP/$10000
+            JSR  UIPORT
+            PULS D,X,PC
+; TXCH: character A (on TXBG 0: on the backdrop's color). (All kept.)
 TXCH        PSHS A
             STA  VC_DATA0
             LDA  TXFG
             STA  VC_DATA0
             LDA  TXBG
-            STA  VC_DATA0
+            BNE  TXCH1
+            LDA  #UI_BACK
+TXCH1       STA  VC_DATA0
             CLRA
             STA  VC_DATA0
             PULS A,PC
@@ -154,14 +194,16 @@ TXSGN       TSTA
 TXSGN1      NEGA
             PSHS A
             LDA  #'-
-TXSGN2      BSR  TXCH
+TXSGN2      JSR  TXCH
             PULS A
             BSR  TXDEC
             INCB
             RTS
-; TXCLR: every cell a space on the backdrop.
+; TXCLR: every cell a space on the backdrop (the song's ticks let in as it
+; goes: the window may be the player's after).
 TXCLR       CLRB
-TXCLR1      BSR  TXROWCLR
+TXCLR1      JSR  TICKPOLL
+            BSR  TXROWCLR
             INCB
             CMPB #30
             BLO  TXCLR1

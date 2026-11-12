@@ -25,7 +25,7 @@ MAXROWS     equ  128        ; the longest pattern edited here
 ROWB        equ  100        ; a row in the buffer: 20 cells of 5 bytes
 GX0         equ  5          ; the grid: its first track's column,
 GY0         equ  5          ;   its first row's row,
-GROWS       equ  20         ;   how many rows it shows,
+GROWS       equ  24         ;   how many rows it shows,
 GTRKS       equ  5          ;   and how many tracks,
 GTW         equ  14         ;   each this wide
 NORDV       equ  23         ; orders shown at once
@@ -87,12 +87,15 @@ PTENT       TFR  A,B
             TFR  D,X
             RTS
 ; PBCLR: the buffer blank, and every row's size 0.
-PBCLR       JSR  EMAP
-            LDX  #WINDOW
-            LDW  #MAXROWS*ROWB
+PBCLR       LDX  #WINDOW        ; (16 rows at a time, the song's ticks between)
+PBC0        JSR  TICKPOLL
+            JSR  EMAP
+            LDW  #16*ROWB
             CLR  PTMP
             LDY  #PTMP
             TFM  Y,X+
+            CMPX #WINDOW+MAXROWS*ROWB
+            BLO  PBC0
             LDX  #ROWLEN
             LDB  #MAXROWS
 PBC1        CLR  ,X+
@@ -149,9 +152,10 @@ PLA3        LDA  PKROW
             TFM  X+,Y+
             LDA  PKROW
             JSR  ROWSIZE
+PLA4        JSR  TICKPOLL       ; (the song's tick, if one is due)
             LDB  RPG            ; (back to reading)
             JSR  MAPPG
-PLA4        LDA  PKROW
+            LDA  PKROW
             ADDA PKN
             BCS  PLA8
             INCA
@@ -443,6 +447,19 @@ PSVFULL     LDX  #S_NOROOM
             JSR  MSG
             ORCC #1
             RTS
+; TICKPOLL: in the middle of long work (with the song as it should be), the
+; song's tick, if one is due -- the window the player's for it; the caller's
+; page to be put in it again after. (All kept.)
+TICKPOLL    TST  SONGON
+            BEQ  TKP9
+            PSHS D,X,Y,U
+            PSHSW
+            LDB  SK_PG
+            JSR  SKMAP
+            JSR  SK_POLL
+            PULSW
+            PULS D,X,Y,U
+TKP9        RTS
 ; RESYNC: the player told the song has changed, if it's playing.
 RESYNC      TST  SONGON
             BEQ  RSY9
@@ -973,7 +990,21 @@ DRUMTKS     FCB  6,7,8,18,19
 ;------------------------------------------------------------------------------
 ; Drawing the page.
 ;------------------------------------------------------------------------------
-DRAWPAT     JSR  TXCLR
+DRAWPAT     BSR  DRAWUI
+            JSR  VIEWFIX
+            JSR  DRAWORDS
+            JSR  DRAWSTAT
+            JMP  DRAWGRID
+; REDRAWUI: the page again over the grid as it is (its own layer, which the
+; help left alone).
+REDRAWUI    BSR  DRAWUI
+            JSR  DRAWORDS
+            JSR  DRAWHEAD
+            JMP  DRAWSTAT
+; DRAWUI: the screen's layer: the grid's window clear, the title, the labels,
+; the settings.
+DRAWUI      JSR  TXCLR
+            JSR  PHOLE
             JSR  DRAWTITLE
             LDX  #PLABELS
             JSR  DRAWLAB
@@ -984,10 +1015,7 @@ DPT1        PSHS A
             INCA
             CMPA #NSETF
             BLO  DPT1
-            JSR  VIEWFIX
-            JSR  DRAWORDS
-            JSR  DRAWGRID
-            JMP  DRAWSTAT
+            RTS
 ; NEWVIEW: after PATLOAD: the cursor on one of its rows, and what shows the
 ; pattern drawn again.
 NEWVIEW     LDA  CROW
@@ -1030,14 +1058,21 @@ VFX3        SUBA LTRK
             STA  LTRK
             INCF
 VFX4        RTS
-; CURMOVED: the cursor moved (A the row it was on): the grid drawn again if
-; what it shows had to move, or else the rows it was and is on.
+; CURMOVED: the cursor moved (A the row it was on): the rows it was and is on
+; drawn again -- the grid scrolled first, if the rows shown had to move; all
+; of it drawn again, if the tracks shown did.
 CURMOVED    PSHS A
+            LDB  LTRK
+            PSHS B
             BSR  VIEWFIX
-            TSTF
-            BEQ  CMV1
+            PULS B
+            CMPB LTRK
+            BEQ  CMV0
             PULS A
             JMP  DRAWGRID
+CMV0        TSTF
+            BEQ  CMV1
+            JSR  SETVS
 CMV1        PULS A
             CMPA CROW
             BEQ  CMV2
@@ -1234,44 +1269,91 @@ DHD8        LDA  DRS
             ADDB #80-GX0
             JMP  TXSPC
 
-; DRAWGRID: the tracks' heads, and the rows shown.
+; DRAWGRID: the tracks' heads; the grid's layer scrolled to the rows shown,
+; and they drawn at once -- the others queued, drawn a few at a time as the
+; main loop goes round (RQSTEP).
 DRAWGRID    JSR  DRAWHEAD
+            BSR  SETVS
             LDA  TOPROW
             STA  DGR
             LDB  #GROWS
             STB  DGN
 DGR1        LDA  DGR
-            BSR  DRAWROW
+            ANDA #MAXROWS-1
+            JSR  DRAWROW
             INC  DGR
             DEC  DGN
             BNE  DGR1
+            LDA  DGR            ; the rest, from the next on
+            ANDA #MAXROWS-1
+            STA  RQR
+            LDA  #MAXROWS-GROWS
+            STA  RQN
             TST  PATOK          ; (a pattern not edited here: why)
             BNE  DGR9
-            LDA  #GX0
-            LDB  #GY0+1
-            JSR  TXAT
-            LDA  #C_MSG
-            STA  TXFG
             LDX  #S_NOPAT
             LDA  CURPAT
             CMPA NPAT
             BHS  DGR2
             LDX  #S_LONGPAT
-DGR2        JMP  TXSTR
+DGR2        JMP  MSG
 DGR9        RTS
+; RQSTEP: a few of the rows queued, drawn.
+RQSTEP      LDB  #4
+RQS1        TST  RQN
+            BEQ  RQS9
+            PSHS B
+            LDA  RQR
+            JSR  DRAWROW
+            LDA  RQR
+            INCA
+            ANDA #MAXROWS-1
+            STA  RQR
+            DEC  RQN
+            PULS B
+            DECB
+            BNE  RQS1
+RQS9        RTS
+; SETVS: the grid's layer scrolled for row TOPROW to be at the screen's row
+; GY0 (its 128 rows go round).
+SETVS       LDA  #VC_CFG/$10000
+            LDX  #LAYER0+L_VSCROLL
+            JSR  UIPORT
+            LDA  TOPROW
+            SUBA #GY0
+            ANDA #MAXROWS-1
+            LDB  #16
+            MUL
+            STA  VC_DATA0
+            STB  VC_DATA0
+            RTS
+; PHOLE: the screen's cells over the grid left clear (color 0: nothing), for
+; the grid's layer to be seen.
+PHOLE       LDB  #GY0
+PHO1        CLRA
+            JSR  TXAT
+            LDE  #80
+PHO2        LDA  #$20
+            STA  VC_DATA0
+            CLRA
+            STA  VC_DATA0
+            STA  VC_DATA0
+            STA  VC_DATA0
+            DECE
+            BNE  PHO2
+            INCB
+            CMPB #GY0+GROWS
+            BLO  PHO1
+            RTS
 
-; DRAWROW: row A of the pattern, if it is among those shown: its number, then
+; DRAWROW: row A of the pattern (0-127), in the grid's layer: its number, then
 ; a cell for each track shown; behind it, the color of the row playing or the
-; cursor's; the cursor's field lit.
-DRAWROW     STA  DRR
-            SUBA TOPROW
-            LBLO DRW9
-            CMPA #GROWS
-            LBHS DRW9
-            ADDA #GY0
+; cursor's; the cursor's field lit. (A row past the pattern's end: blank.)
+DRAWROW     JSR  TICKPOLL       ; (a tick due: first)
+            STA  DRR
             TFR  A,B
             CLRA
-            JSR  TXAT
+            JSR  GXAT
             CLRA
             LDB  DRR
             CMPB CROW
@@ -1473,7 +1555,7 @@ HEX1A       JMP  TXCH
 ; they enter (its number and name), the pattern (of how many), and whether
 ; the song is playing.
 PSTAT       LDA  #2
-            LDB  #25
+            LDB  #29
             JSR  TXAT
             CLR  TXBG
             LDA  #C_LABEL
@@ -1523,7 +1605,7 @@ PST1        JMP  TXSTR
 ; PLAYPOS: where the song is playing (PLORD, PLROW), shown when it moves on:
 ; the row lit, and the order.
 PLAYPOS     TST  PAGE
-            BNE  PPS9
+            LBNE PPS9
             LDD  #$FFFF         ; (nowhere, unless it's playing)
             TST  SONGON
             BEQ  PPS1
@@ -1534,7 +1616,29 @@ PPS1        CMPD PLORD
             LDX  PLORD          ; the old, the new
             STD  PLORD
             STX  PPOLD
-            LDA  PPOLD          ; the old row, if it's this order's
+            CMPA #$FF           ; following the song: its order, its row
+            BEQ  PPS1A
+            CMPA CURORD
+            BEQ  PPS1B
+            STA  CURORD         ; (another order: its pattern)
+            LDA  PLROW
+            STA  CROW
+            BSR  FOLTOP
+            JSR  PATLOAD
+            JSR  DRAWORDS
+            LDA  #4
+            JSR  DRAWSETF
+            JSR  DRAWGRID
+            JMP  DRAWSTAT
+PPS1B       LDA  CROW           ; the cursor on the row playing, in the middle
+            LDB  PLROW
+            STB  CROW
+            PSHS A
+            BSR  FOLTOP
+            JSR  SETVS
+            PULS A
+            JSR  DRAWROW
+PPS1A       LDA  PPOLD          ; the old row, if it's this order's
             CMPA CURORD
             BNE  PPS2
             LDA  PPOLD+1
@@ -1549,6 +1653,12 @@ PPS3        LDA  PLORD
             BEQ  PPS9
             JMP  DRAWORDS
 PPS9        RTS
+; FOLTOP: TOPROW for the cursor's row to be in the middle of those shown.
+FOLTOP      LDA  CROW
+            SUBA #GROWS/2-1
+            ANDA #MAXROWS-1
+            STA  TOPROW
+            RTS
 
 ;------------------------------------------------------------------------------
 ; The keys.
@@ -2194,6 +2304,7 @@ PMCLICK     LDB  MROW
             CMPB #GROWS
             BHS  PMC9
             ADDB TOPROW
+            ANDB #MAXROWS-1
             CMPB PROWS
             BHS  PMC9
             STB  PTMP           ; the row
@@ -2302,15 +2413,6 @@ PLABELS     FCB  2,1,C_LABEL
             FCB  0
             FCB  2,3,C_LABEL
             FCC  "Orders"
-            FCB  0
-            FCB  2,26,C_HELP
-            FCC  "Z-M Q-P: notes  1: off  0-9 A-Z: digits  Del: clear  Ins Sh+Del: row in, out"
-            FCB  0
-            FCB  2,27,C_HELP
-            FCC  "^Up ^Dn: order  + -: its pattern  ^N new  ^D copy  ^R again  ^X remove"
-            FCB  0
-            FCB  2,28,C_HELP
-            FCC  "^Left ^Right: instrument  Tab: instrument page  Space: play  Esc: quit"
             FCB  0
             FCB  $FF,$FF
 S_KINDS     FCB  0,0,0,0,0,0,0,0 ; (8 apart: a 2-op channel, the drums, 4-op)
