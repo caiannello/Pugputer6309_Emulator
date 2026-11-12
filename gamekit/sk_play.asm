@@ -18,6 +18,12 @@
 ;   SK_STOP    the song stopped: its notes let go, and fade as they would
 ;   SK_OFF     the chip silent and as it starts (OPL2 mode, timers stopped);
 ;              before a program ends, and before SK_POLL with no song
+;   SK_MUTE    (3 bytes; SK_START and SK_PSTART make them 0) a bit for each
+;              track (bit n of byte n/8 for track n) -- set: the song doesn't
+;              play it (its cells read all the same, the effects that steer
+;              the song still done: nothing of it to the chip). Notes played
+;              by hand on it still sound
+;   SK_TOFF    B: a track -> its key let go now (as a track is muted)
 ;
 ; For an editor, notes played by hand (with a song, or without one):
 ;
@@ -43,6 +49,10 @@
 ;   SK_PLAYING (a byte) not 0 while the song plays
 ;   SK_TICKS   (2 bytes) Timer 2's ticks since SK_START, playing or not
 ;   SK_RATE    (a byte) ticks a second, as the song has them now
+;   SK_PLOOP   (a byte) not 0: at its end (or a Bxx), the pattern playing is
+;              played again, from its start (or Dxx's row) -- not the next order
+;   SK_WRAP    (a byte) not 0: at the song's last order, with no loop, back to
+;              its first, not over
 ;
 ; The song's ticks come from Timer 2, at the song's rate (Fxx changes it). Each
 ; tick clears the timers' flags, so Timer 1's flag is no use to a program while
@@ -133,6 +143,9 @@ SKB4        STA  SK_SPEED
             LDA  #60
 SKB5        JSR  SKRATE
             CLR  SK_JFL
+            CLR  SK_MUTE
+            CLR  SK_MUTE+1
+            CLR  SK_MUTE+2
             CLR  SK_TICKN
             LDA  #1
             STA  SK_PLAYING
@@ -530,7 +543,7 @@ SKNX1       CLR  SK_BROW    ; its first row, or Dxx's
             LDA  SK_JROW
             STA  SK_BROW
 SKNX2       TFR  B,A
-            JSR  SKORDER
+            JSR  SKNORD
             TST  SK_PLAYING
             BEQ  SKNX9
             LDA  SK_BROW
@@ -554,16 +567,31 @@ SKNX6       INC  SK_ROW
             BLO  SKNX9
             LDA  SK_ORD
             INCA
-            JMP  SKORDER
+            JMP  SKNORD
 SKNX9       RTS
 
+; SKNORD: on to order A, the song's next -- or (an editor looping a pattern)
+; the one playing, again.
+SKNORD
+            IFDEF SK_EDITOR
+            TST  SK_PLOOP
+            BEQ  SKORDER
+            LDA  SK_ORD
+            ENDC
 ; SKORDER: A, an order: its pattern, from its first row. Past the last order,
-; the song goes back to its loop -- or, with none, it is over.
+; the song goes back to its loop -- or, with none, it is over (an editor's
+; SK_WRAP: back to the first).
 SKORDER     CMPA SK_HDR+11
             BLO  SKO1
             LDA  SK_HDR+12
             CMPA SK_HDR+11
-            LBHS SK_STOP
+            BLO  SKO1
+            IFDEF SK_EDITOR
+            CLRA
+            TST  SK_WRAP
+            BNE  SKO1
+            ENDC
+            JMP  SK_STOP
 SKO1        STA  SK_ORD
             CLR  SK_ROW
             CLR  SK_SKIP
@@ -927,7 +955,15 @@ SKOA1       PSHS B
             LDA  T_FL,U
             BITA #1
             BEQ  SKOA2
-            JSR  SKOUT
+            LDA  #SK_NTRK       ; (the track's number)
+            SUBA ,S
+            JSR  SKMUTED
+            BEQ  SKOA1A
+            LDA  T_FL,U         ; muted: no note to start, none down
+            ANDA #$3F
+            STA  T_FL,U
+            BRA  SKOA2
+SKOA1A      JSR  SKOUT
 SKOA2       LEAU SK_TSIZE,U
             PULS B
             DECB
@@ -1128,6 +1164,30 @@ SKRT1       CLRE            ; a drum: its bit in $BD off, the pitch, then on
             LDA  #$BD
             JMP  SKW
 
+; SKMUTED: track A muted? (Z clear if so.) Keeps U.
+SKMUTED     TFR  A,B
+            LSRB
+            LSRB
+            LSRB
+            ANDA #7
+            LDX  #SKBITS
+            LDA  A,X
+            LDX  #SK_MUTE
+            ANDA B,X
+            RTS
+; SK_TOFF: track B's key let go, now.
+SK_TOFF     CMPB #SK_NTRK
+            BHS  SKTO9
+            LDA  #SK_TSIZE
+            MUL
+            ADDD #SK_TRK
+            TFR  D,U
+            LDA  T_FL,U
+            BITA #1
+            BEQ  SKTO9
+            TST  T_INS,U
+            BNE  SKKOFF
+SKTO9       RTS
 ; SKKOFF: track U's key let go.
 SKKOFF      LDA  T_FL,U
             ANDA #$3F
@@ -1539,7 +1599,7 @@ SKFTAB      FDB  345,365,387,410,435,460,488,517,547,580,615,651,690
 SKSINE      FCB  0,12,25,37,49,60,71,81,90,98,106,112,117,122,125,126
             FCB  127,126,125,122,117,112,106,98,90,81,71,60,49,37,25,12
 SKOPOFF     FCB  $00,$01,$02,$08,$09,$0A,$10,$11,$12 ; a channel's first operator
-SKBITS      FCB  1,2,4,8,16,32
+SKBITS      FCB  1,2,4,8,16,32,64,128
 SKCAR4      FCB  $08,$0A,$09,$0D ; the 4-op algorithms' carriers
 SKSILENT    FCB  0,$3F,$FF,$0F,0 ; an operator not playing
 SKDRUMS     FCB  6,6,$10,$13,2,$10,0 ; track, channel, operators, how many,
@@ -1557,7 +1617,10 @@ SK_TICKS    RMB  2
 SK_RATE     RMB  1
 SK_IBASE    RMB  2          ; the editor's instruments (0: the song's)
 SK_INUM     RMB  1
+SK_MUTE     RMB  3          ; the tracks muted, a bit each
             IFDEF SK_EDITOR
+SK_PLOOP    RMB  1          ; the pattern playing played again at its end
+SK_WRAP     RMB  1          ; the song's end: back to its first order
 SK_IPG      RMB  1          ;   in this page (0: in memory)
 SK_IBK      RMB  1          ;   (its bank, and the page that was there)
 SK_IOLD     RMB  1

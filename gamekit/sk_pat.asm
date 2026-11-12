@@ -775,6 +775,7 @@ REPORD      LDA  CURPAT
             BCS  RPO9
             INC  CURORD
             JSR  PATLOAD
+            JSR  PLAYJMP
             JMP  NEWVIEW
 RPO9        RTS
 ; DELORD (^X): this order taken out (not its pattern) -- unless it's the only one.
@@ -818,6 +819,7 @@ DLO4        LDA  CURORD
 DLO5        JSR  RESYNC
             JSR  MARK
             JSR  PATLOAD
+            JSR  PLAYJMP
             LDA  #5
             JSR  DRAWSETF
             JMP  NEWVIEW
@@ -846,7 +848,7 @@ ADDPAT      LDA  NPAT
             ADCA #0
             STA  WOFS
             JSR  ROOM
-            BCS  APFULL
+            LBCS APFULL
             LDD  ITAB           ; its entry, after the table's others
             STD  SLAT+1
             CLR  SLAT
@@ -890,6 +892,7 @@ ADDPAT      LDA  NPAT
             JSR  INSORD
             INC  CURORD
             JSR  PATLOAD
+            JSR  PLAYJMP
             JMP  NEWVIEW
 APFULL      LDX  #S_NOROOM
             JMP  MSG
@@ -1245,6 +1248,10 @@ DHD1        LDA  LTRK
             LDX  #TLIST
             LDA  A,X
             PSHS A
+            JSR  ISMUTE         ; its box: [M], muted
+            LDB  #'M
+            JSR  CHKBOX
+            LDA  ,S
             LDB  #C_HEAD
             STB  TXFG
             JSR  TXDEC
@@ -1256,7 +1263,7 @@ DHD1        LDA  LTRK
             JSR  PSTR
             ADDB DRN
             NEGB
-            ADDB #GTW
+            ADDB #GTW-4
             JSR  TXSPC
             INC  DRS
             LDA  DRS
@@ -1560,7 +1567,7 @@ PSTAT       LDA  #2
             CLR  TXBG
             LDA  #C_LABEL
             STA  TXFG
-            LDX  #S_OCT
+            LDX  #S_POCT
             JSR  TXSTR
             LDA  #C_VALUE
             STA  TXFG
@@ -1590,17 +1597,173 @@ PSTAT       LDA  #2
             STA  TXFG
             LDA  CURPAT
             BSR  HEX2
-            LDX  #S_OF
-            JSR  TXSTR
+            LDA  #C_LABEL
+            STA  TXFG
+            LDA  #'/
+            JSR  TXCH
+            LDA  #C_VALUE
+            STA  TXFG
             LDA  NPAT
-            BSR  HEX2
+            JSR  HEX2
+            LDA  #$20           ; (column 44)
+            JSR  TXCH
+            LDA  RECORD
+            LDB  #'x
+            JSR  CHKBOX
+            LDX  #S_REC
+            JSR  TXSTR
+            LDA  #$20           ; (column 55)
+            JSR  TXCH
+            LDA  LOOPPAT
+            LDB  #'x
+            JSR  CHKBOX
+            LDX  #S_LOOP
+            JMP  TXSTR
+; CHKBOX: a box, "[x] ": checked (B the mark) if A isn't 0. (All kept.)
+CHKBOX      PSHS D
+            LDA  #C_LABEL
+            STA  TXFG
+            LDA  #'[
+            JSR  TXCH
+            LDA  #$20
+            TST  ,S
+            BEQ  CKB1
             LDA  #C_MSG
             STA  TXFG
-            LDX  #S_PLAYING
+            LDA  1,S
+CKB1        JSR  TXCH
+            LDA  #C_LABEL
+            STA  TXFG
+            LDA  #']
+            JSR  TXCH
+            LDA  #$20
+            JSR  TXCH
+            PULS D,PC
+; KREC (^E): Record on or off. KLOOP (^P): Loop pattern on or off.
+KREC        LDA  RECORD
+            EORA #1
+            STA  RECORD
+            CLR  RKEY
+            JMP  DRAWSTAT
+KLOOP       LDA  LOOPPAT
+            EORA #1
+            STA  LOOPPAT
+            STA  SK_PLOOP
+            JMP  DRAWSTAT
+; ISMUTE: track A muted? (A not 0 if so.)
+ISMUTE      TFR  A,B
+            LSRB
+            LSRB
+            LSRB
+            ANDA #7
+            LDX  #SKBITS
+            LDA  A,X
+            LDX  #MUTES
+            ANDA B,X
+            RTS
+; KMUTE (^M): the cursor's track muted, or not. TOGMUTE: track A's the same
+; (its note let go, if it's muted as the song plays).
+KMUTE       LDX  #TLIST
+            LDB  CTRK
+            LDA  B,X
+TOGMUTE     STA  MTRK
+            TFR  A,B
+            LSRB
+            LSRB
+            LSRB
+            ANDA #7
+            LDX  #SKBITS
+            LDA  A,X
+            LDX  #MUTES
+            EORA B,X
+            STA  B,X
+            LDD  MUTES          ; (the player's to know)
+            STD  SK_MUTE
+            LDA  MUTES+2
+            STA  SK_MUTE+2
             TST  SONGON
-            BNE  PST1
-            LDX  #S_STOPPED
-PST1        JMP  TXSTR
+            BEQ  TGM1
+            LDA  MTRK
+            BSR  ISMUTE
+            BEQ  TGM1
+            LDB  MTRK
+            JSR  SK_TOFF
+TGM1        JMP  DRAWHEAD
+; PLAYJMP: as the song plays, the order chosen played from its start (the
+; notes sounding let go).
+PLAYJMP     TST  SONGON
+            BEQ  PJ9
+            CLRB
+PJ1         PSHS B
+            JSR  SK_TOFF
+            PULS B
+            INCB
+            CMPB #SK_NTRK
+            BLO  PJ1
+            LDA  CURORD
+            JSR  SKORDER
+            CLR  SK_TICKN
+            CLR  SK_JFL
+PJ9         RTS
+; PRECUP: key A let go (kept): recording as the song plays, if it's the key
+; of the note put in last, its end put in -- in the row playing, or (let go
+; in the row it went in) the row after, if nothing's there.
+PRECUP      TST  PAGE
+            LBNE PRU9
+            TST  RECORD
+            LBEQ PRU9
+            TST  SONGON
+            LBEQ PRU9
+            TST  PATOK
+            BEQ  PRU9
+            TST  RKEY
+            BEQ  PRU9
+            CMPA RKEY
+            BNE  PRU9
+            PSHS A
+            CLR  RKEY
+            CLR  PNEXT
+            LDB  CROW           ; the row playing (the cursor's)
+            LDA  CURORD
+            CMPA RORD
+            BNE  PRU3
+            CMPB RROW
+            BNE  PRU3
+            INCB                ; (the row it went in: the next)
+            CMPB PROWS
+            BHS  PRU8
+            INC  PNEXT
+PRU3        STB  PTGT
+            LDA  CROW
+            STA  PSVROW
+            LDA  CTRK
+            STA  PSVTRK
+            STB  CROW
+            LDA  RTRK
+            STA  CTRK
+            JSR  CELLX
+            TST  PNEXT
+            BEQ  PRU4
+            TST  ,X             ; (a note there already: that ends it)
+            BNE  PRU7
+PRU4        LDA  #$7F
+            STA  ,X
+            CLR  1,X
+            JSR  EMAP
+            LDA  CROW
+            JSR  ROWSIZE
+            JSR  PATSAVE
+            INC  PNEXT          ; (drawn again, below)
+PRU7        LDA  PSVROW
+            STA  CROW
+            LDA  PSVTRK
+            STA  CTRK
+            TST  PNEXT
+            BEQ  PRU8
+            LDA  PTGT
+            JSR  DRAWROW
+PRU8        PULS A
+PRU9        RTS
 
 ; PLAYPOS: where the song is playing (PLORD, PLROW), shown when it moves on:
 ; the row lit, and the order.
@@ -1767,6 +1930,12 @@ PCTLTAB     FCB  K_LEFT         ; ^Left, ^Right: the instrument before, after
             FDB  SAVEAS
             FCB  $1A            ; ^W
             FDB  SAVEINS
+            FCB  $08            ; ^E: Record
+            FDB  KREC
+            FCB  $13            ; ^P: Loop pattern
+            FDB  KLOOP
+            FCB  $10            ; ^M: mute the track
+            FDB  KMUTE
             FCB  0
 
 ; The cursor: up, down, left, right; in the grid, or among the settings.
@@ -1868,6 +2037,7 @@ PORDDN      LDA  CURORD
             LBHS GDN9
             STA  CURORD
 PORD        JSR  PATLOAD
+            JSR  PLAYJMP
             JMP  NEWVIEW
 ; PPLUS, PMINUS: + and -: a setting changed; in the grid, the order's pattern.
 PPLUS       LDA  #1
@@ -1892,6 +2062,8 @@ PENTRY      TST  PATOK
             BNE  PEDIG
             CMPA #$1E           ; 1
             BNE  PENOTE
+            TST  RECORD         ; (Record off: nothing goes in)
+            LBEQ PEN9
             JSR  CELLX
             LDA  #$7F
             STA  ,X
@@ -1901,14 +2073,34 @@ PENOTE      JSR  PIANOKEY
             LBCS PEN9
             STA  PDKEY
             STB  PDNOTE
-            JSR  CELLX
+            TST  RECORD         ; Record off: only heard
+            LBEQ PAUDIT
+            TST  SONGON         ; as the song plays: once a key (not as it
+            BEQ  PENO2          ; repeats), its end to come as it's let go
+            LDX  #TLIST
+            LDB  CTRK
+            LDB  B,X
+            CMPB VTRK
+            BNE  PENO1
+            CMPA VKEY
+            LBEQ PEN9
+PENO1       STA  RKEY
+            LDA  CTRK
+            STA  RTRK
+            LDA  CROW
+            STA  RROW
+            LDA  CURORD
+            STA  RORD
+PENO2       JSR  CELLX
             LDA  PDNOTE
             STA  ,X
             LDA  CURI
             STA  1,X
             JSR  PAUDIT
             BRA  PEDONE
-PEDIG       JSR  KEYHEX
+PEDIG       TST  RECORD
+            LBEQ PEN9
+            JSR  KEYHEX
             LBCS PEN9
             LDB  CCOL
             CMPB #5
@@ -1965,6 +2157,8 @@ PEDONE      JSR  EMAP           ; packed into the song; the cursor down a row
             JSR  ROWSIZE
             JSR  PATSAVE
             LDA  CROW
+            TST  SONGON         ; (as the song plays, the cursor is the song's)
+            BNE  PED1
             INCA
             CMPA PROWS
             BLO  PED1
@@ -1977,6 +2171,8 @@ CELHI       FCB  0,1,0,1,0,0,1,0 ;   and whether it's the high digit
 ; the instrument, the volume, the effect and its parameter).
 PDEL        TST  AREA
             BNE  PEN9
+            TST  RECORD
+            BEQ  PEN9
             TST  PATOK
             BEQ  PEN9
             JSR  CELLX
@@ -2050,6 +2246,8 @@ PINSALL     LDA  #1
 ROWINS      STA  PALL
             TST  PATOK
             BEQ  RWI9
+            TST  RECORD         ; (Record off: no changes)
+            BEQ  RWI9
             JSR  EMAP
             BSR  TRKOFS
             STB  PKN
@@ -2074,6 +2272,8 @@ RWI2        LDA  CROW
 PDELALL     LDA  #1
 ROWDEL      STA  PALL
             TST  PATOK
+            BEQ  RWI9
+            TST  RECORD         ; (Record off: no changes)
             BEQ  RWI9
             JSR  EMAP
             BSR  TRKOFS
@@ -2296,28 +2496,32 @@ PMS6        CMPB #GY0
             JMP  GDOWN
 PMS9        RTS
 PMCLICK     LDB  MROW
+            CMPB #29
+            LBEQ PMSTAT
             CMPB #3
             BEQ  PMORD
-            BLO  PMSET
+            LBLO PMSET
+            CMPB #GY0-1
+            LBEQ PMHEAD
             SUBB #GY0
-            BLO  PMC9
+            LBLO PMC9
             CMPB #GROWS
-            BHS  PMC9
+            LBHS PMC9
             ADDB TOPROW
             ANDB #MAXROWS-1
             CMPB PROWS
-            BHS  PMC9
+            LBHS PMC9
             STB  PTMP           ; the row
             LDB  MCOL
             SUBB #GX0
-            BLO  PMC9
+            LBLO PMC9
             CLRA
             DIVD #GTW           ; B the track shown, A where in its cell
             CMPB #GTRKS
-            BHS  PMC9
+            LBHS PMC9
             ADDB LTRK
             CMPB NTL
-            BHS  PMC9
+            LBHS PMC9
             STB  CTRK
             LDX  #COLFLD
             LDA  A,X
@@ -2342,6 +2546,31 @@ PMORD       LDB  MCOL
             BHS  PMC9
             STB  CURORD
             JMP  PORD
+PMSTAT      TST  MSGUP          ; the status line's boxes (not a message)
+            BNE  PMC9
+            LDB  MCOL
+            CMPB #44
+            BLO  PMC9
+            CMPB #54
+            LBLO KREC
+            CMPB #55
+            BLO  PMC9
+            CMPB #71
+            LBLO KLOOP
+            RTS
+PMHEAD      LDB  MCOL           ; a track's head: muted, or not
+            SUBB #GX0
+            BLO  PMC9
+            CLRA
+            DIVD #GTW
+            CMPB #GTRKS
+            BHS  PMC9
+            ADDB LTRK
+            CMPB NTL
+            BHS  PMC9
+            LDX  #TLIST
+            LDA  B,X
+            JMP  TOGMUTE
 PMSET       BSR  SFHIT
             BCS  PMC9
             JSR  PICKSET
@@ -2430,9 +2659,15 @@ S_KINDS     FCB  0,0,0,0,0,0,0,0 ; (8 apart: a 2-op channel, the drums, 4-op)
             FCB  0,0,0
 S_NONE      FCC  "none"
             FCB  0
-S_INSTR     FCC  "   Instrument "
+S_POCT      FCC  "Oct "
             FCB  0
-S_PATT      FCC  "Pattern "
+S_INSTR     FCC  "  Inst "
+            FCB  0
+S_PATT      FCC  "Pat "
+            FCB  0
+S_REC       FCC  "Record"
+            FCB  0
+S_LOOP      FCC  "Loop pattern"
             FCB  0
 S_NOPAT     FCC  "There's no such pattern: + - pick one."
             FCB  0

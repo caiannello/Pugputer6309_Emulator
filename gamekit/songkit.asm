@@ -42,6 +42,15 @@ START       LDS  #KIT_STACK
             CLR  SETF
             CLR  RQN
             CLR  MSGUP
+            CLR  RECORD         ; Record off; the song's end back to its start in
+            LDA  #1             ; the editor; no pattern looped, no track muted
+            STA  SK_WRAP
+            CLR  LOOPPAT
+            CLR  SK_PLOOP
+            CLR  RKEY
+            CLR  MUTES
+            CLR  MUTES+1
+            CLR  MUTES+2
             CLR  SONGON
             CLR  PLAYON
             LDA  #4
@@ -192,7 +201,8 @@ KDHELP      TSTB                ; the help: a key closes it (one let go: a note'
             JMP  DRAWPAGE
 KD1         TSTB                ; a key let go: a note's end
             BPL  KD1B
-KD1A        JMP  PIANOUP
+KD1A        JSR  PRECUP         ; (recording: the note's end put in)
+            JMP  PIANOUP
 KD1B        TST  MSGUP          ; (a message: the status back, from the next key)
             BEQ  KD1C
             PSHS D
@@ -348,6 +358,10 @@ KSONG1      JSR  CLRVOICES
             LDB  #WBANK
             JSR  SK_PSTART
             BCS  KSONG9
+            LDD  MUTES          ; (the tracks muted, the player's to know)
+            STD  SK_MUTE
+            LDA  MUTES+2
+            STA  SK_MUTE+2
             JSR  USEINST
             LDA  CURORD         ; from the order being edited
             BEQ  KSONG2
@@ -618,19 +632,19 @@ HELPTXT
             FCC  "A song plays its orders in turn, each one a pattern of up to 128 rows; a row"
             FCB  0
             FCB  2,3,C_LABEL
-            FCC  "has a cell for each track: note, instrument, volume, effect. With the cursor"
+            FCC  "has a cell for each track: note, instrument, volume, effect. The keyboard's"
             FCB  0
             FCB  2,4,C_LABEL
-            FCC  "on a note, the keyboard's letters are a piano: the note goes in, heard as it"
+            FCC  "letters are a piano. With Record on, a note goes in at the cursor, which"
             FCB  0
             FCB  2,5,C_LABEL
-            FCC  "does, and the cursor moves down a row. As the song plays the cursor follows"
+            FCC  "moves down; as the song plays, the cursor follows it, a note goes in the row"
             FCB  0
             FCB  2,6,C_LABEL
-            FCC  "it, and a note typed goes in the row playing. The instrument page has all of"
+            FCC  "playing, and letting its key go puts in its end. With Record off, the keys"
             FCB  0
             FCB  2,7,C_LABEL
-            FCC  "an instrument's settings, heard as they change."
+            FCC  "just play."
             FCB  0
             FCB  2,9,C_HEAD
             FCC  "Both pages"
@@ -815,8 +829,26 @@ HELPTXT
             FCB  54,23,C_LABEL
             FCC  "on title, author: retype"
             FCB  0
+            FCB  42,24,C_VALUE
+            FCC  "^E"
+            FCB  0
+            FCB  54,24,C_LABEL
+            FCC  "Record on, off"
+            FCB  0
+            FCB  42,25,C_VALUE
+            FCC  "^P"
+            FCB  0
+            FCB  54,25,C_LABEL
+            FCC  "Loop pattern on, off"
+            FCB  0
+            FCB  42,26,C_VALUE
+            FCC  "^M"
+            FCB  0
+            FCB  54,26,C_LABEL
+            FCC  "the track muted, or not"
+            FCB  0
             FCB  2,28,C_LABEL
-            FCC  "The mouse: a click picks a field; the wheel over one changes it."
+            FCC  "Mouse: a click picks a field or ticks a box (a track's head: muted)."
             FCB  0
             FCB  2,29,C_MSG
             FCC  "Any key: back to the page"
@@ -833,6 +865,18 @@ HELPTXT
 ;------------------------------------------------------------------------------
 MODE        RMB  1          ; 0 editing; 1 a line being typed; 2 a question; 3 the help
 MSGUP       RMB  1          ; a message on the bottom row (the status back at the next key)
+RECORD      RMB  1          ; Record: notes (and the rest) go in; 0, the keys only play
+LOOPPAT     RMB  1          ; Loop pattern: the order playing played again
+MUTES       RMB  3          ; the tracks muted, a bit each (as SK_MUTE)
+MTRK        RMB  1          ; (TOGMUTE's track)
+RKEY        RMB  1          ; recording as the song plays: the key of the note put
+RTRK        RMB  1          ;   in last (0: none), its track (shown), row and order
+RROW        RMB  1
+RORD        RMB  1
+PNEXT       RMB  1          ; (PRECUP's: the note's end in the row after)
+PTGT        RMB  1
+PSVROW      RMB  1
+PSVTRK      RMB  1
 PAGE        RMB  1          ; the page shown: 0 the patterns', 1 the instruments'
 PBPG        RMB  1          ; the pattern buffer's page, the names', the
 NMPG        RMB  1          ; instruments'

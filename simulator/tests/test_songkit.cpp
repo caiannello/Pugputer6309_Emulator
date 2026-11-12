@@ -649,11 +649,11 @@ TEST(songkit_editor_starts_with_a_new_song) {
     CHECK(e.row(0).find("SONGKIT") != std::string::npos && e.row(0).find("(a new song)") != std::string::npos);
     CHECK(e.row(2).find("Speed 6   Rate 60   Rows 64   Loop 00    Rhythm no") != std::string::npos);
     CHECK(e.row(3).find("Orders >00 ") != std::string::npos);
-    CHECK(e.row(4).substr(5, 57) == "0             1             2             3             4");
+    CHECK(e.row(4).substr(5, 61) == "[ ] 0         [ ] 1         [ ] 2         [ ] 3         [ ] 4");
     CHECK(e.row(5).substr(2, 17) == "00 ... .. .. ... " && e.row(28).substr(2, 2) == "17");
     CHECK(e.row(29).find("F1: help") != std::string::npos);
-    CHECK(e.row(29).find("Octave 4   Instrument 01 Piano") != std::string::npos);
-    CHECK(e.row(29).find("Pattern 00 of 01") != std::string::npos);
+    CHECK(e.row(29).find("Oct 4  Inst 01 Piano") != std::string::npos);
+    CHECK(e.row(29).find("Pat 00/01") != std::string::npos);
     CHECK(e.lit(5) == 5); // (the cursor: the first track's note)
     // F1: the help, over the page (the grid hidden); any key, Esc too, back to the page.
     e.key(0x3A);
@@ -668,7 +668,7 @@ TEST(songkit_editor_starts_with_a_new_song) {
     e.key(0x2A); // Backspace
     CHECK(e.row(29).find("All notes off") != std::string::npos);
     e.key(0x2F); // [
-    CHECK(e.row(29).find("Octave 3") != std::string::npos && e.row(29).find("F1: help") != std::string::npos);
+    CHECK(e.row(29).find("Oct 3") != std::string::npos && e.row(29).find("F1: help") != std::string::npos);
     e.key(0x30); // ]
     e.key(0x2B); // Tab
     CHECK(e.row(2).find("Instrument 1 of 1") != std::string::npos && e.row(2).find("Piano") != std::string::npos);
@@ -770,9 +770,9 @@ TEST(songkit_editor_edits_and_plays_an_instrument) {
     e.text("Bell 2");
     e.key(kEnter);
     CHECK(e.row(2).find("Name  BELL 2") != std::string::npos || e.row(2).find("Name  bell 2") != std::string::npos);
-    // The wheel over the first operator's level: one up. (Turned at once, while the name may
-    // still be being typed: the click is kept for after.)
+    // The wheel over the first operator's level: one up.
     e.v.mouse_to(17 * 8 + 4, 13 * 16 + 8, 0);
+    e.frames(2); // (the pointer there first, as a hand would have it)
     e.v.mouse_wheel(1);
     e.frames(4);
     CHECK(e.lit(13) == 17 && e.row(13).substr(17, 2) == "27" && (ib(2, 4) & 0x3F) == 27);
@@ -902,6 +902,10 @@ TEST(songkit_editor_edits_patterns) {
     auto be24 = [](const std::vector<uint8_t>& f, size_t at) { return f[at] << 16 | f[at + 1] << 8 | f[at + 2]; };
     constexpr uint8_t kTab = 0x2B, kSpace = 0x2C, kIns = 0x49, kDel = 0x4C, kHome = 0x4A;
     CHECK(e.start());
+    // Record off to start with: ^E (E) on.
+    CHECK(e.row(29).find("[ ] Record") != std::string::npos);
+    e.key(0x08, true);
+    CHECK(e.row(29).find("[x] Record") != std::string::npos);
     // Z: C-4 with instrument 1, heard (track 0: channel 0), on down a row; 1: the key let go.
     size_t mark = e.log.size();
     e.key(kZ, false, false, true);
@@ -935,15 +939,15 @@ TEST(songkit_editor_edits_patterns) {
     CHECK(end <= f.size() && V(f.begin() + static_cast<long>(at), f.begin() + static_cast<long>(end)) == packed);
     // ^N: a new pattern (01), played by a new order after this one, and shown; ^Up: back.
     e.key(0x11, true);
-    CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(29).find("Pattern 01 of 02") != std::string::npos);
+    CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(29).find("Pat 01/02") != std::string::npos);
     CHECK(e.row(5).substr(5, 13) == "... .. .. ...");
     e.key(kUp, true);
-    CHECK(e.row(29).find("Pattern 00 of 02") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
+    CHECK(e.row(29).find("Pat 00/02") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
     // ^R: this order again; ^X: out again; + and -: the order's pattern.
     e.key(0x15, true);
     CHECK(e.row(3).find(">00 00 01 ") != std::string::npos);
     e.key(0x1B, true);
-    CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(29).find("Pattern 01 of 02") != std::string::npos);
+    CHECK(e.row(3).find(">00 01 ") != std::string::npos && e.row(29).find("Pat 01/02") != std::string::npos);
     e.key(kMinus);
     CHECK(e.row(3).find(">00 00 ") != std::string::npos && e.row(5).substr(5, 3) == "C-4");
     e.key(kPlus);
@@ -963,7 +967,7 @@ TEST(songkit_editor_edits_patterns) {
     CHECK(e.row(2).find("Rhythm yes") != std::string::npos);
     e.key(kRight);
     e.key(kPlus);
-    CHECK(e.row(4).substr(5, 6) == "0 4-op" && e.row(4).substr(47, 2) == "4 ");
+    CHECK(e.row(4).substr(5, 10) == "[ ] 0 4-op" && e.row(4).substr(51, 2) == "4 ");
     CHECK(e.opl3.reg(0x104) == 0x01 && (e.opl3.reg(0xBD) & 0x20) != 0);
     // Down to the grid, row 8 of track 1 (from the effect column, where the cursor was);
     // Space plays the song, and E-4 put in there is heard when the song gets there (the song
@@ -1021,6 +1025,7 @@ TEST(songkit_editor_edits_a_song_across_pages) {
     auto be24 = [](const std::vector<uint8_t>& f, size_t at) { return f[at] << 16 | f[at + 1] << 8 | f[at + 2]; };
     CHECK(e.start("tune"));
     e.frames(40);
+    e.key(0x08, true); // ^E: Record on
     // Pattern 0: D-4 at row 1 (X), a volume at row 2.
     e.key(kDown);
     e.key(kX);
@@ -1029,7 +1034,7 @@ TEST(songkit_editor_edits_a_song_across_pages) {
     p0.put(1, 0, {N("D-4"), 1}).put(2, 0, {0, 0, 0x21});
     // Pattern 1 (the next order): A-4 at row 3, and what was at row 0 cleared.
     e.key(kDown, true);
-    CHECK(e.row(29).find("Pattern 01 of 02") != std::string::npos && e.row(5).substr(5, 6) == "G-4 01");
+    CHECK(e.row(29).find("Pat 01/02") != std::string::npos && e.row(5).substr(5, 6) == "G-4 01");
     for (int i = 0; i < 3; ++i) e.key(kLeft);
     e.key(0x4A); // Home
     e.key(0x4C); // Delete
@@ -1092,7 +1097,7 @@ TEST(songkit_editor_follows_the_song) {
     e.frames(150);
     row = var("PLROW");
     CHECK(var("PLORD") == 1 && var("CURORD") == 1 && var("CROW") == row);
-    CHECK(e.row(29).find("Pattern 01 of 02") != std::string::npos);
+    CHECK(e.row(29).find("Pat 01/02") != std::string::npos);
     CHECK(e.row(5 + 11).substr(2, 2) == hex2(row));
     CHECK(e.row(5 + 11 - (row % 4)).substr(19, 3) == "G-4");
     // The help, as it plays: the song goes on under it, and is followed again after.
@@ -1117,4 +1122,116 @@ TEST(songkit_editor_follows_the_song) {
     CHECK(on.size() >= 8 && worst < 1.0 / 60);
     if (std::getenv("SONGKIT_SHOW")) e.show();
     e.key(0x2C);
+}
+
+// Playing in the editor: the song (with no loop) goes back to its start rather than ending;
+// Loop pattern (^P) plays the order playing again and again; another order chosen as it plays
+// is played from its start; a track muted (^M, or a click on its head) isn't heard; Record
+// (^E) off, the keys only play; on, as the song plays, a note goes in the row playing, and
+// letting its key go puts its end in.
+TEST(songkit_editor_loops_records_and_mutes) {
+    Song song;
+    song.ins = {kPiano};
+    song.orders = {0, 1};
+    song.speed = 3; // (20 rows a second: each 16-row pattern 0.8 s)
+    Pattern p0, p1;
+    p0.rows = 16;
+    p1.rows = 16;
+    for (int r = 0; r < 16; r += 4) {
+        p0.put(r, 0, {N("C-4"), 1});
+        p1.put(r, 1, {N("G-4"), 1});
+    }
+    song.pats = {p0, p1};
+    Editor e({disk_file("TUNE.SNG", song.bytes())});
+    if (!e.ok) return;
+    CHECK(e.start("tune"));
+    e.frames(40);
+    auto var = [&](const char* n) { return e.s.bus.read_cpu(kit_sym(n)); };
+    auto cell = [&](int row, int trk) {
+        size_t page = var("PBPG");
+        return e.s.bus.phys_ram() + page * 16384 + row * 100 + trk * 5;
+    };
+    auto keyed = [&](size_t from, uint16_t reg) {
+        int n = 0;
+        for (size_t i = from; i < e.log.size(); ++i) n += e.log[i].reg == reg && (e.log[i].value & 0x20);
+        return n;
+    };
+    constexpr uint8_t kSpace = 0x2C, kCtlE = 0x08, kCtlP = 0x13, kCtlM = 0x10, kDel = 0x4C, kHome = 0x4A;
+    e.key(kHome); // (the message that the song was opened gone: the status line)
+    CHECK(e.row(29).find("[ ] Record") != std::string::npos && e.row(29).find("[ ] Loop pattern") != std::string::npos);
+    // The song has no loop; in the editor it goes back to its start (2 s on: order 0 again).
+    e.key(kSpace);
+    e.frames(120);
+    CHECK(var("SK_PLAYING") == 1 && var("SONGON") == 1 && var("SK_ORD") == 0);
+    // ^P: order 0 again and again; ^P again: on to order 1.
+    e.key(kCtlP, true);
+    CHECK(e.row(29).find("[x] Loop pattern") != std::string::npos);
+    bool stayed = true;
+    for (int i = 0; i < 12; ++i) {
+        e.frames(6);
+        stayed = stayed && var("SK_ORD") == 0;
+    }
+    CHECK(stayed);
+    e.key(kCtlP, true);
+    bool on = false;
+    for (int i = 0; i < 60 && !on; ++i) {
+        e.frames(2);
+        on = var("SK_ORD") == 1;
+    }
+    CHECK(on && var("CURORD") == 1);
+    // ^Up as it plays: order 0, from its start.
+    e.key(kUp, true);
+    CHECK(var("SK_ORD") == 0 && var("SK_ROW") <= 3 && var("CURORD") == 0);
+    // ^M: track 0 muted (its head says so): none of its notes keyed on as order 0 plays
+    // round (Loop pattern), until it's heard again.
+    e.key(kCtlP, true);
+    e.key(kCtlM, true);
+    CHECK(e.row(4).substr(5, 5) == "[M] 0");
+    size_t mark = e.log.size();
+    e.frames(60);
+    CHECK(keyed(mark, 0xB0) == 0);
+    e.key(kCtlM, true);
+    CHECK(e.row(4).substr(5, 5) == "[ ] 0");
+    mark = e.log.size();
+    e.frames(60);
+    CHECK(keyed(mark, 0xB0) >= 3);
+    // A click on track 1's head mutes it.
+    e.v.mouse_to(21 * 8 + 4, 4 * 16 + 8, 0);
+    e.frames();
+    e.v.mouse_to(21 * 8 + 4, 4 * 16 + 8, 1);
+    e.frames();
+    e.v.mouse_to(21 * 8 + 4, 4 * 16 + 8, 0);
+    e.frames();
+    CHECK(e.row(4).substr(19, 5) == "[M] 1");
+    // Stopped, Record off (as a song opened starts): a note is heard but doesn't go in, the
+    // cursor stays; Delete clears nothing.
+    e.key(kSpace);
+    e.key(kHome);
+    CHECK(e.row(29).find("[ ] Record") != std::string::npos);
+    e.key(kDown);
+    mark = e.log.size();
+    e.key(kZ);
+    CHECK(var("CROW") == 1 && cell(1, 0)[0] == 0 && keyed(mark, 0xB0) == 1);
+    e.key(kUp);
+    e.key(kDel);
+    CHECK(cell(0, 0)[0] == N("C-4") && var("CROW") == 0);
+    // ^E: Record on. On track 2, as order 0 plays round: Z held goes in the row playing;
+    // let go a few rows on, its end goes in there.
+    e.key(kCtlE, true);
+    for (int i = 0; i < 16; ++i) e.key(kRight);
+    CHECK(var("CTRK") == 2 && var("CCOL") == 0);
+    e.key(kSpace);
+    e.frames(20);
+    e.key(kZ, false, false, true);
+    int r0 = var("RROW");
+    CHECK(var("RKEY") == kZ && cell(r0, 2)[0] == N("C-4") && cell(r0, 2)[1] == 1);
+    e.frames(15);
+    e.up(kZ);
+    int r1 = -1;
+    for (int r = 0; r < 16; ++r)
+        if (cell(r, 2)[0] == OFF) r1 = r;
+    std::printf("  the note in at row %d, its end at row %d\n", r0, r1);
+    CHECK(var("RKEY") == 0 && r1 > r0 && r1 <= r0 + 8);
+    e.key(kSpace);
+    if (std::getenv("SONGKIT_SHOW")) e.show();
 }

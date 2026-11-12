@@ -1,6 +1,12 @@
 # The game kit
 
+### TILEKIT
+
 ![Fun with TILEKIT](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
+
+### SONGKIT
+
+![Fun with SONGKIT](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/songkit.png?raw=true)
 
 Tools for making a game's graphics and music on the Pugputer itself, on the
 video card's screen and with the card's mouse and keyboard. In the emulator those are the video
@@ -376,8 +382,26 @@ C-4 01 30 A0F       note, instrument, volume, effect and its parameter (all in h
 The cursor is on a field of a cell (lit); typing there puts in a note, or a digit, and moves
 down a row. The row being played is shown in green as the song plays, and the cursor
 follows it: it is kept in the middle of the rows shown, the grid moving on under it and on to
-each order's pattern as the song gets there -- so a note typed as the song plays goes in the
-row playing.
+each order's pattern as the song gets there.
+
+The status line has two boxes to tick (with the keys, or a click):
+
+- **Record** (Ctrl+E; off to start with, and as a song is opened): notes and digits go in where the cursor is. As the
+  song plays, a note goes in the row playing -- once, however long its key is held -- and
+  letting the key go puts in its end (`===`) in the row playing then (let go in the row it
+  went in: in the row after, unless a note is there). Off, the piano's keys only play, on the
+  cursor's track with the instrument being used, and nothing in the grid can be changed.
+- **Loop pattern** (Ctrl+P): the order playing is played again and again, not the next; ticked
+  off as it plays, the song goes on from there.
+
+Each track's head has a box too: ticked (`[M]`, with Ctrl+M on the cursor's track, or a
+click on the head), the track is muted -- the song goes on without it (its notes still read:
+a speed change or a jump in it still done), and the piano's keys can still play on it.
+
+Space plays the song from the start of the order being edited; another order chosen as it
+plays (Ctrl+Up, Ctrl+Down, a click, a new or repeated order) is played from its start. A song
+with no loop, played in the editor, goes back to its first order at its end, rather than
+stopping.
 
 | Keys | |
 |---|---|
@@ -396,12 +420,15 @@ row playing.
 | Ctrl+Left, Ctrl+Right | the instrument notes go in with: before, after |
 | `[` `]` | the octave down, up |
 | Enter | on the title, the author: type it again |
+| Ctrl+E | Record on, off |
+| Ctrl+P | Loop pattern on, off |
+| Ctrl+M | the cursor's track muted, or not |
 | Tab | the instrument page |
 | F1 | the help |
 | Space, Backspace, Esc, Ctrl+O, S, A, W | as on the instrument page |
 
-A click picks a cell, an order, or a setting (the title or the author: typed again); the
-wheel over a setting changes it, over the grid moves the cursor. Rhythm mode and the 4-op
+A click picks a cell, an order, or a setting (the title or the author: typed again), or ticks
+a box (Record, Loop pattern, a track's head: muted); the wheel over a setting changes it, over the grid moves the cursor. Rhythm mode and the 4-op
 pairs change the song's tracks: the song stops first. SONGKIT edits patterns of up to 128
 rows (a longer one, from elsewhere, is played and kept as it is).
 
@@ -591,6 +618,8 @@ of its own:
 | `SK_TICK` | one tick, for a game that keeps the time itself |
 | `SK_STOP` | the song stopped, its notes let go |
 | `SK_OFF` | the chip silent and as it starts: before the game ends, and before `SK_POLL` with no song |
+| `SK_MUTE` | (3 bytes; `SK_START` and `SK_PSTART` make them 0) a bit for each track -- bit n of byte n/8 for track n: set, the song doesn't play that track (its cells are still read, so a speed change or a jump in it is still done, but nothing of it goes to the chip) |
+| `SK_TOFF` | B: a track: its key let go now (as it is muted) |
 | `SK_PLAYING` | (a byte) not 0 while the song plays |
 | `SK_TICKS`, `SK_RATE` | Timer 2's ticks so far (2 bytes), and the song's ticks a second |
 
@@ -612,6 +641,8 @@ And with `SK_EDITOR` defined before the `INCLUDE` (an editor's: a game doesn't c
 |---|---|
 | `SK_RESYNC` | the song changed in its memory while it plays (patterns or orders edited, the bytes after them moved along): its header read again, and its place found again -- the same order, the same row |
 | `SK_IPG` | (a byte) not 0: `SK_IBASE` is in this RAM page, seen in the bank `SK_IBASE`'s address is in while an instrument is read, that bank's own page put back after (SONGKIT keeps its instruments in a page of their own) |
+| `SK_PLOOP` | (a byte) not 0: at the end of the pattern playing (or at a `Bxx`), it is played again from its start (or `Dxx`'s row), not the next order |
+| `SK_WRAP` | (a byte) not 0: past the last order, with no loop, back to the first rather than over |
 
 ### SONGKIT's next steps
 

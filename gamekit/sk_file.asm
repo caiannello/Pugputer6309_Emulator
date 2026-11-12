@@ -320,6 +320,10 @@ PARSE       BSR  PARSE0
             CLR  OTOP
             LDD  #$FFFF
             STD  PLORD
+            CLR  RECORD         ; Record off, no track muted
+            CLR  MUTES
+            CLR  MUTES+1
+            CLR  MUTES+2
             JSR  MKTLIST
             JMP  PATLOAD
 PARSE0      JSR  MAP0
