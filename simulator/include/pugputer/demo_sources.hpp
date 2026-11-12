@@ -62,6 +62,7 @@ inline constexpr DemoSource kDemoSources[] = {
     {"gamekit/sk_ui.asm", "ASM/GAMEKIT/SK_UI.ASM"},
     {"gamekit/sk_help.asm", "ASM/GAMEKIT/SK_HELP.ASM"},
     {"gamekit/sk_block.asm", "ASM/GAMEKIT/SK_BLOCK.ASM"},
+    {"gamekit/sk_bank.asm", "ASM/GAMEKIT/SK_BANK.ASM"},
     {"gamekit/sk_inst.asm", "ASM/GAMEKIT/SK_INST.ASM"},
     {"gamekit/sk_file.asm", "ASM/GAMEKIT/SK_FILE.ASM"},
     {"gamekit/sk_pat.asm", "ASM/GAMEKIT/SK_PAT.ASM"},
@@ -69,6 +70,15 @@ inline constexpr DemoSource kDemoSources[] = {
     {"bios/defines.d", "ASM/GAMEKIT/DEFINES.D"},
     {"vidcard/vidcard.d", "ASM/GAMEKIT/VIDCARD.D"},
     {"gamekit/README.md", "ASM/GAMEKIT/README.TXT"},
+};
+
+// SONGKIT's instrument banks, on every disk (as the programs in /CMD are): /BANKS, the
+// folder its bank page looks in first -- The Fat Man's General MIDI banks (MIT; their
+// notice in README.TXT beside them, and in NOTICE.md).
+inline constexpr DemoSource kToolFiles[] = {
+    {"gamekit/banks/README.TXT", "BANKS/README.TXT"},
+    {"gamekit/banks/FATMAN2.WOP", "BANKS/FATMAN2.WOP"},
+    {"gamekit/banks/FATMAN4.WOP", "BANKS/FATMAN4.WOP"},
 };
 
 // The demo programs in /DEMO: raw images (demo/compile.bat or .sh assembles them from

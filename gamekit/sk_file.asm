@@ -8,9 +8,12 @@
 ; own (INPG, NMPG), to edit. Saving writes the file again with the
 ; instruments as they are now (their names after the patterns, where the
 ; header's bytes 13-15 say), the patterns moved along as the instruments
-; before them grow or shrink.
+; before them grow or shrink; and after the names, if any instrument came from
+; a bank, "PSS1" and each one's source (16 bytes: SRCAT), which a player never
+; reads.
 ;
-; An instrument's own file (.INS): "PSI1", its 32 bytes, its name (16).
+; An instrument's own file (.INS): "PSI1", its 32 bytes, its name (16), and
+; where it came from (16), if it came from a bank.
 ;
 ;   NEWSONG    a new song: one empty pattern, one instrument
 ;   OPEN       ^O: a song, or an instrument (.INS) into the one being edited
@@ -19,6 +22,7 @@
 ;   FREEPG     the song's pages given back, bank 1 its own again
 ;------------------------------------------------------------------------------
 INSLEN      equ  52         ; an .INS file
+INSLEN2     equ  68         ;   with the instrument's source
 
 ; NEWSONG: carry set if there's no page for it.
 NEWSONG     JSR  FREEPG
@@ -143,7 +147,7 @@ LOADINS     LDX  #FNAME
             STA  FH
             LDB  FH
             LDX  #IOBUF
-            LDY  #INSLEN
+            LDY  #INSLEN2
             LDA  #B_FREAD
             SWI2
             PSHS CC,A,X
@@ -155,9 +159,12 @@ LOADINS     LDX  #FNAME
             CMPA #ERR_EOF
             LBNE FERR
             LDX  #0
-LI1         CMPX #INSLEN
+LI1         STX  SPLEN          ; (how long it is)
+            CMPX #INSLEN
+            BEQ  LI1A
+            CMPX #INSLEN2
             BNE  LI2
-            LDD  IOBUF
+LI1A        LDD  IOBUF
             CMPD #$5053         ; "PSI1"
             BNE  LI2
             LDD  IOBUF+2
@@ -172,6 +179,15 @@ LI1         CMPX #INSLEN
             TFM  X+,Y+
             CLR  ,Y
             JSR  PUTNAME
+            LDX  #IOBUF+INSLEN  ; where it came from, after them (or nowhere)
+            LDD  SPLEN
+            CMPD #INSLEN2
+            BEQ  LI1B
+            LDX  #NOSRC
+LI1B        LDY  #CURSRC
+            LDW  #16
+            TFM  X+,Y+
+            JSR  PUTSRC
             LDA  #1
             STA  CHANGED
             JSR  JAMREF
@@ -319,11 +335,14 @@ PA1         LDD  NAMEOFS
             STD  DEND
             LDA  NAMEOFS+2
             STA  DEND+2
-PA2         JSR  NMAP           ; no names yet
+PA2         JSR  NMAP           ; no names yet, no sources
             LDX  #WINDOW
             LDW  #MAXINST*16
             CLR  PTMP
             LDY  #PTMP
+            TFM  Y,X+
+            LDX  #WINDOW+SRCOFS
+            LDW  #MAXINST*16
             TFM  Y,X+
             JSR  MAP0
             LDA  OLDNI          ; the instruments
@@ -350,14 +369,14 @@ PA4         LDA  OLDNI          ; from the song's first page to theirs
             LDD  NAMEOFS        ; their names, if it has them
             BNE  PA5
             TST  NAMEOFS+2
-            BEQ  PA9
+            LBEQ PA9
 PA5         LDA  NAMEOFS
             LDX  NAMEOFS+1
             JSR  RSEEK
             CLR  PNI
 PA6         LDA  PNI            ; each, by way of NAMETMP
             CMPA OLDNI
-            BHS  PA9
+            BHS  PASRC
             LDY  #NAMETMP
             LDB  #16
 PA7         JSR  RGETB
@@ -377,6 +396,50 @@ PA7         JSR  RGETB
             JSR  MAPPG
             INC  PNI
             BRA  PA6
+PASRC       LDA  OLDNI          ; their sources after them? ("PSS1", 16 bytes each)
+            LDB  #32
+            MUL
+            ADDD #4
+            ADDD NAMEOFS+1
+            STD  SPLEN          ; (where they would end)
+            LDA  NAMEOFS
+            ADCA #0
+            CMPA SSIZE
+            BHI  PA9
+            BLO  PAS1
+            LDD  SPLEN
+            CMPD SSIZE+1
+            BHI  PA9
+PAS1        LDX  #S_PSS
+            LDB  #4
+PAS2        JSR  RGETB
+            CMPA ,X+
+            BNE  PA9
+            DECB
+            BNE  PAS2
+            CLR  PNI
+PAS3        LDA  PNI            ; each, by way of NAMETMP
+            CMPA OLDNI
+            BHS  PA9
+            LDY  #NAMETMP
+            LDB  #16
+PAS4        JSR  RGETB
+            STA  ,Y+
+            DECB
+            BNE  PAS4
+            JSR  NMAP
+            LDA  PNI
+            LDB  #16
+            MUL
+            ADDD #WINDOW+SRCOFS
+            TFR  D,Y
+            LDX  #NAMETMP
+            LDW  #16
+            TFM  X+,Y+
+            LDB  RPG
+            JSR  MAPPG
+            INC  PNI
+            BRA  PAS3
 PA9         RTS
 
 ;------------------------------------------------------------------------------
@@ -510,7 +573,21 @@ SV3         STA  ,Y
             TFR  D,Y
             JSR  FWRITE
             LBCS SVERR
-            LDB  FH
+            BSR  SRCANY         ; and where they came from, if any came from a bank
+            BEQ  SV5
+            LDX  #S_PSS
+            LDY  #4
+            JSR  FWRITE
+            LBCS SVERR
+            JSR  NMAP
+            LDX  #WINDOW+SRCOFS
+            LDA  NINST
+            LDB  #16
+            MUL
+            TFR  D,Y
+            JSR  FWRITE
+            LBCS SVERR
+SV5         LDB  FH
             LDA  #B_FCLOSE_NAME
             SWI2
             LBCS FERR
@@ -522,6 +599,16 @@ SV3         STA  ,Y
             JSR  TXSTR
             ANDCC #$FE
             RTS
+; SRCANY: Z clear if any instrument came from a bank (its source not 0).
+SRCANY      JSR  NMAP
+            LDX  #WINDOW+SRCOFS
+            LDB  NINST
+SRA1        LDA  ,X
+            BNE  SRA9
+            LEAX 16,X
+            DECB
+            BNE  SRA1
+SRA9        RTS
 SVERR       PSHS A
             LDB  FH
             LDA  #B_FCLOSE_NAME
@@ -557,6 +644,9 @@ SAVEINS2    LDX  #PR_BUF
             LDX  NP
             LDW  #16
             TFM  X+,Y+
+            LDX  #CURSRC        ; (and where it came from)
+            LDW  #16
+            TFM  X+,Y+
             LDX  #FNAME
             LDE  #FOPEN_WRITE
             LDA  #B_FOPEN_NAME
@@ -564,8 +654,11 @@ SAVEINS2    LDX  #PR_BUF
             LBCS FERR
             STA  FH
             LDX  #IOBUF
-            LDY  #INSLEN
-            JSR  FWRITE
+            LDY  #INSLEN        ; (its source only if it has one)
+            TST  CURSRC
+            BEQ  SI1
+            LDY  #INSLEN2
+SI1         JSR  FWRITE
             LBCS SVERR
             LDB  FH
             LDA  #B_FCLOSE_NAME
@@ -738,6 +831,7 @@ S_SNG       FCC  ".SNG"
             FCB  0
 S_INS       FCC  ".INS"
             FCB  0
+S_PSS       FCC  "PSS1"
 S_ASKOPEN   FCC  "Open (a song, or an instrument .INS): "
             FCB  0
 S_ASKOPEN2  FCC  "Changes not saved: open it anyway? (Y or N)"

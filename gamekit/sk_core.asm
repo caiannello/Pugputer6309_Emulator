@@ -148,7 +148,7 @@ SO9         RTS
 
 ; SETIP: IP and NP, the instrument being edited and its name (copies, in
 ; CURINST and CURNAME, of the instruments' and names' pages': PUTINST and
-; PUTNAME put them back).
+; PUTNAME put them back); CURSRC, where it came from (PUTSRC).
 SETIP       LDX  #CURINST
             STX  IP
             LDX  #CURNAME
@@ -162,6 +162,10 @@ SETIP       LDX  #CURINST
             LDW  #16
             TFM  X+,Y+
             CLR  ,Y
+            BSR  SRCAT
+            LDY  #CURSRC
+            LDW  #16
+            TFM  X+,Y+
             RTS
 PUTINST     BSR  INSTAT
             TFR  X,Y
@@ -192,6 +196,19 @@ NAMEAT      JSR  NMAP
             MUL
             ADDD #WINDOW
             TFR  D,X
+            RTS
+; SRCAT: X, instrument CURI's source in the names' page (in the window): 16
+; bytes -- the bank file's name (12, 0s after it; 0: none, made here), the
+; bank (bit 7: percussion; the rest, which of them), the program, flags (bit 0:
+; two voices, the first taken), 0. PUTSRC: CURSRC put there.
+SRCAT       JSR  NAMEAT
+            LEAX SRCOFS,X
+            RTS
+PUTSRC      BSR  SRCAT
+            TFR  X,Y
+            LDX  #CURSRC
+            LDW  #16
+            TFM  X+,Y+
             RTS
 ; DRAWLAB: the labels at X: each its column, its row, its color, its text
 ; (the song's ticks let in as it goes: the window may be the player's after).

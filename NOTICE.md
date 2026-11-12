@@ -80,7 +80,13 @@ public domain.
 Its instruments are from **The Fat Man**'s OPL3 tone libraries, developed by **K. Weston
 Phelan** and **George Alistair Sanger** -- the 4-operator banjo, acoustic bass and steel guitar,
 and a 2-operator cut of the steel guitar -- as published, with George Sanger's written
-permission, at <https://github.com/Wohlstand/TheFatManOPL>, under the MIT License:
+permission, at <https://github.com/Wohlstand/TheFatManOPL>, under the MIT License.
+
+SONGKIT's instrument banks, `gamekit/banks/FATMAN2.WOP` and `FATMAN4.WOP` (on the disk in
+`/BANKS`), are the same libraries' General MIDI banks, 2-operator and 4-operator
+(`fatman-2op.wopl` and `fatman-4op.wopl` there), with the General MIDI instrument names added
+to them (they come with none). `gamekit/banks/README.TXT`, beside them on the disk, carries
+this notice too:
 
 ```
 Tone libraries for OPL2 and OPL3 chips produced by The Fat Man.

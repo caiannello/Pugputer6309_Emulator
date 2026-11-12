@@ -10,8 +10,12 @@ KHELP       LDA  #3
             STA  MODE
             JSR  TXCLR
             JSR  O_DRAWTITLE
-            LDX  #HELPTXT
-            JMP  DRAWLAB
+            LDX  #HELPTXT       ; (the bank page's own, there)
+            LDA  PAGE
+            CMPA #2
+            BNE  KH1
+            LDX  #HELPBK
+KH1         JMP  DRAWLAB
 ; HELPTXT: the help screen (F1): its labels, as DRAWLAB draws them.
 HELPTXT
             FCB  2,2,C_LABEL
@@ -72,16 +76,16 @@ HELPTXT
             FCC  "open a song or instrument"
             FCB  0
             FCB  2,16,C_VALUE
-            FCC  "^S ^A"
+            FCC  "^S ^A ^W"
             FCB  0
             FCB  14,16,C_LABEL
-            FCC  "save the song; save as"
+            FCC  "save song; as; instrument"
             FCB  0
             FCB  2,17,C_VALUE
-            FCC  "^W"
+            FCC  "^B"
             FCB  0
             FCB  14,17,C_LABEL
-            FCC  "save the instrument"
+            FCC  "instrument banks"
             FCB  0
             FCB  2,18,C_VALUE
             FCC  "F1"
@@ -235,6 +239,147 @@ HELPTXT
             FCB  0
             FCB  2,28,C_LABEL
             FCC  "Mouse: a click picks a field or ticks a box (a head: mute); a drag, a block."
+            FCB  0
+            FCB  2,29,C_MSG
+            FCC  "Any key: back to the page"
+            FCB  0
+            FCB  $FF,$FF
+; HELPBK: the bank page's help.
+HELPBK
+            FCB  2,2,C_LABEL
+            FCC  "The bank page lists a folder's instrument banks (WOPL files, .WOP) and the"
+            FCB  0
+            FCB  2,3,C_LABEL
+            FCC  "instruments of the bank shown. The piano's keys play the one at the cursor."
+            FCB  0
+            FCB  2,4,C_LABEL
+            FCC  "Enter adds it to the song; ^R puts it over the song's instrument being"
+            FCB  0
+            FCB  2,5,C_LABEL
+            FCC  "edited (on the right). ^P puts that one into the bank, at the cursor: a bank"
+            FCB  0
+            FCB  2,6,C_LABEL
+            FCC  "of your own, made with ^N. An instrument taken keeps where it came from (the"
+            FCB  0
+            FCB  2,7,C_LABEL
+            FCC  "instrument page shows it)."
+            FCB  0
+            FCB  2,9,C_HEAD
+            FCC  "The bank page"
+            FCB  0
+            FCB  2,10,C_VALUE
+            FCC  "Up Down"
+            FCB  0
+            FCB  14,10,C_LABEL
+            FCC  "the cursor"
+            FCB  0
+            FCB  2,11,C_VALUE
+            FCC  "Left Right"
+            FCB  0
+            FCB  14,11,C_LABEL
+            FCC  "the files; the instruments"
+            FCB  0
+            FCB  2,12,C_VALUE
+            FCC  "PgUp PgDn"
+            FCB  0
+            FCB  14,12,C_LABEL
+            FCC  "a page up, down"
+            FCB  0
+            FCB  2,13,C_VALUE
+            FCC  "Home End"
+            FCB  0
+            FCB  14,13,C_LABEL
+            FCC  "the first, the last"
+            FCB  0
+            FCB  2,14,C_VALUE
+            FCC  "Enter"
+            FCB  0
+            FCB  14,14,C_LABEL
+            FCC  "open it; add to the song"
+            FCB  0
+            FCB  2,15,C_VALUE
+            FCC  "^R"
+            FCB  0
+            FCB  14,15,C_LABEL
+            FCC  "over the song's instrument"
+            FCB  0
+            FCB  2,16,C_VALUE
+            FCC  "^P"
+            FCB  0
+            FCB  14,16,C_LABEL
+            FCC  "the song's into the bank"
+            FCB  0
+            FCB  2,17,C_VALUE
+            FCC  "^N"
+            FCB  0
+            FCB  14,17,C_LABEL
+            FCC  "a new bank file"
+            FCB  0
+            FCB  2,18,C_VALUE
+            FCC  "^Lt ^Rt"
+            FCB  0
+            FCB  14,18,C_LABEL
+            FCC  "the bank before, after"
+            FCB  0
+            FCB  2,19,C_VALUE
+            FCC  "^Up ^Dn"
+            FCB  0
+            FCB  14,19,C_LABEL
+            FCC  "song's instrument up, down"
+            FCB  0
+            FCB  42,9,C_HEAD
+            FCC  "And"
+            FCB  0
+            FCB  42,10,C_VALUE
+            FCC  "Z-M Q-P"
+            FCB  0
+            FCB  54,10,C_LABEL
+            FCC  "the piano's keys"
+            FCB  0
+            FCB  42,11,C_VALUE
+            FCC  "[ ]"
+            FCB  0
+            FCB  54,11,C_LABEL
+            FCC  "octave down, up"
+            FCB  0
+            FCB  42,12,C_VALUE
+            FCC  "Space"
+            FCB  0
+            FCB  54,12,C_LABEL
+            FCC  "play the song; stop"
+            FCB  0
+            FCB  42,13,C_VALUE
+            FCC  "Bksp"
+            FCB  0
+            FCB  54,13,C_LABEL
+            FCC  "all notes off"
+            FCB  0
+            FCB  42,14,C_VALUE
+            FCC  "^S ^A"
+            FCB  0
+            FCB  54,14,C_LABEL
+            FCC  "save the song; save as"
+            FCB  0
+            FCB  42,15,C_VALUE
+            FCC  "Tab Esc ^B"
+            FCB  0
+            FCB  54,15,C_LABEL
+            FCC  "back to the page before"
+            FCB  0
+            FCB  42,16,C_VALUE
+            FCC  "F1"
+            FCB  0
+            FCB  54,16,C_LABEL
+            FCC  "this help"
+            FCB  0
+            FCB  2,21,C_LABEL
+            FCC  "Mouse: a click picks a file or an instrument (a file clicked again opens it;"
+            FCB  0
+            FCB  2,22,C_LABEL
+            FCC  "an instrument double-clicked goes over the song's, as ^R); the wheel moves"
+            FCB  0
+            FCB  2,23,C_LABEL
+            FCC  "the cursor."
             FCB  0
             FCB  2,29,C_MSG
             FCC  "Any key: back to the page"
