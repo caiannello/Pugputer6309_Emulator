@@ -32,8 +32,17 @@ A program file is an 8-byte header followed by its body (all 16-bit values big-e
     +2  load address   where the body goes: at or above DOS_END (the end of DOS's RAM,
                        in dos/dos.lst) and ending below the ROM ($F000)
     +4  entry address  where execution starts; inside the body
-    +6  flags          must be 0 (reserved: a later revision will use it to mark a
-                       header extension describing banked segments)
+    +6  flags          0, or 1 (EXE_MORE: see below); anything else is "not a program"
+
+A program bigger than its 64KB -- code for banked RAM pages, say -- sets `EXE_MORE`. Its header
+has one more word:
+
+    +8  body length    only this much of what follows is the body (loaded as above)
+
+and the rest of the file, any size, is the program's own: it starts with the file still open,
+its handle in `B`, at the byte after the body, reads what it wants (`B_FREAD`) and closes it
+(or `B_EXIT` does). SONGKIT (`../gamekit`) keeps most of its code this way, in pages of its own.
+DOS 2.3 added it; an older DOS says such a file is not a program.
 
 `B_EXEC` (`X` = path, `Y` = command tail or 0) loads and starts a program: on success it does
 not return -- the program has the machine (the stack is the boot stack, interrupts are as the

@@ -112,7 +112,7 @@ TEST(shell_info_commands) {
     std::string img = image("shell2.img", {});
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
-    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.2\r\n");
+    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.3\r\n");
     CHECK(cmd(s, "MEM") == "RAM: 1024 KB installed, 960 KB free for programs\r\n");
     std::string help = cmd(s, "help");
     CHECK(has(help, "DIR [path]") && has(help, "COPY from [to]") && has(help, "name [args]"));
@@ -213,8 +213,8 @@ TEST(shell_line_editing) {
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
     // Backspace and Delete erase; the echo shows the erasure.
-    CHECK(cmd(s, "vex\x08r") == "Pugputer 6309 DOS 2.2\r\n");
-    CHECK(cmd(s, "vxx\x7f\x7f" "er") == "Pugputer 6309 DOS 2.2\r\n");
+    CHECK(cmd(s, "vex\x08r") == "Pugputer 6309 DOS 2.3\r\n");
+    CHECK(cmd(s, "vxx\x7f\x7f" "er") == "Pugputer 6309 DOS 2.3\r\n");
     // Ctrl-C abandons the line.
     s.received.clear();
     for (char c : std::string("del importa")) s.send_byte(static_cast<uint8_t>(c));
@@ -223,13 +223,13 @@ TEST(shell_line_editing) {
     uint64_t spent = 0;
     while (!ends_with(s.received, "> ") && spent < 100000000) spent += s.bus.run(20000);
     CHECK(has(s.received, "^C"));
-    CHECK(has(s.received, "Pugputer 6309 DOS 2.2"));
+    CHECK(has(s.received, "Pugputer 6309 DOS 2.3"));
     CHECK(!has(s.received, "Missing argument")); // "del importa" never ran
     // A command is case-insensitive; a long line is capped rather than overrun.
-    CHECK(cmd(s, "VeR") == "Pugputer 6309 DOS 2.2\r\n");
+    CHECK(cmd(s, "VeR") == "Pugputer 6309 DOS 2.3\r\n");
     std::string longline = "ver " + std::string(120, 'x');
-    CHECK(cmd(s, longline) == "Pugputer 6309 DOS 2.2\r\n");
-    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.2\r\n");
+    CHECK(cmd(s, longline) == "Pugputer 6309 DOS 2.3\r\n");
+    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.3\r\n");
 }
 
 TEST(shell_runs_programs_with_a_command_tail_and_returns_to_the_shell) {
@@ -344,7 +344,7 @@ TEST(basic_starts_in_the_basic_directory_when_the_disk_has_one) {
 TEST(shell_reports_files_that_are_not_programs) {
     Bytes not_exe = {'h', 'e', 'l', 'l', 'o'};
     std::string img = image("shell7.img", {file("BADMAGIC.COM", program(0x5000, 0x5000, {0x39}, 0, "QQ")),
-                                            file("FLAGS.COM", program(0x5000, 0x5000, {0x39}, 1)),
+                                            file("FLAGS.COM", program(0x5000, 0x5000, {0x39}, 2)),
                                             file("LOW.COM", program(0x0100, 0x0100, {0x39})),
                                             file("DOSMEM.COM", program(0x2000, 0x2000, {0x39})),
                                             file("ROM.COM", program(0xEFF0, 0xEFF0, Bytes(0x20, 0x12))),
@@ -365,6 +365,37 @@ TEST(shell_reports_files_that_are_not_programs) {
     CHECK(cmd(s, "dir") != "");                        // and the shell is still fine
     CHECK(cmd(s, "md dd") == "");
     CHECK(cmd(s, "dd") == "Bad command or file name\r\n"); // a directory isn't a program
+}
+
+// EXE_MORE (flags 1): the header has a body length too; only that much is loaded, and the
+// program starts with the file still open (its handle in B) at the byte after the body --
+// here it reads the next 5 bytes and prints them. What follows the body can be any size
+// (more than the 64KB a body could be); the file is closed at B_EXIT.
+TEST(a_program_with_more_than_its_body_reads_the_rest_itself) {
+    Bytes code = {0x8E, 0x51, 0x00,             // LDX #$5100
+                  0x10, 0x8E, 0x00, 0x05,       // LDY #5
+                  0x86, 0x1D, SWI2_0, SWI2_1,   // LDA #B_FREAD ; SWI2
+                  0x7F, 0x51, 0x05,             // CLR $5105
+                  0x8E, 0x51, 0x00,             // LDX #$5100
+                  0xC6, 0x01,                   // LDB #F_STDOUT
+                  0x86, 0x0A, SWI2_0, SWI2_1,   // LDA #B_PUTS ; SWI2
+                  0x86, 0x2B, SWI2_0, SWI2_1};  // LDA #B_EXIT ; SWI2
+    Bytes body = {static_cast<uint8_t>(code.size() >> 8), static_cast<uint8_t>(code.size() & 0xFF)};
+    body.insert(body.end(), code.begin(), code.end());
+    for (char c : std::string("hello")) body.push_back(static_cast<uint8_t>(c));
+    Bytes big = body;
+    big.resize(big.size() + 70000, 0x55);
+    std::string img = image("shell9.img", {file("MORE.COM", program(0x5000, 0x5000, body, 1)),
+                                           file("BIGMORE.COM", program(0x5000, 0x5000, big, 1)),
+                                           file("ROMMORE.COM", program(0xEFF0, 0xEFF0, body, 1))});
+    Basic309Session s;
+    CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
+    // (Its output, then the shell's banner, as it starts again after B_EXIT.)
+    auto says_hello = [&](const char* line) { return cmd(s, line).rfind("hello\r", 0) == 0; };
+    CHECK(says_hello("more"));
+    CHECK(says_hello("bigmore"));
+    CHECK(cmd(s, "rommore") == "Too big\r\n"); // (its body, $EFF0 on: into the ROM)
+    CHECK(says_hello("more")); // (B_EXIT closed its file: one at a time, again and again)
 }
 
 TEST(exit_closes_and_flushes_files_the_program_left_open) {
