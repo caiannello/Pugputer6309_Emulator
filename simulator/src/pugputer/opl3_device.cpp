@@ -139,7 +139,7 @@ void Opl3Device::generate(size_t frames) {
     for (size_t i = 0; i < 2 * frames && silent; ++i) silent = buf_[i] >= -kQuiet && buf_[i] <= kQuiet;
     quiet_ = silent ? quiet_ + frames : 0;
     sink_->write(buf_, frames);
-    if (quiet_ >= rate_) { // a second of silence, and no writes: stop until the next one
+    if (quiet_ >= rate_ && !continuous_) { // a second of silence, and no writes: stop until the next one
         active_ = false;
         due_ = 0;
         idle_at_ = cycles_;

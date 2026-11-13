@@ -153,7 +153,7 @@ struct Kit {
     std::vector<Opl3Device::Write> log;
     bool ok = false;
 
-    explicit Kit(std::vector<pugputer::Fat16File> more = {}) {
+    explicit Kit(std::vector<pugputer::Fat16File> more = {}, const char* image = "songkit.img") {
         std::string repo = REPO_DIR;
         bin = host_file(repo + "/gamekit/build/songplay.bin");
         std::vector<pugputer::Fat16File> files = {
@@ -164,7 +164,7 @@ struct Kit {
             disk_file("ASM.COM", host_file(ASM_BIN_PATH))};
         for (auto& f : more) files.push_back(std::move(f));
         CHECK(!bin.empty());
-        img = build_image("songkit.img", 32768, 4, files);
+        img = build_image(image, 32768, 4, files);
         CHECK(!img.empty());
         CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
         s.bus.map_device("opl3", 0xFFE0, 4, &opl3);
@@ -623,7 +623,9 @@ TEST(songkit_reads_across_pages_and_jumps) {
     CHECK(k.s.bus.bank_register(2) == 2);
 }
 
-// SONGKIT_SONG: a song, heard (see the top of this file). Nothing without it.
+// SONGKIT_SONG: a song, heard (see the top of this file). Nothing without it. SONGKIT_IMG names
+// the disk image (in the tests' build folder, removed after), so that several can run at once
+// -- gamekit/tools/midi2sng.py renders its songs so.
 TEST(songkit_song_to_wav) {
     const char* song = std::getenv("SONGKIT_SONG");
     if (!song) return;
@@ -636,9 +638,18 @@ TEST(songkit_song_to_wav) {
         std::vector<int16_t> pcm;
         void write(const int16_t* f, size_t n) override { pcm.insert(pcm.end(), f, f + 2 * n); }
     } keep;
-    Kit k({disk_file("SONG.SNG", data)});
+    const char* image = std::getenv("SONGKIT_IMG");
+    struct Gone {
+        std::string path;
+        ~Gone() {
+            if (!path.empty()) std::remove(path.c_str());
+        }
+    } gone; // (after the machine is: declared before it)
+    Kit k({disk_file("SONG.SNG", data)}, image ? image : "songkit.img");
+    if (image) gone.path = k.img;
     if (!k.ok) return;
     k.opl3.set_sink(&keep);
+    k.opl3.set_continuous(true); // (the song's silences kept, however long: its time is right)
     k.type("SONGPLAY song");
     uint64_t took = k.prompt(static_cast<uint64_t>(most * kHz));
     if (!took) {
@@ -666,6 +677,24 @@ TEST(songkit_song_to_wav) {
     f.write(reinterpret_cast<const char*>(keep.pcm.data()), bytes);
     std::printf("  wrote %s: %.1f s\n", wav.c_str(), keep.pcm.size() / 2.0 / k.opl3.sample_rate());
     CHECK(!keep.pcm.empty());
+}
+
+// SONGKIT_EDIT=file.sng: that song opened in SONGKIT, its pattern page and its instrument page
+// shown (as midi2sng.py's songs can be looked at). Nothing without it.
+TEST(songkit_editor_opens_a_song_given) {
+    const char* song = std::getenv("SONGKIT_EDIT");
+    if (!song) return;
+    std::string data = host_file(song);
+    CHECK(data.size() > 80);
+    Editor e({disk_file("GIVEN.SNG", data)});
+    if (!e.ok) return;
+    CHECK(e.start("given"));
+    e.frames(40);
+    e.show();
+    CHECK(e.row(29).find("Opened GIVEN.SNG") != std::string::npos);
+    e.key(0x2B); // (Tab: the instrument page)
+    e.frames(10);
+    e.show();
 }
 
 // SONGKIT starts on a new song's pattern page: its settings, its one order, its one

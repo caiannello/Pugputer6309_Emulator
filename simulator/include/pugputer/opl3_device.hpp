@@ -50,6 +50,9 @@ public:
 
     void set_sink(AudioSink* sink) { sink_ = sink; }
     uint32_t sample_rate() const { return rate_; }
+    // Once it has made a sound, it never goes idle: every frame from then on is made, the
+    // silences too, however long (for a recording that keeps its time; off by default).
+    void set_continuous(bool on) { continuous_ = on; }
 
     uint8_t read(uint16_t offset) override;
     void write(uint16_t offset, uint8_t value) override;
@@ -93,6 +96,7 @@ private:
     bool t1_on_ = false, t2_on_ = false;
     double t1_us_ = 0, t2_us_ = 0; // time into the current timer period
     bool active_ = false;
+    bool continuous_ = false; // set_continuous()
     double due_ = 0;          // frames owed to the sink (fractional)
     uint64_t quiet_ = 0;      // silent frames in a row, since the last write
     uint64_t cycles_ = 0;     // CPU cycles so far
