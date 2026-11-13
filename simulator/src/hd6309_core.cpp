@@ -539,11 +539,14 @@ void CPU::do_divq(uint16_t divisor) {
     int32_t quotient = sdividend / div;
     int32_t remainder = sdividend % div;
     bool overflow = (quotient < -32768 || quotient > 32767);
-    r_.set_d(static_cast<uint16_t>(quotient));
-    r_.set_w(static_cast<uint16_t>(remainder));
     set_flag(CC_V, overflow);
-    set_flag(CC_C, false);
-    set_nz16(r_.d());
+    if (overflow) return; // (Q as it was)
+    // The 6309 Book (Burke & Burke), DIVQ: "W' <- Q / (m); D' <- Q % (m)"; N and Z from the
+    // quotient, C set if it is odd.
+    r_.set_w(static_cast<uint16_t>(quotient));
+    r_.set_d(static_cast<uint16_t>(remainder));
+    set_flag(CC_C, (quotient & 1) != 0);
+    set_nz16(r_.w());
 }
 
 void CPU::do_muld(uint16_t multiplier) {

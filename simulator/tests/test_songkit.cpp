@@ -425,6 +425,34 @@ TEST(songkit_plays_notes_in_time) {
     CHECK(k.s.bus.bank_register(2) == 2);
 }
 
+// Fast rates: 128-255 ticks a second (once taken as negative by a signed DIVD, and played far
+// too slowly). 200 a second is 16 steps of 320 us a tick; from row 4, F96 (150) makes it 21.
+TEST(songkit_plays_fast_rates) {
+    Song song;
+    song.rate = 200;
+    song.ins = {kPiano};
+    Pattern p;
+    p.rows = 8;
+    p.put(0, 0, {N("C-4"), 1}).put(4, 0, {0, 0, 0, 'F', 0x96}).put(7, 0, {OFF});
+    song.pats = {p};
+    Kit k({disk_file("FAST.SNG", song.bytes())});
+    if (!k.ok) return;
+    CHECK(k.run("SONGPLAY fast", 10) != 0);
+    std::vector<uint64_t> at; // each tick's start: its flags cleared ($04 = $80)
+    bool started = false;
+    for (auto& w : k.log) {
+        if (w.reg == 0x04 && w.value == 0x42) started = true;
+        if (started && w.reg == 0x04 && w.value == 0x80) at.push_back(w.cycle);
+    }
+    CHECK(at.size() > 42);
+    if (at.size() <= 42) return;
+    double fast = (at[24] - at[0]) / kHz / 24;    // rows 0-3
+    double slower = (at[42] - at[30]) / kHz / 12; // rows 5 and 6
+    std::printf("  ticks of %.3f ms (5.120 expected), then %.3f ms (6.720)\n", fast * 1000, slower * 1000);
+    CHECK(fast > 16 * 320e-6 * 0.99 && fast < 16 * 320e-6 * 1.01);
+    CHECK(slower > 21 * 320e-6 * 0.99 && slower < 21 * 320e-6 * 1.01);
+}
+
 // The effects, a row each on track 0, as their ticks go by.
 TEST(songkit_plays_the_effects) {
     Song song;
