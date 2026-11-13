@@ -432,6 +432,9 @@ cursor moved without Shift, lets the block go.
 | Delete | the field cleared (a note with its instrument; an effect with its parameter); a block, all of it |
 | Shift+arrows, PgUp, PgDn, Home, End | a block, from the cursor to where it's taken |
 | Ctrl+C, Ctrl+X, Ctrl+V | the block copied, cut; pasted at the cursor |
+| Ctrl+Backspace | the cursor's track cut, all the pattern's rows of it, at once -- for a take gone wrong (the song plays on; the track's note is let go). It goes into the clipboard, so Ctrl+V on the first row puts it back |
+| Ctrl+Shift+C, Ctrl+Shift+X, Ctrl+Shift+V | the whole pattern -- all its rows of all its tracks -- copied, cut; the clipboard pasted at the pattern's first row of its first track, wherever the cursor is (as much as fits: a longer pattern's last rows are left out, a shorter one's rows past it are left as they were). A block is for some of a pattern; these are for all of it -- to start a pattern from another, say, made with Ctrl+N. They go on with the song playing, as the others do |
+| Ctrl+Shift+Backspace | the whole pattern cut, as Ctrl+Shift+X (Ctrl+Backspace's, for all the tracks) |
 | Esc | a block let go (none: as on the instrument page) |
 | Insert, Ctrl+Insert | a blank row at the cursor, the rows below down one (the last lost): in this track, in all |
 | Shift+Delete, Ctrl+Delete | the row at the cursor out, the rows below up one: in this track, in all |

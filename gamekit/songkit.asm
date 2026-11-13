@@ -779,7 +779,8 @@ CV1         CLR  ,X+
             BNE  CV1
             RTS
 ; PIANODN: key A a note? (Carry set if not.) It starts, on a voice of its
-; own -- or the drum Play on says.
+; own -- or the drum Play on says; or, with the song playing, on the cursor's
+; track (the pattern page's), the one track the song leaves to the keys.
 PIANODN     JSR  PIANOKEY
             LBCS PD9
             STA  PDKEY
@@ -787,7 +788,7 @@ PIANODN     JSR  PIANOKEY
             LDX  #VKEY          ; (a held key repeating: nothing)
             LDE  #NVOICE
 PD2         CMPA ,X+
-            BEQ  PD8
+            LBEQ PD8
             DECE
             BNE  PD2
             CLRA                ; a voice: a free one, or the next in turn
@@ -804,8 +805,30 @@ PD4         TST  A,X
             CLRA
 PD5         STA  VNEXT
 PD6         TST  PLAYON         ; a drum: always voice 0
-            BEQ  PD7
+            BEQ  PD6A
             CLRA
+            BRA  PD7
+PD6A        TST  SONGON         ; the song playing: the cursor's track, voice 0's
+            BEQ  PD7            ; (the song's own notes would cut one off on any
+            LDB  NTL            ; other), as the pattern page does
+            BEQ  PD7
+            LDX  #TLIST
+            LDB  CTRK
+            LDB  B,X
+            LDA  VKEY           ; (voice 0's note before, on another track: let go)
+            BEQ  PD6C
+            CMPB VTRK
+            BEQ  PD6C
+            PSHS B
+            LDB  VTRK
+            LDA  #$7F
+            CLRE
+            JSR  SK_JAM
+            PULS B
+PD6C        STB  VTRK
+            LDA  PDKEY
+            STA  VKEY
+            BRA  PD7B
 PD7         LDB  PDKEY
             STB  A,X
             LDX  #VTRK
