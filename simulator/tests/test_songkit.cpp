@@ -660,7 +660,7 @@ TEST(songkit_editor_starts_with_a_new_song) {
     e.key(0x3A);
     CHECK(e.row(29).find("Any key") != std::string::npos && e.row(2).find("A song plays") != std::string::npos);
     bool both = false;
-    for (int r = 8; r < 12; ++r) both = both || e.row(r).find("Both pages") != std::string::npos;
+    for (int r = 6; r < 12; ++r) both = both || e.row(r).find("Both pages") != std::string::npos;
     CHECK(both && e.row(5).find("... ..") == std::string::npos);
     e.key(0x29);
     CHECK(e.row(2).find("Speed 6") != std::string::npos && e.row(5).substr(2, 6) == "00 ...");
@@ -1403,6 +1403,56 @@ TEST(songkit_editor_copies_and_pastes_blocks) {
     CHECK(cell(14, last)[0] == N("C-4") && box(14, 15, last, last));
     e.key(kDel);
     CHECK(cell(14, last)[0] == 0 && var("SELON") == 1 && var("RECORD") == 0);
+    // ^Backspace: the cursor's track cut, all its rows (a take gone wrong), the cursor where it
+    // was, no block; ^V on the first row puts it back. With the song playing too.
+    constexpr uint8_t kBksp = 0x2A, kSpc = 0x2C;
+    e.key(kHome);
+    for (int i = 0; i < 300 && var("CTRK") > 1; ++i) e.key(kLeft);
+    for (int i = 0; i < 5; ++i) e.key(kDown);
+    CHECK(var("CROW") == 5 && var("CTRK") == 1 && cell(4, 1)[0] == N("G-4"));
+    e.key(kBksp, true);
+    CHECK(e.row(29).find("Cut: 16 rows, 1 track") != std::string::npos && var("SELON") == 0);
+    CHECK(var("CROW") == 5 && var("CTRK") == 1 && var("CHANGED") == 1);
+    CHECK(cell(0, 1)[0] == 0 && cell(4, 1)[0] == 0 && cell(12, 1)[0] == 0 && cell(4, 0)[0] == N("C-4"));
+    e.key(kHome);
+    e.key(kV, true);
+    CHECK(cell(4, 1)[0] == N("G-4") && cell(4, 1)[2] == 0x21 && cell(12, 1)[0] == N("G-4"));
+    for (int i = 0; i < 20 && var("CTRK") > 0; ++i) e.key(kLeft);
+    e.key(kSpc);
+    CHECK(var("SONGON") == 1 && var("CTRK") == 0);
+    e.key(kBksp, true);
+    CHECK(var("SONGON") == 1 && cell(0, 0)[0] == 0 && cell(12, 0)[0] == 0 && cell(4, 1)[0] == N("G-4"));
+    e.key(kSpc);
+    CHECK(var("SONGON") == 0);
+    // ^Shift+C: the whole pattern copied; in order 1's (pattern 1, empty), ^Shift+V: pasted at
+    // its first row of its first track, the cursor left where it is. ^Shift+X, with the song
+    // playing: cut; ^Shift+V, ^Shift+Backspace: in, and cut again. Pattern 0 as it was.
+    const int ntl = var("NTL");
+    e.key(kC, true, true);
+    CHECK(e.row(29).find("Copied: 16 rows, " + std::to_string(ntl) + " tracks") != std::string::npos);
+    CHECK(var("SELON") == 0 && var("CBROWS") == 16 && var("CBTRKS") == ntl);
+    e.key(kDown, true);
+    CHECK(var("CURORD") == 1 && var("CURPAT") == 1 && cell(4, 1)[0] == 0);
+    for (int i = 0; i < 5; ++i) e.key(kDown);
+    int crow = var("CROW"), ctk = var("CTRK");
+    e.key(kV, true, true);
+    CHECK(e.row(29).find("Pasted: 16 rows, " + std::to_string(ntl) + " tracks") != std::string::npos);
+    CHECK(cell(4, 1)[0] == N("G-4") && cell(12, 1)[2] == 0x21 && cell(0, 0)[0] == 0);
+    CHECK(var("CROW") == crow && var("CTRK") == ctk && box(0, 15, 0, ntl - 1));
+    e.key(kSpc);
+    CHECK(var("SONGON") == 1);
+    e.key(0x1B, true, true);
+    CHECK(var("SONGON") == 1 && e.row(29).find("Cut: 16 rows") != std::string::npos);
+    CHECK(var("SELON") == 0 && cell(4, 1)[0] == 0 && cell(12, 1)[0] == 0);
+    e.key(kV, true, true);
+    e.frames(40); // (the whole grid drawn again: the keys after it wait in the queue)
+    CHECK(cell(4, 1)[0] == N("G-4"));
+    e.key(kBksp, true, true);
+    CHECK(cell(4, 1)[0] == 0 && e.row(29).find("Cut: 16 rows") != std::string::npos);
+    e.key(kSpc);
+    CHECK(var("SONGON") == 0);
+    e.key(kUp, true);
+    CHECK(var("CURORD") == 0 && cell(4, 1)[0] == N("G-4") && cell(12, 1)[0] == N("G-4"));
     // Alt+Insert: this order again; Alt+Delete: out.
     auto alt = [&](uint8_t usage) {
         e.v.key(0xE2, true);
@@ -1518,6 +1568,27 @@ TEST(songkit_editor_takes_instruments_from_banks) {
     e.key(kZ);
     CHECK(writes_to(e.log, mark, 0x20) == V({0x11}) && writes_to(e.log, mark, 0x23) == V({0x17}));
     CHECK(writes_to(e.log, mark, 0x28) == V({banjo[13]}) && writes_to(e.log, mark, 0x2B) == V({banjo[18]}));
+    // With the song playing, the keys play on the cursor's track (the pattern page's), one
+    // note at a time -- not on the 4-op channels, where the song's notes would cut them off.
+    {
+        uint16_t vkey = kit_sym("VKEY"), vtrk = kit_sym("VTRK"), ctrk = kit_sym("CTRK");
+        const uint8_t kX = 0x1B, kC = 0x06, kSpc = 0x2C;
+        e.key(kSpc);
+        CHECK(var("SONGON") == 1 && var("NTL") > 3);
+        e.s.bus.write_cpu(ctrk, 3);
+        uint8_t trk = e.s.bus.read_cpu(kit_sym("TLIST") + 3);
+        e.key(kX, false, false, true);
+        CHECK(e.s.bus.read_cpu(vkey) == kX && e.s.bus.read_cpu(vtrk) == trk && e.s.bus.read_cpu(vkey + 1) == 0);
+        e.key(kC, false, false, true);
+        CHECK(e.s.bus.read_cpu(vkey) == kC && e.s.bus.read_cpu(vtrk) == trk && e.s.bus.read_cpu(vkey + 1) == 0);
+        e.up(kX);
+        CHECK(e.s.bus.read_cpu(vkey) == kC);
+        e.up(kC);
+        CHECK(e.s.bus.read_cpu(vkey) == 0);
+        e.key(kSpc);
+        CHECK(var("SONGON") == 0);
+        e.s.bus.write_cpu(ctrk, 0);
+    }
     // Enter: into the song, instrument 2 (the one edited); the next to try is 3.
     e.key(kEnter);
     CHECK(has(29, "Added to the song: instrument 2") && var("NINST") == 2 && var("CURI") == 2);

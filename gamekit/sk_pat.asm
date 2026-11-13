@@ -1818,7 +1818,13 @@ FOLTOP      LDA  CROW
 PKEY        LDB  KEYMODS
             BITB #VC_MOD_CTL
             BEQ  PKY1
-            LDX  #PCTLTAB
+            BITB #VC_MOD_SHF    ; (Ctrl and Shift: the whole pattern's first)
+            BEQ  PKYC0
+            LDX  #PCSTAB
+            BSR  TFIND
+            BCS  PKYC0
+            JMP  [1,X]
+PKYC0       LDX  #PCTLTAB
             BSR  TFIND
             BCS  PKY9
             JMP  [1,X]
@@ -1935,6 +1941,8 @@ PCTLTAB     FCB  K_LEFT         ; ^Left, ^Right: the instrument before, after
             FDB  PCUT
             FCB  $19
             FDB  PPASTE
+            FCB  K_BKSP         ; ^Backspace: the track cut
+            FDB  PCUTTRK
             FCB  $12            ; ^O
             FDB  O_OPEN
             FCB  $16            ; ^S
@@ -1951,6 +1959,15 @@ PCTLTAB     FCB  K_LEFT         ; ^Left, ^Right: the instrument before, after
             FDB  KMUTE
             FCB  $05            ; ^B: the bank page
             FDB  O_BKOPEN
+            FCB  0
+PCSTAB      FCB  $06            ; ^Shift+C, X, V: the whole pattern copied, cut,
+            FDB  PATCOPY        ; pasted (at its first row, first track)
+            FCB  $1B
+            FDB  PATCUT
+            FCB  $19
+            FDB  PATPASTE
+            FCB  K_BKSP         ; ^Shift+Backspace: cut, as ^Backspace a track
+            FDB  PATCUT
             FCB  0
 
 ; The cursor: up, down, left, right; in the grid, or among the settings.
@@ -2405,9 +2422,9 @@ PESC        TST  SELON
             LBRA SELOFF
 ; PCOPY (^C): the block (or the cursor's cell) into the clipboard.
 PCOPY       TST  AREA
-            BNE  PBK9
+            LBNE PBK9
             TST  PATOK
-            BEQ  PBK9
+            LBEQ PBK9
             JSR  SELBOX
             CLRA
             JMP  O_BCOPY
@@ -2445,6 +2462,88 @@ PBKNO       ORCC #1
 PBKYES      ANDCC #$FE
             RTS
 PBK9        RTS
+; PCUTTRK (^Backspace): the cursor's track cut, all the pattern's rows of it
+; (into the clipboard: ^V on the first row puts it back) -- a take gone wrong,
+; gone at once, the song playing on (the track's note let go).
+PCUTTRK     LBSR PBKOK
+            LBCS PBK9
+            LDA  #1
+            STA  SELON
+            CLR  SELR
+            LDA  PROWS
+            DECA
+            STA  SELR2
+            LDA  CTRK
+            STA  SELT
+            STA  SELT2
+            JSR  SELBOX
+            LDA  #1
+            JSR  O_BCOPY
+            JSR  O_BCLEAR
+            CLR  SELON          ; (no block left: the cursor where it was)
+            TST  SONGON
+            LBEQ PBKDONE
+            LDX  #TLIST
+            LDB  CTRK
+            LDB  B,X
+            JSR  SK_TOFF
+            LBRA PBKDONE
+; PATCOPY, PATCUT (^Shift+C, ^Shift+X or ^Shift+Backspace): the whole pattern,
+; all its rows of all its tracks, copied, cut (the song playing on: its notes
+; let go); a block there was let go. PATPASTE (^Shift+V): the clipboard in at
+; the pattern's first row, first track, wherever the cursor is (as much as fits,
+; as ^V; the block, then, what it went into).
+PATCOPY     LBSR PBKOK
+            LBCS PBK9
+            BSR  PATSEL
+            CLRA
+            JSR  O_BCOPY
+            CLR  SELON
+            RTS
+PATCUT      LBSR PBKOK
+            LBCS PBK9
+            BSR  PATSEL
+            LDA  #1
+            JSR  O_BCOPY
+            JSR  O_BCLEAR
+            CLR  SELON
+            TST  SONGON
+            LBEQ PBKDONE
+            CLRA                ; (every track's note let go)
+PCT1        PSHS A
+            LDX  #TLIST
+            LDB  A,X
+            JSR  SK_TOFF
+            PULS A
+            INCA
+            CMPA NTL
+            BLO  PCT1
+            LBRA PBKDONE
+PATPASTE    LBSR PBKOK
+            LBCS PBK9
+            JSR  SELOFF
+            LDD  CROW           ; (the cursor, row and track, kept)
+            PSHS D
+            CLR  CROW
+            CLR  CTRK
+            JSR  O_BPASTE
+            PULS D              ; (carry kept: set, the clipboard empty)
+            STD  CROW
+            LBCS PBK9
+            LBRA PBKDONE
+; PATSEL: the block the whole pattern (any there was let go first).
+PATSEL      JSR  SELOFF
+            LDA  #1
+            STA  SELON
+            CLR  SELR
+            CLR  SELT
+            LDA  PROWS
+            DECA
+            STA  SELR2
+            LDA  NTL
+            DECA
+            STA  SELT2
+            JMP  SELBOX
 
 ; PINS1, PINSALL: Insert, ^Insert: a blank row at the cursor, those below it
 ; down one (the pattern's last lost) -- in the cursor's track, or in all.
