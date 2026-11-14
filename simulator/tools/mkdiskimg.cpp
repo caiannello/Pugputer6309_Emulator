@@ -21,7 +21,13 @@
 //             --songkit path/to/songkit.bin
 //             --out path/to/disk.img
 //             [--sources path/to/repository] [--demo NAME]... [--add-dir path/to/folder]...
+//             [--size MB]
 //
+// --size makes the volume that many megabytes (5-2047; 8 by default) with FAT16's
+// usual cluster size for it -- a 1024 MB image for an SD card, say, written to the
+// card whole (sector 0 is the boot sector: the BIOS and DOS read no partition table).
+// An unknown option, or one missing its value, is an error (--help lists them):
+// nothing is written.
 // --sources adds the programs' sources from the repository, in /ASM (see
 // pugputer/demo_sources.hpp), for rebuilding them on the Pugputer, and the demo
 // programs, built (demo/compile.bat or .sh), in /DEMO, with the files they use
@@ -39,6 +45,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -76,6 +83,27 @@ bool read_file(const std::string& path, std::vector<uint8_t>& out) {
     out.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     return true;
 }
+
+void usage(std::FILE* to) {
+    std::fputs("usage: mkdiskimg [--out disk.img] [--size MB] [--sources repo] [--demo NAME]...\n"
+               "                 [--add-dir folder]... [--dos|--basic|--shell|--edit|--asm|--link|\n"
+               "                  --hexdump|--move|--tilekit|--songplay|--songkit|--tilekit-ini file]\n"
+               "Writes a fresh FAT16 disk image (by default basic309/disk.img, 8 MB).\n"
+               "--size MB (5-2047) makes a bigger one, e.g. for a real SD card: write it to the\n"
+               "card whole, with no partition table (Win32DiskImager, dd).\n",
+               to);
+}
+
+// FAT16's cluster size for a volume of this many sectors, as Microsoft's table
+// has it (fatgen103): 1KB up to 16MB, doubling at 128/256/512MB/1GB, 32KB to 2GB.
+uint8_t sectors_per_cluster_for(uint32_t sectors) {
+    if (sectors <= 32680) return 2;
+    if (sectors <= 262144) return 4;
+    if (sectors <= 524288) return 8;
+    if (sectors <= 1048576) return 16;
+    if (sectors <= 2097152) return 32;
+    return 64;
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -86,6 +114,8 @@ int main(int argc, char** argv) {
     std::vector<std::string> add_dirs;
     std::vector<std::string> demos;
     std::string sources;
+    uint32_t total_sectors = 16384; // 8 MB, 1KB clusters: build_fat16_image's defaults
+    uint8_t sectors_per_cluster = 2;
     // The other programs in /CMD, each assembled with its own header: the option that
     // names another file for it, the file, and its name on the disk.
     struct Program {
@@ -126,6 +156,24 @@ int main(int argc, char** argv) {
             demos.push_back(name);
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             out_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
+            char* end = nullptr;
+            long mb = std::strtol(argv[++i], &end, 10);
+            if (*end != '\0' || mb < 5 || mb > 2047) {
+                std::fprintf(stderr, "mkdiskimg: --size takes megabytes, 5 to 2047 (FAT16's range)\n");
+                return 1;
+            }
+            total_sectors = static_cast<uint32_t>(mb) * 2048;
+            sectors_per_cluster = sectors_per_cluster_for(total_sectors);
+        } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            usage(stdout);
+            return 0;
+        } else {
+            // Anything else -- a misspelling, or an option missing its value -- stops
+            // here rather than going on to overwrite the default disk image.
+            std::fprintf(stderr, "mkdiskimg: unknown option or missing value: %s\n", argv[i]);
+            usage(stderr);
+            return 1;
         }
     }
 
@@ -259,7 +307,7 @@ int main(int argc, char** argv) {
             add(std::move(f), "");
         }
     }
-    auto result = build_fat16_image(out_path, dos_payload, files);
+    auto result = build_fat16_image(out_path, dos_payload, files, total_sectors, sectors_per_cluster);
     if (!result.ok) {
         std::fprintf(stderr, "Failed to build '%s': %s\n", out_path.c_str(), result.error.c_str());
         return 1;

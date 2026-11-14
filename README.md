@@ -226,6 +226,19 @@ ignores `local/`). `reinit_disk` and `make_release` (`.bat` and `.sh`) copy that
 the disk image's root as it is -- `local/disk/SWAMP/GAME.BAS` becomes `/SWAMP/GAME.BAS`
 (8.3 names; others are skipped). The rest of `local/` is yours for work files.
 
+**A bigger disk for a real SD card:** the emulator's disk is 8 MB; `mkdiskimg --size MB`
+(5 to 2047, FAT16's limit) makes a bigger one, with the cluster size FAT16 uses for that
+size (16 KB at 1 GB). For instance, from the repository root,
+`simulator\build\tools\Release\mkdiskimg.exe --size 1024 --out local\sd1g.img --sources . --add-dir demo\programs`
+gives the release disk's contents on a 1 GB volume. Write the image to the whole card
+(Win32DiskImager, Raspberry Pi Imager, `dd`). The whole image is written, empty space and
+all, so a 1 GB card takes minutes to write where the 8 MB disk takes seconds: the default
+stays small, and a big image is worth making once, when you want the room. Don't format the card with a partition
+utility and copy files across: the BIOS and DOS look for the FAT16 boot sector in the
+card's first sector (they don't read a partition table), and DOS itself is in the volume's
+reserved sectors, not a file. `mkdiskimg --help` lists the options; an unknown one is an
+error, and nothing is written.
+
 `make_release.sh` builds the Linux binary release
 (`dist/Pugputer6309-demo-<version>-linux-x64.tar.gz`, the version taken from `make_release.bat`),
 with the emulator linked fully statically so it runs on any x86-64 Linux.
