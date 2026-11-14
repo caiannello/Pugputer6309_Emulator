@@ -1150,7 +1150,17 @@ TEST(songkit_editor_follows_the_song) {
         return std::string(b);
     };
     e.key(0x2C); // Space
-    e.frames(72); // (1.2 s: row 12 or so)
+    e.frames(12);
+    // Right, as it plays near the pattern's top (the rows shown from "before" row 0): the
+    // cursor's field moves, the rows shown don't (the row playing stays in the middle). (Looked
+    // at as soon as the key is taken, before the song can move on a row and put them back.)
+    e.v.key(0x4F, true);
+    for (int i = 0; i < 4000 && var("CCOL") != 1; ++i) e.s.bus.run(100);
+    e.s.bus.run(3000);
+    CHECK(var("CCOL") == 1 && ((var("CROW") - var("TOPROW")) & 127) == 11);
+    e.v.key(0x4F, false);
+    e.frames(2);
+    e.frames(56); // (1.2 s in all: row 12 or so)
     int row = var("PLROW");
     CHECK(row >= 9 && row <= 14 && var("CROW") == row && var("PLORD") == 0);
     CHECK(e.row(5 + 11).substr(2, 2) == hex2(row) && e.bg(5 + 11, 2) == 22);

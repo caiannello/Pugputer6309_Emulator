@@ -1004,9 +1004,18 @@ NVW1        JSR  VIEWFIX
             JSR  DRAWGRID
             JMP  DRAWSTAT
 ; VIEWFIX: the rows and tracks shown moved, if need be, for the cursor to be
-; among them; F not 0 if they were.
+; among them; F not 0 if they were. (The rows shown go round the 128: as the
+; song plays, followed, the first of them can be "before" row 0, the row
+; playing -- the cursor's -- in the middle: left as it is.)
 VIEWFIX     CLRF
+            TST  SONGON
+            BEQ  VFX0
             LDA  CROW
+            SUBA TOPROW
+            ANDA #MAXROWS-1
+            CMPA #GROWS
+            BLO  VFX2
+VFX0        LDA  CROW
             CMPA TOPROW
             BHS  VFX1
             STA  TOPROW
