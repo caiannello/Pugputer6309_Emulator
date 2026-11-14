@@ -8,11 +8,7 @@
 
 ![Fun with SONGKIT](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/songkit.png?raw=true)
 
-Tools for making a game's graphics and music on the Pugputer itself, on the
-video card's screen and with the card's mouse and keyboard. In the emulator those are the video
-window's: click into it and use it, not the terminal. (If the window is closed while one of
-these runs, the terminal's keys are given to the card instead, so Esc still works.) What they
-make, a game loads straight into the card.
+Tools for making a game's graphics and music on the Pugputer itself.
 
 | File | |
 |---|---|
