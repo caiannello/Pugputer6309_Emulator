@@ -186,14 +186,30 @@ TEST(divq_normal_division) {
     Harness h;
     h.boot_at(0x8000, { 0x11, 0x8E, 0x00, 0x0A }); // DIVQ #10
     hd6309_regs_t r = h.regs();
-    r.a = 0x00; r.b = 0x00; // D = 0 (quotient high)
-    r.e = 0x00; r.f = 100;  // W = 100 (dividend low / eventually remainder)
+    r.a = 0x00; r.b = 0x00; // D = 0 (the dividend's high half)
+    r.e = 0x00; r.f = 103;  // W = 103 (its low half)
     h.set_regs(r);
-    // Dividend is the full 32-bit D:W = 100; divide by 10 -> quotient 10, remainder 0
+    // Q = 103 divided by 10: the quotient (10) in W, the remainder (3) in D -- as the 6309
+    // Book has it ("W' <- Q / (m); D' <- Q % (m)").
     hd6309_step(h.cpu);
     r = h.regs();
-    CHECK_EQ_HEX(static_cast<uint16_t>((r.a << 8) | r.b), 10);
-    CHECK_EQ_HEX(static_cast<uint16_t>((r.e << 8) | r.f), 0);
+    CHECK_EQ_HEX(static_cast<uint16_t>((r.e << 8) | r.f), 10);
+    CHECK_EQ_HEX(static_cast<uint16_t>((r.a << 8) | r.b), 3);
+    CHECK(!(r.cc & CC_V));
+}
+
+// The 6309 Book's own example: Q = $0456B56A, DIVQ #$1001 -> W = $4567, D = $0003.
+TEST(divq_the_books_example) {
+    Harness h;
+    h.boot_at(0x8000, { 0x11, 0x8E, 0x10, 0x01 }); // DIVQ #$1001
+    hd6309_regs_t r = h.regs();
+    r.a = 0x04; r.b = 0x56; r.e = 0xB5; r.f = 0x6A;
+    h.set_regs(r);
+    hd6309_step(h.cpu);
+    r = h.regs();
+    CHECK_EQ_HEX(static_cast<uint16_t>((r.e << 8) | r.f), 0x4567);
+    CHECK_EQ_HEX(static_cast<uint16_t>((r.a << 8) | r.b), 0x0003);
+    CHECK(r.cc & CC_C); // (the quotient is odd)
 }
 
 TEST(muld_signed_multiply) {

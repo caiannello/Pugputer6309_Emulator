@@ -41,6 +41,7 @@ make, a game loads straight into the card.
 | `tools/sk_overlays.py` | checks that SONGKIT's code only reaches another overlay through a stub (below, "SONGKIT's memory") |
 | `banks/` | SONGKIT's instrument banks: The Fat Man's General MIDI banks, 2-op and 4-op (`FATMAN2.WOP`, `FATMAN4.WOP`), and a `README.TXT` with their credit and license; `mkdiskimg` puts them in `/BANKS` |
 | `tools/wopl_names.py` | (on a PC) gives a WOPL bank's unnamed instruments their General MIDI names, and its banks names -- the Fat Man's come with none |
+| `tools/midi2sng.py` | (on a PC) makes a MIDI file a song, on The Fat Man's patches, 4-op where it is heard to matter most (below, "MIDI files") |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
 `compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin`,
@@ -578,6 +579,62 @@ comes in as it is, with these differences:
   the bank page.
 - Into a bank, the other way round, a SONGKIT instrument loses its fine tune and its outputs
   (a WOPL instrument has neither).
+
+### MIDI files
+
+`tools/midi2sng.py`, on a PC (Python and numpy), makes a Standard MIDI File a song:
+
+```
+python gamekit/tools/midi2sng.py song.mid [OUT.SNG] [options]
+```
+
+Every General MIDI program and drum plays on The Fat Man's patch for it: his 4-op one
+(`FATMAN4.WOP`) on a 4-op track, his 2-op one (`FATMAN2.WOP`) on the others, as instruments
+named for him -- `Grand Piano 4op`, `Grand Piano 2op` -- with their sources. How many 4-op
+pairs the song has, and which notes get them, the tool finds by listening, so it is slow
+on purpose: each way of arranging the song is played with SONGPLAY on the emulated machine
+(the test program's `songkit_song_to_wav`, which `build_all` builds) and heard against the
+song as it would be with unlimited channels, every note on its 4-op patch. The one heard
+closest is written. A minute or so for a song of a minute or two; it prints what it tried:
+
+- Each instrument is first heard alone, 2-op and 4-op, at the pitches and lengths the song
+  plays it: how much its 4-op patch differs from its 2-op one is what 4-op is worth for it
+  (the louder of the two is taken down to match, 2-op notes' volume set to make up for it).
+- Then for each number of 4-op pairs (none to six: 18 tracks to 12), the notes there are too
+  many for are cut where it costs least -- a long note shortened before a short one is
+  dropped; the top and bottom notes, drums, a note alone in its channel kept before one of a
+  chord or one doubling another -- and of the notes kept, those worth most in 4-op get the
+  4-op tracks (both chosen as a whole, over the song: min-cost flows).
+- The best of those is searched further: each instrument's worth in 4-op, and (where notes
+  had to go) each channel's, taken up and down, kept where it is heard to be closer.
+
+So a song of few notes at once gets six pairs, its leads and bass 4-op; a crowded one gives
+pairs up for the notes it would lose. The song itself:
+
+- Its grid: the rows a beat most of the notes are on (16ths, say; rows of about 0.1 s if it
+  was played in and has none), EDx placing the rest to the tick (8-10 ms); Fxx where the
+  tempo changes. Patterns are whole bars, about 64 rows; a pattern the same as another is
+  kept once.
+- Velocity, volume (CC 7) and expression (CC 11) make each note's volume, as General MIDI
+  has it (each 40 log); a change while a note plays, its volume column. Pitch bend (and its
+  range) is E1x/E2x, 1xx/2xx across a row for a bend that ramps, `3FF` to its note for one
+  that jumps. The sustain pedal holds notes; pan far to one side (48 from the middle) plays
+  an instrument with its outputs left or right. Channel 10 (and General MIDI 2's and XG's
+  drum banks) is the percussion bank's: each drum plays out, whatever its note-off says.
+
+| Option | |
+|---|---|
+| `--pairs n` | this many 4-op pairs (0-6), not the best heard |
+| `--renders n` | arrangements heard at most (60) |
+| `--no-render` | from the banks alone, nothing heard: quick, and not as good |
+| `--wav f`, `--ideal-wav f` | the song as written, and as it was heard against, as WAV files |
+| `--loop n` | the order it goes back to at its end (none) |
+| `--rows-per-beat n`, `--pattern-rows n`, `--snap-ms n` | the grid; patterns' rows (64); a note this close to a row is on it (6) |
+| `--gain dB`, `--pan-width n`, `--drums 10,11` | every note louder; how far a pan goes hard; the percussion channels |
+
+`SONGKIT_EDIT=OUT.SNG` with the test program and `songkit_editor_opens_a_song_given` shows
+it as SONGKIT opens it. Not done: the mod wheel (vibrato), channel pressure, portamento,
+rhythm mode's drums (the drums are on channels of their own), GS and XG drum kits.
 
 ### Songs
 

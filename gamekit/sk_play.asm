@@ -407,15 +407,17 @@ SKT12       RTS
 
 ; SKRATE: A ticks a second (32-255), Timer 2 (steps of 320 us) set to that.
 SKRATE      STA  SK_RATE
-            LDD  #3125      ; 3125 steps a second
-            DIVD SK_RATE    ; B steps a tick, A over
-            PSHS B
-            LSLA            ; rounded
+            STA  SK_TMPW+1  ; the rate as 16 bits: DIVQ's divisor (DIVD's is 8
+            CLR  SK_TMPW    ; bits, signed: 128-255 would be taken as negative)
+            CLRD            ; 3125 steps a second, in Q
+            LDW  #3125
+            DIVQ SK_TMPW    ; F steps a tick, B over
+            LSLB            ; rounded
             BCS  SKR1
-            CMPA SK_RATE
+            CMPB SK_RATE
             BLO  SKR2
-SKR1        INC  ,S
-SKR2        PULS B
+SKR1        INCF
+SKR2        TFR  F,B
             NEGB            ; (256 - steps)
             CLRE
             LDA  #$03
