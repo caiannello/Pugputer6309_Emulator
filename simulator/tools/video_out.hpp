@@ -43,7 +43,7 @@ public:
         int x = 0, y = 0;    // Mouse: in the card's 640x480 pixels (may be off the picture)
         uint8_t buttons = 0; // Mouse: bit 0 left, 1 right, 2 middle
         int clicks = 0;      // Wheel: + is away from the user
-        // Pad: a PC gamepad changed (Windows only): which (0-3), whether it's there, its 8
+        // Pad: a PC gamepad changed: which (0-3), whether it's there, its 8
         // bytes as the card's pads have them.
         int pad = 0;
         bool present = false;

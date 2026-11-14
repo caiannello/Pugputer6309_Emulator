@@ -185,8 +185,8 @@ where it is, in the terminal. Keys typed into the window go to the Pugputer as w
 | `/DEMO/VIDTEXT` | text: the 256 characters and 256 colors, a 320x240 marquee over them; then an 8x8 font made from the card's own, 80x60 cells scrolling under a heading that stays put |
 | `/DEMO/VIDTILES` | tiles and sprites: three layers scrolling at their own speeds (8x8 and 16x16 tiles, 2 and 8 bits a pixel, flipped, in palettes of their own), sprites of every size between and in front of them; then 128 sprites at 640x480, and the 32-a-line limit |
 | `/DEMO/VIDGFX` | bitmaps and drawing: every drawing command at 640x480 in 16 colors, palette cycling; then bitmaps of 8, 2 and 1 bits a pixel, bars of color set by a line interrupt, an animation drawn in the PSRAM |
-| `/DEMO/VIDPAD` | the gamepads: what each of four is doing, read once a frame. The Linux video window doesn't pass PC gamepads on yet, so here they all read as not connected; Esc quits |
-| `PADMAP` (in `/CMD`) | sets up a gamepad and saves it in `/CMD/PADMAP.INI`. With no gamepads in the Linux window, only Esc does anything here |
+| `/DEMO/VIDPAD` | the gamepads: what each of four is doing, its d-pad, 16 buttons and two sticks, read once a frame. A PC joystick or gamepad works -- the first four plugged in, and they can come and go while it runs; click into the video window for Esc, which quits |
+| `PADMAP` (in `/CMD`) | sets up a gamepad: asks for each button in turn, so every game sees the same ones, and saves them in `/CMD/PADMAP.INI`. Click into the video window for its keys. Linux numbers some pads' buttons differently from Windows, so a pad set up on one may need setting up again on the other |
 | `/DEMO/VIDMOUSE` | the mouse and keyboard: draw on a canvas with the mouse (left button draws, right rubs out, the wheel or + and - change the color, C clears), with the mouse's position and buttons and the last key's code, character and modifiers shown; the pointer is a sprite the card moves itself. Click into the video window first: the keys typed there go to the program. Esc quits |
 | `/DEMO/MANDEL` | the Mandelbrot set in 320x240, 256 colors: Motorola's MC6839 floating-point ROM works out each pixel's starting point, 8.8 fixed point does the iterating, and the palette is the V9958's fixed colors, as the program was first written for. It takes about five minutes; a key stops it, or ends it when it's done |
 | `/DEMO/SWAMP` | a swamp at night in three tile layers: the sky stands still, the bayou drifts by, the mossy ground runs past, until a key is pressed. Its pictures are a TILEKIT project beside it (`TILEKIT SWAMP.TKT` in `/DEMO` opens it; what's saved there is what SWAMP shows). And music: *Old Joe Clark* on the OPL3 -- banjo, bass, guitars and mandolin -- over and over, from `SWAMP.SNG` beside them, played by SONGKIT's player, the one a game includes (`SONGKIT SWAMP.SNG` opens the song: hear it, change it) |
@@ -201,6 +201,12 @@ While the window is open, the emulator runs at the real machine's speed (60 fram
 without it, putting the console in the terminal instead. The window is `pugputer-video`, beside `pugputer`; it needs the SDL2 library
 (`sudo apt install libsdl2-2.0-0` if it isn't there already). Without it, or without a display,
 the emulator says so and goes on without the window.
+
+Gamepads are read by the window, so run the emulator from an ordinary terminal: a sandboxed one
+(VS Code installed as a snap, for one) can't see them. If a pad is listed by `lsusb` but
+`ls /dev/input/by-id/` shows no joystick for it, something has taken it from Linux's driver.
+Ubuntu's firmware updater does this to 8BitDo pads; add `DisabledPlugins=ebitdo` under
+`[fwupd]` in `/etc/fwupd/fwupd.conf`, `sudo systemctl restart fwupd`, and plug the pad in again.
 
 ## Other commands
 

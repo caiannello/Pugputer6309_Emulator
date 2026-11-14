@@ -15,6 +15,14 @@
 //                                     the picture's pixels (signed, high byte first), buttons
 //                                     bit 0 left, 1 right, 2 middle
 //             $FF 'W' clicks          the wheel turned (signed; + is away from the user)
+//             $FF 'P' pad present vid:2 pid:2 state:8
+//                                     a gamepad (0-3) came, changed or went (present 0, and
+//                                     the rest 0): its USB IDs, high byte first, and its 8
+//                                     bytes as the card's pads have them (vc.h's VC_PAD_*)
+//
+// The gamepads are SDL's joysticks, the first four to be plugged in, read as the Windows
+// window reads them (video_out.cpp): the buttons in the pad's own order, the sticks -127 to
+// 127 with a dead zone, the d-pad from its hat -- or, with none, from the left stick.
 //
 // It ends when the window is closed (the emulator sees the pipe close) or when stdin ends.
 //
@@ -31,6 +39,8 @@
 #include <vector>
 
 #include <unistd.h>
+
+#include "vc.h"
 
 namespace {
 constexpr int kW = 640, kH = 480;
@@ -97,6 +107,89 @@ uint8_t card_buttons(uint32_t mask) {
                                 ((mask & SDL_BUTTON_MMASK) ? 4 : 0));
 }
 
+// The gamepads, as the card's pads 0-3.
+struct Pad {
+    SDL_Joystick* joy = nullptr;
+    SDL_GameController* pad = nullptr; // when SDL knows its layout: then the sticks come from it
+    SDL_JoystickID id = -1;
+    uint8_t sent[8] = {};
+    bool fresh = false; // just plugged in: it has yet to be sent
+};
+Pad g_pads[VC_PADS];
+
+void send_pad(int n, bool present, uint16_t vid, uint16_t pid, const uint8_t* state) {
+    char rec[16] = {'\xFF', 'P', static_cast<char>(n), static_cast<char>(present ? 1 : 0),
+                    static_cast<char>(vid >> 8), static_cast<char>(vid), static_cast<char>(pid >> 8),
+                    static_cast<char>(pid)};
+    if (state) std::memcpy(rec + 8, state, 8);
+    send(rec, sizeof(rec));
+}
+
+// An axis as the card's sticks have it: -127 to 127, and values close to the middle read 0
+// (as the firmware's axis_value in usbhost.c).
+uint8_t pad_axis(int16_t v) {
+    long n = (static_cast<long>(v) * 2 + 1) * 127 / 65535;
+    return static_cast<uint8_t>(static_cast<int8_t>(n > -8 && n < 8 ? 0 : n));
+}
+
+void pad_added(int index) {
+    int n = 0;
+    while (n < VC_PADS && g_pads[n].joy) ++n;
+    if (n == VC_PADS) return; // (four already)
+    Pad& p = g_pads[n];
+    if (SDL_IsGameController(index)) p.pad = SDL_GameControllerOpen(index);
+    p.joy = p.pad ? SDL_GameControllerGetJoystick(p.pad) : SDL_JoystickOpen(index);
+    if (!p.joy) return;
+    p.id = SDL_JoystickInstanceID(p.joy);
+    p.fresh = true;
+}
+
+void pad_removed(SDL_JoystickID id) {
+    for (int n = 0; n < VC_PADS; ++n) {
+        Pad& p = g_pads[n];
+        if (!p.joy || p.id != id) continue;
+        if (p.pad) SDL_GameControllerClose(p.pad);
+        else SDL_JoystickClose(p.joy);
+        p = Pad();
+        send_pad(n, false, 0, 0, nullptr);
+    }
+}
+
+// Each pad's state now, sent if it has changed.
+void poll_pads() {
+    for (int n = 0; n < VC_PADS; ++n) {
+        Pad& p = g_pads[n];
+        if (!p.joy) continue;
+        uint8_t s[8] = {};
+        int axes = SDL_JoystickNumAxes(p.joy);
+        if (p.pad) {
+            s[VC_PAD_LX] = pad_axis(SDL_GameControllerGetAxis(p.pad, SDL_CONTROLLER_AXIS_LEFTX));
+            s[VC_PAD_LY] = pad_axis(SDL_GameControllerGetAxis(p.pad, SDL_CONTROLLER_AXIS_LEFTY));
+            s[VC_PAD_RX] = pad_axis(SDL_GameControllerGetAxis(p.pad, SDL_CONTROLLER_AXIS_RIGHTX));
+            s[VC_PAD_RY] = pad_axis(SDL_GameControllerGetAxis(p.pad, SDL_CONTROLLER_AXIS_RIGHTY));
+        } else { // (the right stick is the third and fourth axes: Z and Rz, as on Windows)
+            for (int a = 0; a < 4 && a < axes; ++a) s[VC_PAD_LX + a] = pad_axis(SDL_JoystickGetAxis(p.joy, a));
+        }
+        int buttons = SDL_JoystickNumButtons(p.joy);
+        for (int b = 0; b < 16 && b < buttons; ++b)
+            if (SDL_JoystickGetButton(p.joy, b)) s[VC_PAD_BTN1 + b / 8] |= static_cast<uint8_t>(1 << (b % 8));
+        if (SDL_JoystickNumHats(p.joy) > 0) {
+            uint8_t hat = SDL_JoystickGetHat(p.joy, 0);
+            s[VC_PAD_DPAD] = static_cast<uint8_t>(((hat & SDL_HAT_UP) ? VC_PAD_UP : 0) | ((hat & SDL_HAT_DOWN) ? VC_PAD_DOWN : 0) |
+                                                  ((hat & SDL_HAT_LEFT) ? VC_PAD_LEFT : 0) | ((hat & SDL_HAT_RIGHT) ? VC_PAD_RIGHT : 0));
+        } else { // (a simple pad's cross is its X and Y)
+            int8_t lx = static_cast<int8_t>(s[VC_PAD_LX]), ly = static_cast<int8_t>(s[VC_PAD_LY]);
+            s[VC_PAD_DPAD] = static_cast<uint8_t>((ly <= -64 ? VC_PAD_UP : 0) | (ly >= 64 ? VC_PAD_DOWN : 0) |
+                                                  (lx <= -64 ? VC_PAD_LEFT : 0) | (lx >= 64 ? VC_PAD_RIGHT : 0));
+        }
+        if (p.fresh || std::memcmp(s, p.sent, sizeof(s)) != 0) {
+            p.fresh = false;
+            std::memcpy(p.sent, s, sizeof(s));
+            send_pad(n, true, SDL_JoystickGetVendor(p.joy), SDL_JoystickGetProduct(p.joy), s);
+        }
+    }
+}
+
 // The keys that type no character, as a terminal sends them.
 const char* key_sequence(SDL_Keycode k) {
     switch (k) {
@@ -122,6 +215,11 @@ int main(int argc, char** argv) {
     if (scale < 1) scale = 1;
 
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1"); // the emulator's terminal keys stay its own
+    // The gamepads work whichever window has the focus (as on Windows), and through the kernel's
+    // own drivers, which keep a pad's buttons in its own order -- SDL's drivers for some pads
+    // would put them in SDL's.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::fprintf(stderr, "\r\npugputer-video: no window: %s\r\n", SDL_GetError());
         return 1;
@@ -137,6 +235,7 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return 1;
     }
+    SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER); // (without it, simply no gamepads)
     SDL_RenderSetLogicalSize(ren, kW, kH); // as big as fits, in the picture's own shape
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_StartTextInput();
@@ -195,6 +294,10 @@ int main(int argc, char** argv) {
                     const char rec[3] = {'\xFF', 'W', static_cast<char>(clicks)};
                     send(rec, sizeof(rec));
                 }
+            } else if (e.type == SDL_JOYDEVICEADDED) {
+                pad_added(e.jdevice.which);
+            } else if (e.type == SDL_JOYDEVICEREMOVED) {
+                pad_removed(e.jdevice.which);
             } else if (e.type == SDL_KEYDOWN) {
                 send_key(e.key.keysym.scancode, true);
                 SDL_Keycode k = e.key.keysym.sym;
@@ -208,6 +311,7 @@ int main(int argc, char** argv) {
             }
             got = SDL_PollEvent(&e) != 0;
         }
+        poll_pads();
         bool show = false;
         {
             std::lock_guard<std::mutex> g(g_lock);

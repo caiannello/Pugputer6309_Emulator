@@ -504,8 +504,8 @@ void VideoOut::show(const uint32_t* pixels) {
 void VideoOut::set_pointer_hidden(bool hidden) { impl_->hide_pointer = hidden; }
 
 // What pugputer-video sends (see pugputer_video.cpp): characters typed, below $80, and
-// $FF-prefixed records -- 'K' usage down, 'M' x(2) y(2) buttons, 'W' clicks -- of the keys and
-// the mouse.
+// $FF-prefixed records -- 'K' usage down, 'M' x(2) y(2) buttons, 'W' clicks, 'P' pad present
+// vid(2) pid(2) state(8) -- of the keys, the mouse and the gamepads.
 bool VideoOut::poll(Input& in) {
     if (impl_->input.empty() && impl_->from >= 0) {
         uint8_t buf[256];
@@ -521,7 +521,7 @@ bool VideoOut::poll(Input& in) {
                 } else {
                     if (i + 1 >= g.size()) break;
                     uint8_t kind = g[i + 1];
-                    size_t len = kind == 'K' ? 4 : kind == 'M' ? 7 : kind == 'W' ? 3 : 2;
+                    size_t len = kind == 'K' ? 4 : kind == 'M' ? 7 : kind == 'W' ? 3 : kind == 'P' ? 16 : 2;
                     if (i + len > g.size()) break; // the rest is still on its way
                     const uint8_t* r = g.data() + i + 2;
                     i += len;
@@ -537,6 +537,13 @@ bool VideoOut::poll(Input& in) {
                     } else if (kind == 'W') {
                         e.kind = Input::Wheel;
                         e.clicks = static_cast<int8_t>(r[0]);
+                    } else if (kind == 'P' && r[0] < 4) {
+                        e.kind = Input::Pad;
+                        e.pad = r[0];
+                        e.present = r[1] != 0;
+                        e.vid = static_cast<uint16_t>(r[2] << 8 | r[3]);
+                        e.pid = static_cast<uint16_t>(r[4] << 8 | r[5]);
+                        std::memcpy(e.state, r + 6, sizeof(e.state));
                     } else {
                         continue;
                     }

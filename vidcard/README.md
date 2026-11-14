@@ -250,8 +250,9 @@ running `PADMAP` and pressing Esc sends the saved ones to the card.
 Any change sets the input interrupt's flag (`ISR` bit 3). A reset leaves the pads alone.
 
 On the card these are generic USB HID gamepads (D-input). XInput and PlayStation pads aren't
-supported. In the emulator they are the PC's first four joysticks or gamepads, on Windows; the
-Linux window doesn't pass them on yet, so there they read as not connected.
+supported. In the emulator they are the PC's first four joysticks or gamepads, on Windows and
+on Linux. Their buttons come in the order the PC gives them, which for some pads differs between
+the two.
 
 ## Drawing commands
 
