@@ -24,7 +24,7 @@ JOBS=$(nproc 2>/dev/null || echo 4)
 command -v cmake >/dev/null || { echo 'ERROR: cmake was not found on the PATH. See README.md, "Building from source".' >&2; exit 1; }
 
 echo "=== Assembling the BIOS, DOS, shell, editor, assembler, C library, utilities, demos, game kit and BASIC ==="
-for D in bios dos shell edit asmlink cc/lib utils demo gamekit; do
+for D in bios dos shell edit asmlink cc cc/lib utils demo gamekit; do
     "$ROOT/$D/compile.sh"
 done
 "$ROOT/basic309/build_basic.sh"

@@ -43,7 +43,9 @@ call "%ROOT%asmlink\compile.bat"
 if errorlevel 1 (popd & exit /b 1)
 popd
 
-echo Rebuilding the C library...
+echo Rebuilding the C compiler and library...
+call "%ROOT%cc\compile.bat"
+if errorlevel 1 exit /b 1
 call "%ROOT%cc\lib\compile.bat"
 if errorlevel 1 exit /b 1
 

@@ -53,3 +53,5 @@
 /demo/build/
 /vidcard/firmware/build/
 /gamekit/build/
+/cc/*.bin
+/cc/*.lst

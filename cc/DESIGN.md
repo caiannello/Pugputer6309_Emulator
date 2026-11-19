@@ -1,8 +1,10 @@
 # CC: a C compiler for the Pugputer (design)
 
-Status: phase 1 done (2026-11-19): LINK's libraries, AR, CRT0 and the first libc. See
-[`README.md`](README.md) for what is there now, and "Found in phase 1" at the end for what
-it settled. Decisions taken so far (2026-11-19):
+Status: phases 1 and 2 done (2026-11-19). Phase 1: LINK's libraries, AR, CRT0 and the first
+libc. Phase 2: CPP, and CC1 with `char`, `int`, pointers, arrays, functions, `typedef` and every
+statement and operator. See [`README.md`](README.md) for what is there now, and "Found in
+phase 1" and "Found in phase 2" at the end for what they settled. Decisions taken so far
+(2026-11-19):
 
 - The compiler is written in **6309 assembly**, like ASM and LINK. It is built with lwtools
   on the PC to bootstrap, and can be rebuilt on the Pugputer with ASM and LINK.
@@ -29,14 +31,16 @@ FOO.C --CPP--> FOO.I --CC1--> FOO.ASM --ASM -f obj--> FOO.O --LINK--> FOO.COM
 | `AR.COM` | New: a librarian for lwar-compatible `.a` archives, so that lwlink on the PC can read them too. |
 
 CPP and CC1 are separate programs because each must fit in the space a program gets
-($3400-$EFFF, about 47KB) together with its buffers. Their tables (macros, symbols, types)
-live in banked RAM through `pa_heap.asm`, as ASM's do.
+($3400-$EFFF, about 47KB) together with its buffers. CPP's macros live in banked RAM through
+`pa_heap.asm`, as ASM's symbols do. CC1 (16KB of code) keeps its names, types and symbols in
+a 16KB heap of its own for now; they can move to banked RAM if programs outgrow it.
 
 ### Inside CC1
 
 CC1 works one top-level declaration at a time. A function body is parsed one statement at a
-time. Each full expression becomes a tree in the banked heap, is type-checked, has constants
-folded, and is turned into code straight away. Then the tree is dropped. Only declarations
+time. Each full expression becomes a tree (in a pool of nodes, used again for the next one),
+is type-checked, has constants folded, and is turned into code straight away. Then the tree is
+dropped. (A `for`'s condition and step are kept together until both are code.) Only declarations
 (the symbols, types, struct layouts and string literals) last for the whole file. That keeps
 CC1's memory needs proportional to its declarations, not to the size of the source.
 
@@ -44,11 +48,15 @@ Code generation is plain and template-based:
 
 - **Registers:** D is the accumulator, X holds addresses, and intermediate values are pushed
   on the stack.
-- **6309 instructions** (which `-9` turns off): W as a second accumulator, so the common
-  binary operations need no push or pop; Q for `long` (`LDQ`, `STQ`, `ADDW`/`ADCD`); `MULD`
-  for `*`; `DIVD`/`DIVQ` for `/` and `%`; `TFM` for struct copy; `AIM`/`OIM`/`EIM` for
-  bit operations on memory.
-- **Optimization:** at first, only constant folding and choosing short branches. A peephole
+- **Operands in place:** a number, a variable, `*p` for a pointer variable, or an array's
+  element at a constant index is used where it is (`ADDD 4,U`, `LDD [-2,U]`, `STB _a+3`);
+  anything else on the right is made first and pushed (`ADDD ,S++`).
+- **6309 instructions** (which `-9` will turn off): `MULD` for `*`; `TFM` for locals' array
+  initializers (and struct copy, later); `NEGD`, `COMD`, `LSLD`, `ASRD`, `TSTD`; Q for `long`
+  (`LDQ`, `STQ`, `ADDW`/`ADCD`) in phase 3. W as a second accumulator, and `AIM`/`OIM`/`EIM`,
+  are for the peephole pass. `/`, `%` and shifts by a variable call the library's helpers
+  (`lib/arith.asm`), not `DIVD`/`DIVQ` (see "Found in phase 2").
+- **Optimization:** so far only constant folding. Every branch is long (`LBxx`). A peephole
   pass (`-O`) comes later.
 
 ## The calling convention
@@ -150,12 +158,14 @@ Each phase leaves something that works and is tested.
    library support and `AR.COM`. Assembly programs can use libc right away. The compiler's
    helper routines (16- and 32-bit multiply, divide and shift) moved to phase 2: their
    register interface is the code generator's to decide.
-2. **CPP and the core of CC1:** `char`, `int`, `unsigned`, pointers, arrays, functions,
-   every statement, globals and string literals. Tests compile C programs on the emulated
-   machine, run them and compare what they print.
-3. **The rest of the language:** `struct`/`union`, `typedef`, `enum`, function pointers,
-   `long`, variadic functions, initializers, `asm { }`, `interrupt`, `static`, and the
-   `const`/`volatile` qualifiers (accepted).
+2. **CPP and the core of CC1** (done): `char`, `int`, `unsigned`, pointers, arrays,
+   functions, every statement, globals and string literals; `typedef`, `static`, initializers
+   for arrays and calls through function pointers came early. The headers, and the library's
+   helpers (`lib/arith.asm`). Tests compile C programs on the emulated machine, run them and
+   compare what they print.
+3. **The rest of the language:** `struct`/`union`, `enum`, `long` (and `fseek`/`ftell`),
+   `asm { }`, `interrupt`, brace elision in initializers, `extern` in a block, a local array
+   sized by a `{ list }`, and `-9`. (Variadic functions already work, with `<stdarg.h>`.)
 4. **`B_SPAWN` and `CC.COM`; overlays** (LINK, CC1's stubs, `__farcall`, CRT0) and
    `<pug/bank.h>`.
 5. **`LIBPUG.A`** (video, sound, input), and a demo written in C.
@@ -199,3 +209,25 @@ Things that phase 2 onwards has to follow:
 - **`B_GETC` doesn't echo,** so libc's console input does its own line editing.
 - **DOS's text files end lines with CR** (`B_WRITELINE`) **or CR LF.** libc writes CR LF and
   reads either as `'\n'`.
+
+## Found in phase 2
+
+- **Arguments are expanded before they go into a macro.** CPP first expanded them where they
+  landed, marked off in the text. That got `XSTR(N)` (`#define XSTR(x) STR(x)`) wrong, since
+  `STR`'s `#` takes the argument before it's scanned. Now each argument a body uses (not next
+  to `#` or `##`) is copied above the end of the line and expanded there first, with the call's
+  state saved on the stack. The standard's examples all come out as it says.
+- **`char` is signed**, so `'\xff'` is -1 and `char c = 200` reads back as -56. CMOC's
+  default wasn't checked; `unsigned char` is there for bytes.
+- **`DIVD` and `DIVQ` aren't used.** They trap on a zero divisor, and their quotient must fit
+  in 15 bits (or 7), so `60000 / 1` overflows. The helpers divide by shifting and subtracting,
+  and give -1 for a zero divisor.
+- **`TST` leaves the carry alone** (the 6809's way), so a test against 0 is `TSTD` for `==`,
+  `!=` and signed comparisons, and `CMPD #0` for unsigned ones.
+- **A function's frame size is an `EQU` after it** (`LEAS -L3,S` / `L3 EQU 6`): it's only
+  known at the end. The forward reference makes the `LEAS` 16 bits wide, in ASM and lwasm alike.
+- **Strings go into `rodata` as they're read,** in the middle of a function's code: `SECTION
+  rodata`, a label and `FCB`s, and back to `SECTION code`.
+- **`FILE` is a `char` until structs,** and libc's console `FILE`s are C's `_iob` (`__iob` in
+  assembly). Programs never look inside a `FILE`, so nothing changes for them when it becomes a
+  struct.

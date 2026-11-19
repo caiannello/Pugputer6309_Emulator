@@ -3,9 +3,11 @@
 // asmlink/ar.asm makes) of the members cc/lib/libc.rsp lists, in that order. That
 // file is AR's response file: "AR @libc.rsp" makes the same archive on the Pugputer.
 // The objects are cc/lib's compile.bat's (or compile.sh's), made by lwasm.
-// mkdiskimg puts them on every disk; test_libc.cpp uses them the same way.
+// mkdiskimg puts them on every disk, with the C headers in /INCLUDE; test_libc.cpp
+// and test_cc.cpp use them the same way.
 #pragma once
 
+#include <cctype>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -70,6 +72,26 @@ inline bool c_library_files(const std::string& repo, std::vector<Fat16File>& out
     out.push_back(std::move(crt0));
     out.push_back(std::move(script));
     out.push_back(std::move(libc));
+    return true;
+}
+
+// The C headers (cc/include), as /INCLUDE/NAME.H: where CPP looks for them.
+inline const char* const kCHeaders[] = {"stddef.h", "stdio.h", "string.h", "ctype.h",
+                                        "stdlib.h", "limits.h", "stdarg.h"};
+
+inline bool c_header_files(const std::string& repo, std::vector<Fat16File>& out, std::string& error) {
+    for (const char* name : kCHeaders) {
+        std::ifstream f(repo + "/cc/include/" + name, std::ios::binary);
+        if (!f) {
+            error = std::string("can't read cc/include/") + name;
+            return false;
+        }
+        Fat16File h;
+        h.name = "INCLUDE/";
+        for (const char* c = name; *c; ++c) h.name += static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+        h.data.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        out.push_back(std::move(h));
+    }
     return true;
 }
 

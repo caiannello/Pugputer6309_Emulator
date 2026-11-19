@@ -358,6 +358,16 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
                 CHECK(same("/ASM/LIBC/LIBC.A", std::string(f.data.begin(), f.data.end()), m.file("/ASM/LIBC/LIBC.A")));
         m.run("CD /ASM/ASMLINK"); // (where the rest expects to be)
     }
+    // The C compiler's two programs.
+    m.run("CD /ASM/CC");
+    for (const char* prog : {"cpp", "cc1"}) {
+        std::string cmd = std::string("ASM -o ") + upper(prog) + ".COM " + prog + ".asm";
+        CHECK(m.run(cmd).find("ERROR") == std::string::npos);
+        std::string built = "/ASM/CC/" + upper(prog) + ".COM";
+        CHECK(same(built.c_str(), host_text(repo(std::string("cc/") + prog + ".bin")), m.file(built)));
+        if (std::getenv("ASM_TIMING")) std::printf("  %s: %.1f s at 3.58 MHz\n", cmd.c_str(), m.cycles / 3.58e6);
+    }
+    m.run("CD /ASM/ASMLINK");
     // A new program runs from where it was made, ahead of the search path.
     m.run("CD ..");
     CHECK(m.run("HEXDUMP basiccom.asm").find("000000  2A 20 42 41 53 49 43 43") != std::string::npos);

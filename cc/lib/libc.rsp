@@ -20,3 +20,4 @@ malloc.o
 stdio.o
 fileio.o
 printf.o
+arith.o

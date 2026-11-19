@@ -1,15 +1,17 @@
 // Builds basic309/disk.img: a fresh FAT16 disk image (see
 // pugputer/fat16_image.hpp) containing dos/dos.bin in its reserved
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
-// EDIT.COM, ASM.COM, LINK.COM, AR.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM, SONGKIT.COM and
-// SONGPLAY.COM (shell/shell.bin, edit/edit.bin, asmlink/asm.bin, asmlink/link.bin, asmlink/ar.bin,
-// utils/hexdump.bin, utils/move.bin and gamekit/build/{tilekit,songkit,songplay}.bin as
+// EDIT.COM, ASM.COM, LINK.COM, AR.COM, CPP.COM, CC1.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM,
+// SONGKIT.COM and SONGPLAY.COM (shell/shell.bin, edit/edit.bin, asmlink/asm.bin,
+// asmlink/link.bin, asmlink/ar.bin, cc/cpp.bin, cc/cc1.bin, utils/hexdump.bin, utils/move.bin
+// and gamekit/build/{tilekit,songkit,songplay}.bin as
 // assembled -- they carry their own
 // program headers), TILEKIT.INI (TILEKIT's default palettes, gamekit/TILEKIT.INI) and
 // BASIC.COM (the BASIC_LOAD-$EFFF window of basic309's S-record, given a program
 // header: load BASIC_LOAD, entry $C000 -- see pugputer/basic309_layout.hpp and EXE_* in
 // bios/defines.d); in /BANKS, SONGKIT's instrument banks (gamekit/banks); and in /LIB,
-// the C library (cc/lib: CRT0.O, CC.SCR and LIBC.A -- see pugputer/c_library.hpp).
+// the C library (cc/lib: CRT0.O, CC.SCR and LIBC.A), and in /INCLUDE its headers
+// (cc/include -- see pugputer/c_library.hpp).
 // DOS starts /CMD/SHELL.COM at boot, and the shell finds programs through its PATH
 // (/CMD by default).
 //
@@ -17,6 +19,7 @@
 //   mkdiskimg --dos path/to/dos.bin --basic path/to/exbasrom309.s19
 //             --shell path/to/shell.bin --edit path/to/edit.bin
 //             --asm path/to/asm.bin --link path/to/link.bin --ar path/to/ar.bin
+//             --cpp path/to/cpp.bin --cc1 path/to/cc1.bin
 //             --hexdump path/to/hexdump.bin --move path/to/move.bin
 //             --tilekit path/to/tilekit.bin --songplay path/to/songplay.bin
 //             --songkit path/to/songkit.bin
@@ -129,6 +132,8 @@ int main(int argc, char** argv) {
                                      {"--asm", ASM_BIN_DEFAULT, "ASM.COM"},
                                      {"--link", LINK_BIN_DEFAULT, "LINK.COM"},
                                      {"--ar", AR_BIN_DEFAULT, "AR.COM"},
+                                     {"--cpp", CPP_BIN_DEFAULT, "CPP.COM"},
+                                     {"--cc1", CC1_BIN_DEFAULT, "CC1.COM"},
                                      {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"},
                                      {"--move", MOVE_BIN_DEFAULT, "MOVE.COM"},
                                      {"--tilekit", TILEKIT_BIN_DEFAULT, "TILEKIT.COM"},
@@ -261,12 +266,17 @@ int main(int argc, char** argv) {
     // SONGKIT's banks, always (from the repository this was built in, or --sources's).
     for (const auto& src : pugputer::kToolFiles)
         if (!add_file(sources.empty() ? REPO_DIR_DEFAULT : sources, src)) return 1;
-    // The C library, always: /LIB/CRT0.O, /LIB/CC.SCR and /LIB/LIBC.A (pugputer/c_library.hpp).
+    // The C library, always: /LIB/CRT0.O, /LIB/CC.SCR and /LIB/LIBC.A, and the headers in
+    // /INCLUDE (pugputer/c_library.hpp).
     {
         std::vector<Fat16File> lib;
         std::string error;
         if (!pugputer::c_library_files(sources.empty() ? REPO_DIR_DEFAULT : sources, lib, error)) {
             std::fprintf(stderr, "The C library: %s\n", error.c_str());
+            return 1;
+        }
+        if (!pugputer::c_header_files(sources.empty() ? REPO_DIR_DEFAULT : sources, lib, error)) {
+            std::fprintf(stderr, "The C headers: %s\n", error.c_str());
             return 1;
         }
         for (auto& f : lib) add(std::move(f), "");
