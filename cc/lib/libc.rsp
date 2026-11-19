@@ -1,0 +1,22 @@
+-c libc.a
+strlen.o
+strcpy.o
+strncpy.o
+strcat.o
+strcmp.o
+strncmp.o
+strchr.o
+strrchr.o
+strstr.o
+memcpy.o
+memmove.o
+memset.o
+memcmp.o
+ctype.o
+atoi.o
+abs.o
+rand.o
+malloc.o
+stdio.o
+fileio.o
+printf.o

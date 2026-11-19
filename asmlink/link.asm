@@ -7,7 +7,7 @@
 ; link script says, resolves the references between them, and writes the
 ; program: the same bytes, S-records and map as lwlink.
 ;
-;   LINK [options] file.o ...
+;   LINK [options] file.o|file.a ... [-l lib] ...
 ;     -f FMT, --format=FMT     raw (the default), srec, com (raw with a Pugputer
 ;                              program header: load = the first section's
 ;                              address, entry = the entry point, if any)
@@ -17,8 +17,14 @@
 ;     -e SYM, --entry=SYM      the entry point (a symbol, or a hex address)
 ;     --section-base=SECT=ADDR a load address (with the default script only)
 ;     -r                       the same as -f raw
+;     -l LIB, --library=LIB    the library libLIB.a (or -l:NAME, NAME as it is),
+;                              looked for in each -L directory in turn; only
+;                              the members something needs are linked
+;     -L DIR, --library-path=DIR  a directory for -l (up to 4)
 ;     @FILE                    more arguments, from FILE (the shell's command
 ;                              line is short; spaces and line ends separate)
+;
+; An archive (lwar's LWAR1V) named as a file is linked whole, as lwlink does.
 ;
 ; A link script, one statement a line (# and ; start comments):
 ;     section NAME[,bss|,!bss] [load ADDR | high ADDR]    (NAME * = all others)
@@ -30,7 +36,14 @@
 ; symbols, relocations and bytes); the script places the sections one after
 ; another from each load address (or down from it, "high"); each relocation's
 ; expression (postfix, lwlink's terms) is evaluated with the final addresses and
-; patched into the bytes; then the output and the map are written. No libraries.
+; patched into the bytes; then the output and the map are written.
+;
+; Each file, and each member of an archive, is a "unit", numbered in the order
+; lwlink walks its tree of files: a library's members follow it. A unit is in
+; the link ("forced", lwlink's word) when it was named as an object, or is in an
+; archive named as a file, or a reference from a unit in the link found one of
+; its exports; this goes round until nothing more comes in (lwlink's
+; resolve_files). Only those units' sections are placed.
 ;------------------------------------------------------------------------------
     INCLUDE defines.d
 ;------------------------------------------------------------------------------
@@ -42,7 +55,10 @@ STACKTOP    equ  $C000
 PATHMAX     equ  79
 SYMMAX      equ  127               ; longest symbol or section name kept
 MAXPAGES    equ  48
-MAXFILES    equ  32
+MAXINPUTS   equ  64                ; files and -l libraries on the command line
+MAXUNITS    equ  255               ; those and the archives' members
+MAXLDIRS    equ  4                 ; -L directories
+POOLSZ      equ  8192              ; their names
 MAXSLINES   equ  32
 MAXBASES    equ  8
 CHUNKSZ     equ  1021
@@ -81,6 +97,17 @@ RE_OFF      equ  3
 RE_FLAGS    equ  5                 ; 1: 8 bits
 RE_LEN      equ  6                 ; bytes of expression
 RE_EXPR     equ  7
+; An input (INPUTS, 4 bytes each): what the command line named
+IN_NAME     equ  0                 ; its name (in POOL)
+IN_LIB      equ  2                 ; 1: a -l library
+IN_UNIT     equ  3                 ; its unit
+IN_SIZE     equ  4
+; A unit (UNITS, 4 bytes each, unit n at UNITS+4*(n-1))
+UN_NAME     equ  0                 ; its name (in POOL): lwlink's file name
+UN_FLAGS    equ  2
+UN_PARENT   equ  3                 ; the archive it is a member of (0: none)
+UN_SIZE     equ  4
+UF_FORCED   equ  1                 ; in the link
 ; A link-script "section" line (SLINES)
 SL_NAME     equ  0                 ; "" = * (the ones not placed yet)
 SL_YES      equ  32                ; flags a section must have
@@ -114,7 +141,17 @@ DP_VP       SET  DPAGE
             DVAR TMP2,2
             DVAR TMPB,1
             DVAR FORMAT,1
-            DVAR NFILES,1
+            DVAR NINPUTS,1
+            DVAR NUNITS,1
+            DVAR NLDIRS,1
+            DVAR CURIN,1               ; reading: the input
+            DVAR RFPASS,1              ; ... the libraries (1) or the files (0)
+            DVAR TOPUNIT,1             ; ... its unit
+            DVAR POOLPTR,2             ; the next free byte of POOL
+            DVAR RDFPOS,4              ; the input file: bytes read so far
+            DVAR MEMEND,4              ; an archive member: where it ends
+            DVAR NFORCED,1             ; a unit came into the link
+            DVAR FXPAR,1               ; FINDEXPF: only this archive's members
             DVAR NSLINES,1
             DVAR NBASES,1
             DVAR CURFILE,1
@@ -182,6 +219,8 @@ START       LDS  #STACKTOP
             LDY  #VARS
             LDW  #VARSEND-VARS
             TFM  X,Y+
+            LDD  #POOL
+            STD  <POOLPTR
             JSR  HEAPINIT
             JSR  CMDLINE
             JSR  SCRIPT
@@ -243,6 +282,10 @@ CL_ARG      CMPA #'@'                  ; @FILE: more arguments, from a file
             LDA  1,X
             CMPA #'-'
             BEQ  CL_LONG
+            CMPA #'l'                  ; -l and -L: the case counts, as in lwlink
+            LBEQ CL_LIB
+            CMPA #'L'
+            LBEQ CL_LDIR
             JSR  UPCASE
             LEAX 2,X
             CMPA #'F'
@@ -300,6 +343,12 @@ CL_LONG     LEAX 2,X                   ; --name=value
             LDY  #LO_ENTRY
             JSR  PREFIX
             BEQ  CL_ENT2
+            LDY  #LO_LPATH
+            JSR  PREFIX
+            LBEQ CL_LDIR2
+            LDY  #LO_LIB
+            JSR  PREFIX
+            LBEQ CL_LIB2
             LDY  #LO_BASE
             JSR  PREFIX
             LBNE USAGE
@@ -335,18 +384,63 @@ CL_BEQ      CLR  ,Y
             PULS D
             STD  SL_LOAD,Y
             LBRA CL_NEXT
-CL_FILE     LDA  <NFILES               ; an input file
-            CMPA #MAXFILES
+CL_FILE     CLRA                       ; an input file
+            BRA  CL_INPUT
+CL_LIB      LEAX 2,X                   ; -l LIB
+            JSR  OPTARG
+CL_LIB2     LDA  #1
+CL_INPUT    PSHS A
+            LDA  <NINPUTS
+            CMPA #MAXINPUTS
             BHS  CL_MANY
+            LDY  #WORKBUF
+            JSR  GETWORD
+            PSHS X
+            LDX  #WORKBUF
+            JSR  POOLADD               ; -> D = its copy
+            PSHS D
+            LDB  <NINPUTS
+            CLRA
+            LSLB
+            ROLA
+            LSLB
+            ROLA
+            ADDD #INPUTS
+            TFR  D,Y
+            PULS D
+            STD  IN_NAME,Y
+            PULS X
+            PULS A
+            STA  IN_LIB,Y
+            INC  <NINPUTS
+            LBRA CL_NEXT
+CL_LDIR     LEAX 2,X                   ; -L DIR
+            JSR  OPTARG
+CL_LDIR2    LDA  <NLDIRS
+            CMPA #MAXLDIRS
+            LBHS USAGE
             LDB  #PATHMAX+1
             MUL
-            ADDD #FILETAB
+            ADDD #LDIRS
             TFR  D,Y
             JSR  GETWORD
-            INC  <NFILES
+            INC  <NLDIRS
             LBRA CL_NEXT
 CL_MANY     LDX  #M_MANYFILES
             JMP  FATAL
+; X = a name: copied into POOL -> D = where. Keeps X.
+POOLADD     PSHS X
+            JSR  STRLEN
+            ADDD #1
+            ADDD <POOLPTR
+            CMPD #POOL+POOLSZ
+            BHI  CL_MANY
+            LDY  <POOLPTR
+            STD  <POOLPTR
+            PSHS Y
+            JSR  STRCPY
+            PULS D
+            PULS X,PC
 CL_RESP     TST  RSPIN                 ; (not inside another one)
             LBNE USAGE
             LEAX 1,X
@@ -378,7 +472,7 @@ CL_REND     CLR  ,X
             CLR  RSPIN
             PULS X
             LBRA CL_NEXT
-CL_DONE     TST  <NFILES
+CL_DONE     TST  <NINPUTS
             BNE  CL_HAVE
             LDX  #M_NOINPUT
             JMP  FATAL
@@ -723,6 +817,8 @@ RDOPENF     LDE  #FOPEN_READ
             CLRD
             STD  <RDPOS
             STD  <RDLEN
+            STD  <RDFPOS
+            STD  <RDFPOS+2
             ANDCC #$FE
 RO_RET      RTS
 RDCLOSE     TST  <RDOPEN
@@ -752,7 +848,14 @@ RB_HAVE     LDX  #RDBUF
             LEAX D,X
             ADDD #1
             STD  <RDPOS
-            LDA  ,X
+            INC  <RDFPOS+3
+            BNE  RB_POS
+            INC  <RDFPOS+2
+            BNE  RB_POS
+            INC  <RDFPOS+1
+            BNE  RB_POS
+            INC  <RDFPOS
+RB_POS      LDA  ,X
             ANDCC #$FE
             PULS B,X,Y,PC
 RB_END      ORCC #1
@@ -817,48 +920,302 @@ FILENAME    TSTB
             BNE  FN_FILE
             LDX  #M_SYNTH
             RTS
-FN_FILE     PSHS D
+FN_FILE     PSHS Y
+            JSR  UNITREC
+            LDX  UN_NAME,Y
+            PULS Y,PC
+; B = a unit (1 up): -> Y = its record. Keeps D and X.
+UNITREC     PSHS D
             DECB
-            LDA  #PATHMAX+1
-            MUL
-            ADDD #FILETAB
-            TFR  D,X
+            CLRA
+            LSLB
+            ROLA
+            LSLB
+            ROLA
+            ADDD #UNITS
+            TFR  D,Y
             PULS D,PC
-;------------------------------------------------------------------------------
-; The object files, into the heap.
-;------------------------------------------------------------------------------
-READFILES   CLR  <CURFILE
-RF_FILE     INC  <CURFILE
+; X = a name (in POOL), A = its flags, B = its archive (0: none): a new unit ->
+; B = its number (CURFILE too). Keeps X.
+NEWUNIT     PSHS D
+            LDB  <NUNITS
+            CMPB #MAXUNITS
+            LBHS CL_MANY
+            INCB
+            STB  <NUNITS
+            STB  <CURFILE
+            JSR  UNITREC
+            STX  UN_NAME,Y
+            PULS D
+            STA  UN_FLAGS,Y
+            STB  UN_PARENT,Y
             LDB  <CURFILE
-            CMPB <NFILES
-            BHI  RF_RET
-            JSR  FILENAME
-            JSR  RDOPENF
+            RTS
+; B = a unit: it is in the link, and so is its archive. NFORCED set if either
+; wasn't. Keeps X.
+FORCE       PSHS D,Y
+FC_UNIT     JSR  UNITREC
+            LDA  UN_FLAGS,Y
+            BITA #UF_FORCED
+            BNE  FC_HAD
+            ORA  #UF_FORCED
+            STA  UN_FLAGS,Y
+            LDA  #1
+            STA  <NFORCED
+FC_HAD      LDB  UN_PARENT,Y
+            BNE  FC_UNIT
+            PULS D,Y,PC
+; B = a unit: Z clear if it is in the link. Keeps X.
+INLINK      PSHS Y
+            JSR  UNITREC
+            LDB  UN_FLAGS,Y
+            BITB #UF_FORCED
+            PULS Y,PC
+;------------------------------------------------------------------------------
+; The object files and archives, into the heap (lwlink's read_files): each
+; input, then each member of an archive, a unit of its own. The -l libraries
+; come first, then the files, wherever they were on the command line: lwlink's
+; option parser takes every option (-l among them) before the other arguments.
+;------------------------------------------------------------------------------
+READFILES   LDA  #1                    ; RFPASS 1: the libraries; 0: the files
+            STA  <RFPASS
+RF_PASS     CLR  <CURIN
+RF_FILE     LDB  <CURIN
+            CMPB <NINPUTS
+            BLO  RF_ONE
+            TST  <RFPASS
+            LBEQ RF_RET
+            CLR  <RFPASS
+            BRA  RF_PASS
+RF_ONE      CLRA
+            LSLB
+            ROLA
+            LSLB
+            ROLA
+            ADDD #INPUTS
+            TFR  D,U
+            LDA  IN_LIB,U
+            CMPA <RFPASS
+            BEQ  RF_THIS
+            INC  <CURIN
+            BRA  RF_FILE
+RF_THIS     LDX  IN_NAME,U
+            LDA  #UF_FORCED            ; a library starts out of the link
+            TST  IN_LIB,U
+            BEQ  RF_NEWU
+            CLRA
+RF_NEWU     CLRB
+            JSR  NEWUNIT
+            STB  IN_UNIT,U
+            STB  <TOPUNIT
+            TST  IN_LIB,U
+            BEQ  RF_PLAIN
+            JSR  LIBOPEN
+            BRA  RF_OPEN
+RF_PLAIN    JSR  RDOPENF
             BCC  RF_OPEN
             LDX  #M_NOFILE
             JSR  PRINTS
             LDB  <CURFILE
             JSR  FILENAME
             JMP  FATAL
-RF_OPEN     LDY  #M_MAGIC              ; "LWOBJ16" and a NUL
-            LDB  #8
+RF_OPEN     LDX  #NAME2                ; its first 6 bytes
+            LDB  #6
+RF_MREAD    JSR  RDBYTE
+            BCS  RF_NOTOBJ
+            STA  ,X+
+            DECB
+            BNE  RF_MREAD
+            LDX  #NAME2                ; "LWAR1V": an archive
+            LDY  #M_ARMAGIC
+            LDB  #6
+            JSR  MEMEQ
+            BEQ  RF_ARCH
+            LDX  #NAME2                ; else "LWOBJ16" and a NUL
+            LDY  #M_MAGIC
+            LDB  #6
+            JSR  MEMEQ
+            BNE  RF_NOTOBJ
+            LDY  #M_MAGIC+6
+            LDB  #2
 RF_MAGIC    JSR  RDBYTE
             BCS  RF_NOTOBJ
             CMPA ,Y+
             BNE  RF_NOTOBJ
             DECB
             BNE  RF_MAGIC
-RF_SECT     JSR  OBYTE                 ; a section, or the end
-            TSTA
-            BEQ  RF_DONE
-            JSR  READSECT
-            BRA  RF_SECT
+            JSR  RF_OBJECT
 RF_DONE     JSR  RDCLOSE
-            BRA  RF_FILE
+            INC  <CURIN
+            LBRA RF_FILE
 RF_NOTOBJ   JSR  CURNAME
             LDX  #M_NOTOBJ
             JMP  FATAL
 RF_RET      RTS
+; An object file's sections, to its end.
+RF_OBJECT
+RF_SECT     JSR  OBYTE                 ; a section, or the end
+            TSTA
+            BEQ  RF_ORET
+            JSR  READSECT
+            BRA  RF_SECT
+RF_ORET     RTS
+; Z set if the B bytes at X and Y are the same.
+MEMEQ       LDA  ,X+
+            CMPA ,Y+
+            BNE  ME_RET
+            DECB
+            BNE  MEMEQ
+ME_RET      RTS
+; An archive (lwlink's read_lwar1v): its members, each "NAME", a NUL, the
+; length (32 bits, high byte first) and an object file; a NUL ends them, as
+; does the end of the file or a length of 0.
+RF_ARCH     JSR  RDBYTE
+            BCS  RF_DONE
+            TSTA
+            BEQ  RF_DONE
+            LDX  #NAMEBUF              ; its name
+            LDB  #SYMMAX
+RF_ANAME    STA  ,X
+            TSTA
+            BEQ  RF_ALEN
+            TSTB
+            BEQ  RF_ANEXT
+            LEAX 1,X
+            DECB
+RF_ANEXT    JSR  RDBYTE
+            BCC  RF_ANAME
+RF_MALF     LDX  #M_MALF               ; "Malformed archive file NAME."
+            JSR  PRINTS
+            LDB  <TOPUNIT
+            JSR  FILENAME
+            JSR  PRINTS
+            LDX  #M_DOT
+            JMP  FATAL
+RF_ALEN     LDX  #MEMEND               ; its length
+            LDB  #4
+RF_ALBYTE   JSR  RDBYTE
+            BCS  RF_DONE
+            STA  ,X+
+            DECB
+            BNE  RF_ALBYTE
+            LDD  <MEMEND               ; (LDQ's Z is only bits 31-16's)
+            BNE  RF_ALEN2
+            LDD  <MEMEND+2
+            LBEQ RF_DONE
+RF_ALEN2    LDQ  <MEMEND
+            ADDW <RDFPOS+2             ; -> where it ends
+            ADCD <RDFPOS
+            STQ  <MEMEND
+            LDX  #NAMEBUF              ; a unit, in the link if the archive is
+            JSR  POOLADD
+            TFR  D,X
+            LDB  <TOPUNIT
+            JSR  UNITREC
+            LDA  UN_FLAGS,Y
+            JSR  NEWUNIT
+            LDY  #M_MAGIC              ; an object file (not another archive)
+            LDB  #8
+RF_MMAGIC   JSR  RDBYTE
+            BCS  RF_MALF
+            CMPA ,Y+
+            LBNE RF_NOTOBJ
+            DECB
+            BNE  RF_MMAGIC
+            JSR  RF_OBJECT
+RF_ASKIP    LDD  <RDFPOS               ; on to its end
+            CMPD <MEMEND
+            BHI  RF_MALF
+            BLO  RF_ASKIP1
+            LDD  <RDFPOS+2
+            CMPD <MEMEND+2
+            BHI  RF_MALF
+            LBEQ RF_ARCH
+RF_ASKIP1   JSR  RDBYTE
+            BCS  RF_MALF
+            BRA  RF_ASKIP
+; X = a -l library's name: opened, from the first -L directory that has it:
+; DIR/libNAME.a (or DIR/NAME for -l:NAME).
+LIBOPEN     CLR  <TMPB
+LO_DIR      LDB  <TMPB
+            CMPB <NLDIRS
+            BHS  LO_NONE
+            PSHS X
+            LDA  #PATHMAX+1
+            MUL
+            ADDD #LDIRS
+            TFR  D,X
+            LDY  #WORKBUF
+            JSR  STRCPY
+            CMPY #WORKBUF              ; DIR, then a / unless it ends in one
+            BEQ  LO_SLASH
+            LDA  -1,Y
+            CMPA #'/'
+            BEQ  LO_NAME
+LO_SLASH    LDA  #'/'
+            STA  ,Y+
+LO_NAME     LDX  ,S
+            LDA  ,X
+            CMPA #':'
+            BNE  LO_LIBNAME
+            LEAX 1,X
+            BRA  LO_REST
+LO_LIBNAME  PSHS X
+            LDX  #M_LIB
+            JSR  STRCPY
+            PULS X
+            JSR  STRCPY
+            LDX  #M_DOTA
+LO_REST     JSR  STRCPY
+            LDX  #WORKBUF
+            JSR  RDOPENF
+            PULS X
+            BCC  LO_RET
+            INC  <TMPB
+            BRA  LO_DIR
+LO_NONE     PSHS X
+            LDX  #M_NOLIB              ; "Can't open library: -lNAME"
+            JSR  PRINTS
+            PULS X
+            JMP  FATAL
+LO_RET      RTS
+; After the files are in: each library that brought nothing in (lwlink's
+; warning; N counts from 0 in lwlink's order, the libraries first).
+LIBWARN     CLR  <RFPASS               ; (the libraries' count)
+            CLRB
+LW_LOOP     CMPB <NINPUTS
+            BHS  LW_RET
+            PSHS B
+            CLRA
+            LSLB
+            ROLA
+            LSLB
+            ROLA
+            ADDD #INPUTS
+            TFR  D,U
+            TST  IN_LIB,U
+            BEQ  LW_NEXT
+            INC  <RFPASS
+            LDB  IN_UNIT,U
+            JSR  INLINK
+            BNE  LW_NEXT
+            LDX  #M_WARNLIB            ; "Warning: library -lNAME (N) does not
+            JSR  PRINTS                ; resolve any symbols"
+            LDX  IN_NAME,U
+            JSR  PRINTS
+            LDX  #M_OPEN
+            JSR  PRINTS
+            LDB  <RFPASS
+            DECB
+            CLRA
+            JSR  PRINTDEC
+            LDX  #M_NORES
+            JSR  PRINTS
+            JSR  PRINTNL
+LW_NEXT     PULS B
+            INCB
+            BRA  LW_LOOP
+LW_RET      RTS
 ; A = the first byte of a section's name: the section.
 READSECT    JSR  OSTRING
             CLR  <TMPB                 ; its flags
@@ -1107,17 +1464,20 @@ RD_DONE     JSR  SECTMAP
             RTS
 ;------------------------------------------------------------------------------
 ; Before placing (lwlink's resolve_files): every relocation's external names
-; looked up once, which brings in each constant section one refers to -- at
-; load address 0, and first in the list of sections.
+; looked up, which brings in each constant section one refers to -- at load
+; address 0, and first in the list of sections -- and each archive member one
+; finds. The units in the link are gone through again and again, in order, until
+; a pass brings nothing more in.
 ;------------------------------------------------------------------------------
 PRECONST    LDA  #1
             STA  <RESONLY
+PC_PASS     CLR  <NFORCED
             LDD  <SECTS
             STD  <PCSECT
             LDA  <SECTS+2
             STA  <PCSECT+2
 PC_SECT     TST  <PCSECT
-            BEQ  PC_RET
+            LBEQ PC_END
             LDD  <PCSECT
             STD  <CURSECT
             LDA  <PCSECT+2
@@ -1133,6 +1493,9 @@ PC_SECT     TST  <PCSECT
             STD  <RELP
             LDA  SC_RELOCS+2,X
             STA  <RELP+2
+            LDB  <CURFILE              ; (a unit not in the link: not yet)
+            JSR  INLINK
+            BEQ  PC_SECT
 PC_REL      TST  <RELP
             BEQ  PC_SECT
             LDD  <RELP
@@ -1173,8 +1536,10 @@ PC_SKIP1    LEAX 1,X
 PC_SKIPS    LDA  ,X+                   ; (a local name: skipped)
             BNE  PC_SKIPS
             BRA  PC_TERM
-PC_RET      CLR  <RESONLY
-            RTS
+PC_END      TST  <NFORCED
+            LBNE PC_PASS
+            CLR  <RESONLY
+            JMP  LIBWARN
 ;------------------------------------------------------------------------------
 ; Placing the sections (lwlink's resolve_sections).
 ;------------------------------------------------------------------------------
@@ -1205,6 +1570,9 @@ PL_WILD     LDD  <SECTS                ; *: each section not placed, with the
 PL_WLOOP    TST  <CURSECT
             BEQ  PL_NEXT
             JSR  SECTMAP
+            LDB  SC_FILE,X
+            JSR  INLINK
+            BEQ  PL_WSKIP
             LDA  SC_FLAGS,X
             BITA #SEF_CONST
             BNE  PL_WSKIP
@@ -1251,6 +1619,9 @@ PLACENAME   LDD  <SECTS
 PN_LOOP     TST  <CURSECT
             BEQ  PN_RET
             JSR  SECTMAP
+            LDB  SC_FILE,X
+            JSR  INLINK
+            BEQ  PN_NEXT
             LDA  SC_FLAGS,X
             BITA #SEF_CONST
             BNE  PN_NEXT
@@ -1464,15 +1835,27 @@ FE_SYNHIT   LDD  SY_VAL,X
             ANDCC #$FE
             RTS
 FE_FILES    CLR  <FOUNDC
+            CLR  <FXPAR
             LDB  <CURFILE              ; its own file first
             BEQ  FE_ALL
             JSR  FINDEXPF
             BCC  FE_RET
+            LDB  <CURFILE              ; then, for an archive's member, the
+            JSR  UNITREC               ; archive's members
+            LDA  UN_PARENT,Y
+            BEQ  FE_ALL
+            STA  <FXPAR
+            CLRB
+            JSR  FINDEXPF
+            BCC  FE_RET
+            CLR  <FXPAR
 FE_ALL      CLRB                       ; then all of them
             JSR  FINDEXPF
 FE_RET      RTS
-; B = a file (0: every file): its sections' exports searched for NAMEBUF. -> D
-; = the value, carry clear; carry set if not found.
+; B = a file (0: every file, or with FXPAR the members of that archive): its
+; sections' exports searched for NAMEBUF. -> D = the value, carry clear; carry
+; set if not found. The unit found in is in the link from then on (lwlink's
+; find_external_sym_recurse), unless its section isn't going to be.
 FINDEXPF    STB  <TMPB
             LDD  <SECTS
             STD  <FARP2
@@ -1486,8 +1869,16 @@ FX_SECT     LDA  <FARP2
             STA  <FARP+2
             JSR  FARMAP
             LDB  <TMPB
-            BEQ  FX_ANY
+            BEQ  FX_PAR
             CMPB SC_FILE,X
+            LBNE FX_NEXTS
+            BRA  FX_ANY
+FX_PAR      LDB  <FXPAR                ; (only that archive's members)
+            BEQ  FX_ANY
+            LDB  SC_FILE,X
+            JSR  UNITREC
+            LDB  UN_PARENT,Y
+            CMPB <FXPAR
             LBNE FX_NEXTS
 FX_ANY      LDD  SC_EXPORTS,X
             STD  <FARP
@@ -1545,7 +1936,9 @@ FX_CONSTIN
             LDA  <FARP2+2
             STA  <FARP+2
             JSR  FARMAP
-FX_PLACED   LDD  <PVAL
+FX_PLACED   LDB  SC_FILE,X
+            JSR  FORCE
+            LDD  <PVAL
             LDB  SC_FLAGS,X
             BITB #SEF_CONST
             BNE  FX_CONST
@@ -2672,6 +3065,9 @@ SREC_SCRIPT FCN  "define basesympat s_%s"
             FCB  0
 M_MAGIC     FCC  "LWOBJ16"
             FCB  0
+M_ARMAGIC   FCC  "LWAR1V"
+M_LIB       FCN  "lib"
+M_DOTA      FCN  ".a"
 M_RAW       FCN  "raw"
 M_SREC      FCN  "srec"
 M_COM       FCN  "com"
@@ -2694,6 +3090,8 @@ LO_MAP      FCN  "map="
 LO_SCRIPT   FCN  "script="
 LO_ENTRY    FCN  "entry="
 LO_BASE     FCN  "section-base="
+LO_LIB      FCN  "library="
+LO_LPATH    FCN  "library-path="
 M_S1        FCN  "S1"
 M_S903      FCN  "S903"
 M_MSECT     FCN  "Section: "
@@ -2706,7 +3104,9 @@ M_SYNTH     FCN  "<synthetic>"
 M_COLON     FCN  ": "
 M_USAGE     FCC  "Usage: LINK [-f raw|srec|com] [-o out] [-m map] [-s script]"
             FCB  CR,LF
-            FCC  "               [-e entry] [--section-base=S=ADDR] file.o ..."
+            FCC  "               [-e entry] [--section-base=S=ADDR] [-L dir]"
+            FCB  CR,LF
+            FCC  "               file.o|file.a ... [-l lib] ..."
             FCB  CR,LF,0
 M_BADFMT    FCN  "Invalid output format: "
 M_NOINPUT   FCN  "No input files"
@@ -2716,6 +3116,11 @@ M_NOFILE    FCN  "Can't open file "
 M_NOOUT     FCN  "Cannot open output file "
 M_NOMAP     FCN  "Cannot open map file "
 M_NOTOBJ    FCN  "unknown file format"
+M_MALF      FCN  "Malformed archive file "
+M_DOT       FCN  "."
+M_NOLIB     FCN  "Can't open library: -l"
+M_WARNLIB   FCN  "Warning: library -l"
+M_NORES     FCN  ") does not resolve any symbols"
 M_BADOBJ    FCN  "invalid file format"
 M_BADFLAG   FCN  "unrecognized section flag"
 M_BADREL    FCN  "bad relocation expression"
@@ -2747,7 +3152,10 @@ VP          SET  VARS
             VAR  SCRNAME,PATHMAX+1
             VAR  EXECNAME,SYMMAX+2
             VAR  ENTRYARG,PATHMAX+1
-            VAR  FILETAB,MAXFILES*(PATHMAX+1)
+            VAR  INPUTS,MAXINPUTS*IN_SIZE
+            VAR  UNITS,MAXUNITS*UN_SIZE
+            VAR  LDIRS,MAXLDIRS*(PATHMAX+1)
+            VAR  POOL,POOLSZ
             VAR  SLINES,MAXSLINES*SL_SIZE
             VAR  BASES,MAXBASES*SL_SIZE
             VAR  NAMEBUF,SYMMAX+2

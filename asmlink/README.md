@@ -14,13 +14,15 @@ LWTOOLS and William Astle's work deserve credit for providing the 6809/6309 tool
 
 The project was developed using AI assistance and is intentionally disclosed as such. The author has not represented the generated implementation as an official LWTOOLS component or as work by William Astle. 
 
-# ASM and LINK, the Pugputer's assembler and linker
+# ASM, LINK and AR, the Pugputer's assembler, linker and librarian
 
 - **`ASM.COM`** (`asm.asm` and the `pa_*.asm` files it includes) is a 6309/6809
   assembler modelled on **lwasm**. It produces the same bytes, listings and symbol tables, and
   the same LWOBJ object files.
 - **`LINK.COM`** (`link.asm`) is a linker modelled on **lwlink**. It produces the same
-  S-records, raw binaries and maps from the same object files and link script.
+  S-records, raw binaries and maps from the same object files, libraries and link script.
+- **`AR.COM`** (`ar.asm`) is a librarian modelled on **lwar**. It makes and reads the same
+  archives (libraries), so each set of tools can use the other's.
 
 Together they build everything in this project on the Pugputer, identical to the lwtools
 build: the shell, the editor, DOS and BASIC, the BIOS from its eight object files and link
@@ -162,7 +164,7 @@ then its buffers, and the stack below `$C000`. Heap pages are mapped one at a ti
 ## LINK
 
 ```
-LINK [options] file.o ...
+LINK [options] file.o|file.a ... [-l lib] ...
   -f FMT, --format=FMT        raw (the default), srec, or com
   -o FILE, --output=FILE      the output (default A.OUT)
   -m FILE, --map=FILE         a map: the sections, then every symbol with its address
@@ -170,6 +172,9 @@ LINK [options] file.o ...
   -e SYM, --entry=SYM         the entry point: a symbol, or a hex address
   --section-base=SECT=ADDR    a section's load address (with the default script)
   -r                          the same as -f raw
+  -l LIB, --library=LIB       the library libLIB.a (-l:NAME: the file NAME), from the -L
+                              directories
+  -L DIR, --library-path=DIR  a directory for -l to look in (up to 4)
   @FILE                       more arguments, from a file
 ```
 
@@ -195,6 +200,34 @@ BIOS.RSP:  -f srec -o PUGBIOS.S19 -m PUGBIOS.MAP -s LINK.SCR
   (otherwise the load address). The sections should follow one another in memory, as a
   script with one `load` places them. This format is LINK's own; lwlink has no equivalent.
 
+### Libraries
+
+A library is an archive of object files, as AR (or lwar) makes it. With `-l`, only the
+members that something in the link needs are linked. LINK goes through the references of
+everything in the link, again and again, and brings in each member that exports a name one of
+them needs, until nothing more comes in. An archive named as a file, like an object file, is
+linked whole. As in lwlink:
+
+- `-lNAME` is the file `libNAME.a` (`-lc` is `libc.a`), and `-l:NAME` is `NAME` itself. It is
+  looked for in each `-L` directory in turn, and only there: without `-L`, nowhere.
+- The libraries come first and the files after them, wherever they are on the command line,
+  because lwlink's option parser takes all the options (`-l` is one) before the other
+  arguments. So a library's sections come before the files' sections of the same name.
+  Start-up code that must come first belongs in a section the script places first (`init` in
+  the default scripts), not just first on the command line.
+- A name is looked for in the file that needs it, then (for a member) in the other members of
+  its archive, then in every library and file in that order. The first export found is the one
+  used, and its member comes in even if a later file exports the same name.
+- A library that brings nothing in gets a warning: `Warning: library -lNAME (N) does not
+  resolve any symbols`, where N counts the libraries from 0.
+- In the map, a member's sections and symbols name the member (`putchar.o`), not the archive.
+
+For example, with `/LIB/LIBC.A`:
+
+```
+/> LINK -f com -o HELLO.COM -L /LIB hello.o -lc
+```
+
 ### Link scripts
 
 A script has one statement per line, and `#` or `;` starts a comment line. A line must not
@@ -218,19 +251,29 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
 
 ### Differences from lwlink
 
-- No libraries (`-l`, `-L`, `.a` archives), no `sectopt`, and no DECB, OS-9 or LWEX formats.
-  The `com` format and `@FILE` are LINK's own.
+- No `sectopt`, and no DECB, OS-9 or LWEX formats. The `com` format and `@FILE` are LINK's
+  own.
+- lwlink's option parser gives an option written as a separate word (`-o OUT`) the first word
+  that isn't an option, wherever it is: `lwlink a.o -o out.bin` takes `a.o` as the output.
+  LINK takes the word after the option.
+- Nested archives (an archive that is a member of another) aren't read.
 - A section is placed once. lwlink places a section again when the script names it twice.
   For example, `--section-base=code=ADDR` with the default script (which also names `code`)
   makes lwlink write the code twice.
-- Up to 32 input files and 32 script lines. Symbol and section names are kept to 127
-  characters, and a map lists up to 4,000 symbols.
+- Up to 64 input files and libraries, 255 files and archive members in all, and 32 script
+  lines. Symbol and section names are kept to 127 characters, and a map lists up to 4,000
+  symbols.
 
 ### How it works
 
-- **Reading:** each object file is read as a stream into banked RAM. That covers its
-  sections, their symbols and exports, their relocation expressions, and their bytes (in 1KB
-  chunks).
+- **Reading:** each object file, and each member of an archive, is read as a stream into
+  banked RAM. That covers its sections, their symbols and exports, their relocation
+  expressions, and their bytes (in 1KB chunks). Each is a "unit", numbered in the order lwlink
+  walks its tree of files (a library's members follow it).
+- **Choosing members:** the relocations of every unit in the link have their names looked up,
+  pass after pass, until no more members come in (lwlink's `resolve_files`). This is also when
+  a constant section that something imports from comes in. Only the sections of units in the
+  link are placed.
 - **Placing:** the script places the sections. Then each relocation's expression is worked out
   with the final addresses: lwlink's postfix terms and operators, in C `int` arithmetic.
 - **Resolving:** names resolve as in lwlink. A local reference looks in its own section first,
@@ -238,7 +281,38 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
   then in its own file's exports, then in every file's in order.
 - **Writing:** the value is patched into the bytes. Then the output is written, and the map
   (sorted with a heap sort in banked RAM, by name and then by file, as lwlink sorts it).
-- **Size:** LINK is about 7KB.
+- **Size:** LINK is about 8KB.
+
+## AR
+
+```
+AR [options] archive [file ...]
+  -c, --create      a new archive of the files (an old one is deleted first)
+  -a, --add         the files added at the end (the archive made if it's missing)
+  -r, --replace     the files added at the end, any member of the same name dropped
+  -l, --list        the members, "NAME: LENGTH bytes" (the length in hex)
+  -x, --extract     the members named, or all of them, written out as files
+  -m, --merge       a file that is itself an archive adds its members, not itself
+  -n, --nopaths     only a name's last part (after its last /) is stored, compared and
+                    extracted to
+  @FILE             more arguments, from a file
+```
+
+Options can be run together (`-cn`). An archive is `LWAR1V`, then each member (its name, a
+NUL, its length in 32 bits with the high byte first, and its bytes), then a NUL. A member's
+name is the file's name as it was given (`lib/putc.o`, unless `-n`), and LINK's map uses it.
+For example, a C library from its objects, listed in a file:
+
+```
+LIBC.RSP:  -c LIBC.A putchar.o puts.o strlen.o strcpy.o memcpy.o ...
+
+/> AR @libc.rsp
+```
+
+Unlike lwar, AR writes the new archive as `ARTEMP.TMP` in the archive's directory. Only when
+that is complete does it delete the old archive and rename the new one into its place. So a
+file that can't be read, or a full disk, leaves the old archive as it was. AR is about 2.5KB.
+
 
 ## The files
 
@@ -246,6 +320,7 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
 |---|---|
 | `asm.asm` | ASM: the header, the variables, the main flow (the command line, two passes, the end). |
 | `link.asm` | LINK, all of it (with `pa_util`, `pa_heap` and `pa_strm`). |
+| `ar.asm` | AR, all of it (with `pa_util`). |
 | `pa_util.asm` | Console output, strings, character classes, 32-bit multiply and divide. (Both.) |
 | `pa_heap.asm` | The banked-RAM heap (far pointers: a page number and an address). (Both.) |
 | `pa_strm.asm` | Buffered output files. (Both.) |
@@ -261,9 +336,9 @@ with `entry __start`. `--section-base` lines come before it. A constant section 
 
 ## Building and testing
 
-`compile.bat` assembles both with lwasm (`asm.bin`, `link.bin` and their listings).
-`build_all.bat` and `reinit_disk.bat` do this too, and put them on the disk image as
-`ASM.COM` and `LINK.COM`.
+`compile.bat` assembles all three with lwasm (`asm.bin`, `link.bin`, `ar.bin` and their
+listings). `build_all.bat` and `reinit_disk.bat` do this too, and put them on the disk image as
+`ASM.COM`, `LINK.COM` and `AR.COM`.
 
 `simulator/tests/test_asmlink.cpp` runs them on the emulated machine and checks the following,
 comparing byte for byte (and listing line for listing line) with the lwtools build:
@@ -281,4 +356,9 @@ comparing byte for byte (and listing line for listing line) with the lwtools bui
   - a file of directives, macros and expressions;
   - object files (`objf.asm`, `objexpr.asm`);
   - links of `objf.o` and `prov.o` with the default scripts, a script of its own
-    (`link1.scr`), `--section-base` and `-e`.
+    (`link1.scr`), `--section-base` and `-e`;
+  - links of `lmain.o` with libraries that AR makes from `la`..`ld`, `lk` and `lx`: with `-L`
+    and `-l`, with `-l:NAME`, and with an archive named as a file. The libraries must also be
+    exactly what lwar makes.
+- AR makes, adds to, replaces in, lists and extracts from archives (`-c`, `-a`, `-r`, `-n`,
+  `-m`, `-l`, `-x`, `@FILE`), and reports its errors without leaving an archive behind.

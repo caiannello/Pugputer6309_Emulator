@@ -44,10 +44,24 @@ Pugputer, byte for byte as they were built.
                  ASM -o SONGKIT.COM songkit.asm
                  ASM -o SONGPLAY.COM songplay.asm
 
-  ASMLINK/     the assembler and the linker:
+  ASMLINK/     the assembler, the linker and the librarian:
                  CD ASMLINK
                  ASM -o ASM.COM asm.asm
                  ASM -o LINK.COM link.asm
+                 ASM -o AR.COM ar.asm
+
+  LIBC/        the C library (in /LIB: CRT0.O, LIBC.A, and CC.SCR, LINK's
+               script for a C program). Each part is an object file of its
+               own, so a program links only the ones it uses:
+                 CD LIBC
+                 ASM -f obj crt0.asm
+                 ASM -f obj strlen.asm   (and so on: each file LIBC.RSP names)
+                 AR @libc.rsp            (LIBC.A, from them)
+               A program written in assembly can use it: its main is _main,
+               called as C calls a function (see LIBC.D), and it is linked
+               with
+                 LINK -f com -o PROG.COM -s /lib/cc.scr -L /lib
+                      /lib/crt0.o prog.o -lc
 
 These programs carry their own program header, so ASM's usual (raw) output,
 named .COM, is the program. Add -l for a listing (-s adds the symbols).

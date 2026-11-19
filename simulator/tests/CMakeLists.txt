@@ -114,6 +114,7 @@ set(EDIT_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.bin")
 set(EDIT_LST "${CMAKE_CURRENT_SOURCE_DIR}/../../edit/edit.lst")
 set(ASM_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/asm.bin")
 set(LINK_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/link.bin")
+set(AR_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../asmlink/ar.bin")
 set(HEXDUMP_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/hexdump.bin")
 set(MOVE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../utils/move.bin")
 if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
@@ -144,6 +145,9 @@ if(EXISTS "${PUGBIOS_S19}" AND EXISTS "${DISK_IMG}")
     endif()
     if(EXISTS "${ASM_BIN}" AND EXISTS "${LINK_BIN}")
         list(APPEND PUGPUTER_TEST_SOURCES test_asmlink.cpp)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cc/lib/crt0.o")
+            list(APPEND PUGPUTER_TEST_SOURCES test_libc.cpp)
+        endif()
         list(APPEND PUGPUTER_TEST_SOURCES test_opl3.cpp)
         list(APPEND PUGPUTER_TEST_SOURCES test_vidcard_demo.cpp)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../gamekit/build/tilekit.bin")
@@ -188,6 +192,7 @@ target_compile_definitions(pugputer_tests PRIVATE
     EDIT_LST_PATH="${EDIT_LST}"
     ASM_BIN_PATH="${ASM_BIN}"
     LINK_BIN_PATH="${LINK_BIN}"
+    AR_BIN_PATH="${AR_BIN}"
     HEXDUMP_BIN_PATH="${HEXDUMP_BIN}"
     MOVE_BIN_PATH="${MOVE_BIN}"
     LWLINK_EXE_PATH="${LWLINK_EXE}"

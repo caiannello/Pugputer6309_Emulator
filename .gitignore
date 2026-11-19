@@ -44,6 +44,10 @@
 /asmlink/asm.lst
 /asmlink/link.bin
 /asmlink/link.lst
+/asmlink/ar.bin
+/asmlink/ar.lst
+/cc/lib/*.o
+/cc/lib/*.lst
 /utils/*.bin
 /utils/*.lst
 /demo/build/

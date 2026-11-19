@@ -1,6 +1,6 @@
 @echo off
 rem Rebuilds BIOS, dos.asm, the shell, the editor, ASM, LINK, the utilities, the demos and basic309, then
-rem regenerates basic309\disk.img from scratch (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM,
+rem regenerates basic309\disk.img from scratch (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, AR.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM,
 rem and /DEMO: SWAMP.COM and its pictures -- no other files, apart from local\disk\ if there is one) -- run this
 rem any time you want a clean slate between test sessions, or after editing bios/,
 rem dos/, shell/, edit/, asmlink/, utils/ or basic309/.
@@ -43,6 +43,10 @@ call "%ROOT%asmlink\compile.bat"
 if errorlevel 1 (popd & exit /b 1)
 popd
 
+echo Rebuilding the C library...
+call "%ROOT%cc\lib\compile.bat"
+if errorlevel 1 exit /b 1
+
 echo Rebuilding the utilities...
 pushd "%ROOT%utils" || exit /b 1
 call "%ROOT%utils\compile.bat"
@@ -65,7 +69,7 @@ echo Rebuilding basic309...
 call "%ROOT%basic309\build_basic.bat"
 if errorlevel 1 exit /b 1
 
-echo Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM; /DEMO/SWAMP.COM; clean slate)...
+echo Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, AR.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM; /DEMO/SWAMP.COM; clean slate)...
 rem local\disk\ (not in the repository, see .gitignore): experiments to try on the disk, copied
 rem to its root as they are -- local\disk\SWAMP\X.BAS becomes /SWAMP/X.BAS
 set LOCALDISK=

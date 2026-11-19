@@ -1,0 +1,12 @@
+# CC.SCR: LINK's script for a C program (crt0.o first, then the program's
+# objects, then -lc): a .COM loading at $3400, the sections in this order, the
+# heap (sbrk's) after them all. CRT0 uses s_bss, l_bss and s_heap.
+define basesympat s_%s
+define lensympat l_%s
+section init load 3400
+section code
+section rodata
+section data
+section bss
+section heap
+entry __start
