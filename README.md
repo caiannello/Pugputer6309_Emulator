@@ -15,8 +15,8 @@ does run on the real thing!)
 ## Demo Releases
 
 **Just want to try it?** Download the demo for Windows or Linux from the *Releases* page.
-On Windows, unzip it and double-click `start-console.bat`; on Linux, unpack the `.tar.gz` and
-run `./start-console.sh` in a terminal. Nothing to install or compile in Windows, but if you 
+On Windows, unzip it and double-click `pugputer.exe`; on Linux, unpack the `.tar.gz` and
+run `./pugputer` in a terminal. Nothing to install or compile in Windows, but if you 
 want graphics in Linux, libsdl2 will be needed. ; see the release's `README.md`.
 
 ## Future plans
