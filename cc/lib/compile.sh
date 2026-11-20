@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # The C library's objects (cc/lib/*.o, with listings): crt0.o, and the members
 # of libc.a, which libc.rsp lists in order (it is AR's response file: on the
 # Pugputer, "AR @libc.rsp" makes libc.a from them). mkdiskimg puts them on the
