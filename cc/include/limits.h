@@ -1,4 +1,5 @@
-/* limits.h -- CC (the Pugputer's C compiler): char is signed, int 16 bits. */
+/* limits.h -- CC (the Pugputer's C compiler): char is signed, int 16 bits,
+   long 32. */
 #ifndef _LIMITS_H
 #define _LIMITS_H
 
@@ -14,5 +15,8 @@
 #define INT_MIN (-32767 - 1)
 #define INT_MAX 32767
 #define UINT_MAX 65535U
+#define LONG_MIN (-2147483647L - 1)
+#define LONG_MAX 2147483647L
+#define ULONG_MAX 4294967295UL
 
 #endif

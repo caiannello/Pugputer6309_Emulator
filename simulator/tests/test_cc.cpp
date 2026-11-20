@@ -243,6 +243,26 @@ TEST(cc_compiles_types_declarators_and_pointers_to_functions) {
     CHECK(runs_as_expected("more", "cc_more.img"));
 }
 
+TEST(cc_compiles_structs_unions_enums_and_longs) {
+    // struct and union members (. and ->, nested), struct assignment, structs
+    // passed and returned by value, enum constants, and long arithmetic in
+    // Q: * / % and shifts (the library's helpers), comparisons, casts, ++ --.
+    CHECK(runs_as_expected("structs", "cc_structs.img"));
+}
+
+TEST(cc_compiles_initializers_asm_blocks_and_the_rest) {
+    // Initializers with nested braces and without (brace elision), arrays
+    // sized by them (locals too), unions; asm { } with C names; interrupt;
+    // switch on a long; extern in a block; long op= of every kind.
+    CHECK(runs_as_expected("inits", "cc_inits.img"));
+}
+
+TEST(cc_programs_seek_in_files_and_use_longs_in_the_library) {
+    // fseek (back from the end and the current place: DOS's offsets are
+    // signed) and ftell, atol and labs, and limits.h's longs.
+    CHECK(runs_as_expected("files", "cc_files.img"));
+}
+
 TEST(cc_compiles_variadic_functions_and_reads_argv_and_stdin) {
     Machine m;
     CHECK(m.start("cc_vararg.img", {test_file("vararg.c")}));
@@ -268,27 +288,31 @@ TEST(cc_programs_are_small) {
 
 #if PUGPUTER_HAVE_LWASM
 TEST(cc1_output_assembles_alike_with_asm_and_lwasm) {
-    Machine m;
-    CHECK(m.start("cc_lwasm.img", {test_file("ops.c")}));
-    CHECK(m.compile("ops"));
-    std::string dir = std::string(PUGPUTER_TEST_BUILD_DIR);
+    for (const char* name : {"ops", "structs", "inits"}) {
+        Machine m;
+        CHECK(m.start("cc_lwasm.img", {test_file(std::string(name) + ".c")}));
+        CHECK(m.compile(name));
+        std::string dir = std::string(PUGPUTER_TEST_BUILD_DIR);
+        std::string base = std::string("cc_") + name;
 #ifdef _WIN32
-    std::system(("mkdir \"" + dir + "\" >NUL 2>NUL").c_str());
-    std::string cmd = "\"cd /d \"" + dir + "\" && \"" + LWASM_EXE_PATH +
-                      "\" cc_ops.asm --6309 --format=obj --output=cc_ops.o >NUL 2>NUL\"";
+        std::system(("mkdir \"" + dir + "\" >NUL 2>NUL").c_str());
+        std::string cmd = "\"cd /d \"" + dir + "\" && \"" + LWASM_EXE_PATH + "\" " + base +
+                          ".asm --6309 --format=obj --output=" + base + ".o >NUL 2>NUL\"";
 #else
-    std::system(("mkdir -p \"" + dir + "\"").c_str());
-    std::string cmd = "cd \"" + dir + "\" && \"" + LWASM_EXE_PATH +
-                      "\" cc_ops.asm --6309 --format=obj --output=cc_ops.o >/dev/null 2>&1";
+        std::system(("mkdir -p \"" + dir + "\"").c_str());
+        std::string cmd = "cd \"" + dir + "\" && \"" + LWASM_EXE_PATH + "\" " + base +
+                          ".asm --6309 --format=obj --output=" + base + ".o >/dev/null 2>&1";
 #endif
-    std::string asm_text = m.disk_file("OPS.ASM");
-    CHECK(asm_text.size() > 1000);
-    {
-        std::ofstream o(dir + "/cc_ops.asm", std::ios::binary);
-        o << asm_text;
+        std::string asm_text = m.disk_file(upper(name) + ".ASM");
+        CHECK(asm_text.size() > 1000);
+        {
+            std::ofstream o(dir + "/" + base + ".asm", std::ios::binary);
+            o << asm_text;
+        }
+        CHECK(std::system(cmd.c_str()) == 0);
+        CHECK(same((std::string(name) + ".o (lwasm and ASM)").c_str(), host_text(dir + "/" + base + ".o"),
+                   m.disk_file(upper(name) + ".O")));
     }
-    CHECK(std::system(cmd.c_str()) == 0);
-    CHECK(same("ops.o (lwasm and ASM)", host_text(dir + "/cc_ops.o"), m.disk_file("OPS.O")));
 }
 #endif
 
@@ -308,10 +332,18 @@ TEST(cc1_reports_errors_and_writes_nothing) {
         {"int main(void) { int a; int a; return 0; }", "t.c:1: error: redeclared: 'a'"},
         {"void f(void) { return 1; }", "t.c:1: error: a value returned from a void function"},
         {"int main(void) {\nreturn 0;\n", "t.c:3: error: the file ends inside a block"},
-        {"struct s { int a; };", "t.c:1: error: struct, union and enum are not supported yet"},
-        {"long x;", "t.c:1: error: long is not supported yet"},
-        {"int main(void) { return 100000; }", "t.c:1: error: constant too large (long isn't supported yet)"},
         {"int main(void) { float f; }", "t.c:1: error: floating point is not supported yet"},
+        {"struct s { int a; }; int f(struct s v) { return v.b; }", "t.c:1: error: no such member: 'b'"},
+        {"int main(void) { int i; return i.x; }", "t.c:1: error: a struct or union was expected"},
+        {"struct s { int a; char a; };", "t.c:1: error: duplicate member 'a'"},
+        {"struct s { int a : 3; };", "t.c:1: error: bit-fields are not supported"},
+        {"enum e { A }; struct e *p;", "t.c:1: error: used as the wrong kind of tag: 'e'"},
+        {"struct s { int a; }; struct s { int b; };", "t.c:1: error: redefinition of 's'"},
+        {"struct s; int main(void) { struct s v; return 0; }", "t.c:1: error: no size for 'v'"},
+        {"struct s { int a; }; int main(void) { struct s v; return v + 1; }",
+         "t.c:1: error: an integer was expected"},
+        {"enum { A, B }; enum { B };", "t.c:1: error: redeclared: 'B'"},
+        {"int main(void) {\nasm { nop\n", "t.c:2: error: the file ends inside asm { }"},
     };
     std::vector<pugputer::Fat16File> files;
     int n = 0;

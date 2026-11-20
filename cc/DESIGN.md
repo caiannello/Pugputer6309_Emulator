@@ -1,10 +1,11 @@
 # CC: a C compiler for the Pugputer (design)
 
-Status: phases 1 and 2 done (2026-11-19). Phase 1: LINK's libraries, AR, CRT0 and the first
-libc. Phase 2: CPP, and CC1 with `char`, `int`, pointers, arrays, functions, `typedef` and every
-statement and operator. See [`README.md`](README.md) for what is there now, and "Found in
-phase 1" and "Found in phase 2" at the end for what they settled. Decisions taken so far
-(2026-11-19):
+Status: phases 1 to 3 done (2026-11-19). Phase 1: LINK's libraries, AR, CRT0
+and the first libc. Phase 2: CPP, and CC1 with `char`, `int`, pointers, arrays, functions,
+`typedef` and every statement and operator. Phase 3: `long`, `struct`, `union`, `enum`,
+`asm { }`, `interrupt` and the rest of the declarations and initializers. See
+[`README.md`](README.md) for what is there now, and the "Found in phase" sections at the end
+for what each settled. Decisions taken so far (2026-11-19):
 
 - The compiler is written in **6309 assembly**, like ASM and LINK. It is built with lwtools
   on the PC to bootstrap, and can be rebuilt on the Pugputer with ASM and LINK.
@@ -24,7 +25,7 @@ FOO.C --CPP--> FOO.I --CC1--> FOO.ASM --ASM -f obj--> FOO.O --LINK--> FOO.COM
 
 | Program | What it does |
 |---|---|
-| `CC.COM` | The driver. It runs each stage with `B_SPAWN`, deletes the temporary files and stops at the first error. Options: `-c` (stop at `.O`), `-S` (stop at `.ASM`), `-E` (stop at `.I`), `-o`, `-I`, `-L`, `-l`, `-D`, `-9` (6809 code only), `-O` (peephole pass, later). |
+| `CC.COM` | The driver. It runs each stage with `B_SPAWN`, deletes the temporary files and stops at the first error. Options: `-c` (stop at `.O`), `-S` (stop at `.ASM`), `-E` (stop at `.I`), `-o`, `-I`, `-L`, `-l`, `-D`, `-9` (6809 code only, later), `-O` (peephole pass, later). |
 | `CPP.COM` | The C preprocessor: `#include`, `#define` (object-like and function-like, with `#` and `##`), `#if`/`#elif` with `defined`, `#ifdef`, `#line`, `#error`, `#pragma` passed through. Writes `#line` markers so CC1 can report errors against the original file. |
 | `CC1.COM` | Parses one preprocessed file and writes lwasm-syntax assembly with `SECTION`/`EXPORT`/`IMPORT`. |
 | `ASM.COM`, `LINK.COM` | The existing ones, with the LINK changes listed below. |
@@ -32,8 +33,9 @@ FOO.C --CPP--> FOO.I --CC1--> FOO.ASM --ASM -f obj--> FOO.O --LINK--> FOO.COM
 
 CPP and CC1 are separate programs because each must fit in the space a program gets
 ($3400-$EFFF, about 47KB) together with its buffers. CPP's macros live in banked RAM through
-`pa_heap.asm`, as ASM's symbols do. CC1 (16KB of code) keeps its names, types and symbols in
-a 16KB heap of its own for now; they can move to banked RAM if programs outgrow it.
+`pa_heap.asm`, as ASM's symbols do. CC1 (21KB of code since phase 3) keeps its names, types
+and symbols in an 11KB heap of its own for now; they can move to banked RAM if programs
+outgrow it (the node pool, 6KB, could shrink first).
 
 ### Inside CC1
 
@@ -52,10 +54,13 @@ Code generation is plain and template-based:
   element at a constant index is used where it is (`ADDD 4,U`, `LDD [-2,U]`, `STB _a+3`);
   anything else on the right is made first and pushed (`ADDD ,S++`).
 - **6309 instructions** (which `-9` will turn off): `MULD` for `*`; `TFM` for locals' array
-  initializers (and struct copy, later); `NEGD`, `COMD`, `LSLD`, `ASRD`, `TSTD`; Q for `long`
-  (`LDQ`, `STQ`, `ADDW`/`ADCD`) in phase 3. W as a second accumulator, and `AIM`/`OIM`/`EIM`,
-  are for the peephole pass. `/`, `%` and shifts by a variable call the library's helpers
-  (`lib/arith.asm`), not `DIVD`/`DIVQ` (see "Found in phase 2").
+  initializers and struct copies (`__scopy`); `NEGD`, `COMD`, `LSLD`, `ASRD`, `TSTD`; Q for
+  `long` (`LDQ`, `STQ`, `ADDW`/`ADCD`, `SUBW`/`SBCD`, `ORR W,D`, `SEXW`). W as a second
+  accumulator, and `AIM`/`OIM`/`EIM`, are for the peephole pass. `/`, `%` and shifts by a
+  variable call the library's helpers (`lib/arith.asm`, `lib/larith.asm`), not `DIVD`/`DIVQ`
+  (see "Found in phase 2").
+- **Longs and structs** have their own generator (`cc1_long.asm`): a `long` is made in Q, a
+  struct's value is its address in D.
 - **Optimization:** so far only constant folding. Every branch is long (`LBxx`). A peephole
   pass (`-O`) comes later.
 
@@ -163,14 +168,16 @@ Each phase leaves something that works and is tested.
    for arrays and calls through function pointers came early. The headers, and the library's
    helpers (`lib/arith.asm`). Tests compile C programs on the emulated machine, run them and
    compare what they print.
-3. **The rest of the language:** `struct`/`union`, `enum`, `long` (and `fseek`/`ftell`),
-   `asm { }`, `interrupt`, brace elision in initializers, `extern` in a block, a local array
-   sized by a `{ list }`, and `-9`. (Variadic functions already work, with `<stdarg.h>`.)
+3. **The rest of the language** (done): `struct`/`union`, `enum`, `long` (and
+   `fseek`/`ftell`, `atol`, `labs`), `asm { }`, `interrupt`, brace elision in initializers,
+   `extern` in a block, a local array sized by a `{ list }`. (`-9` moved to "Later".)
 4. **`B_SPAWN` and `CC.COM`; overlays** (LINK, CC1's stubs, `__farcall`, CRT0) and
    `<pug/bank.h>`.
 5. **`LIBPUG.A`** (video, sound, input), and a demo written in C.
 6. **Later:** a better `malloc`, `float` (and `double` as the same type, as in CMOC),
-   bitfields, `-O`, and `__far` pointers.
+   bitfields, `-O`, `__far` pointers, and `-9`: plain 6809 code. That needs a second way of
+   holding a `long` (there's no Q) and a 6809 build of the library, for its code to run on a
+   6809 at all; the Pugputer always has a 6309, so it waits (decided 2026-11-19).
 
 Not planned: K&R-style function definitions, `goto` into a block from outside it with
 initialized locals, wide characters, and the parts of C99 CMOC doesn't have.
@@ -182,7 +189,7 @@ initialized locals, wide characters, and the parts of C99 CMOC doesn't have.
 - C programs under `simulator/tests/test_cc/` (expressions, control flow, structs, the
   library, overlays), each with its expected output.
 - Each is compiled on the emulated machine, run there, and what it prints is compared with
-  the expected output. This is done for 6309 and `-9` code alike.
+  the expected output. (With `-9`, later, for 6809 code too.)
 - The `.ASM` that CC1 writes is also assembled by lwasm and must give the same object file
   as ASM gives, so the two assemblers keep checking each other.
 - A program that should fail to compile must fail, with the right message, and leave no
@@ -228,6 +235,31 @@ Things that phase 2 onwards has to follow:
   known at the end. The forward reference makes the `LEAS` 16 bits wide, in ASM and lwasm alike.
 - **Strings go into `rodata` as they're read,** in the middle of a function's code: `SECTION
   rodata`, a label and `FCB`s, and back to `SECTION code`.
-- **`FILE` is a `char` until structs,** and libc's console `FILE`s are C's `_iob` (`__iob` in
-  assembly). Programs never look inside a `FILE`, so nothing changes for them when it becomes a
-  struct.
+- **`FILE` was a `char` until structs,** and libc's console `FILE`s are C's `_iob` (`__iob` in
+  assembly). Programs never look inside a `FILE`, so nothing changed for them when it became a
+  struct (phase 3: an undefined one).
+
+## Found in phase 3
+
+- **A long's comparisons are a subtraction.** `SUBW` then `SBCD` leaves the flags that `<`
+  and `>=` need (signed: N and V; unsigned: C), but Z is the high word's alone (as with `LDQ`),
+  so `==` and `!=` add `ORR W,D`. `a > b` is made as `b < a`, and `a <= b` as `b >= a`.
+- **The long helpers keep X,** so that `x op= y` can keep x's address in X across the call.
+  They take the right side on the stack, and the caller pops it.
+- **A struct is passed by its bytes,** rounded up to words; one returned goes through a hidden
+  pointer to a temporary in the caller's frame (a block's, made when the call is parsed).
+  `f().m` works on that temporary's address.
+- **Member access is `*(T *)(&s + offset)`,** which OPND and GENADDR already knew as `n,U`,
+  `_s+n` and `n,X`, so `s.m` and `p->m` cost nothing new. `(&x + n) + m` is folded to one
+  offset, so nested members do too.
+- **An initializer is one walk for data and for code:** the object's bytes are done in order,
+  so a gap is zeros (`ZMB`, or `CLR`/`TFM` in code). Brace elision is a list that stops when its
+  aggregate is full and leaves the comma to the list around it.
+- **A local array sized by `{ list }`** is made in `rodata` and copied: its size is only known
+  at the list's end, and the frame offsets are needed before.
+- **DOS's `fseek` offsets are signed** for `SEEK_CUR` and `SEEK_END`. DOS took a carry out of
+  the addition as "too big", which every negative offset gives; it tests the sign now.
+- **`asm { }` names:** a register's name only means the register next to a comma or `-`, or
+  after PSHS, TFR and the like; on its own (`ldd x`) it's a C name if there is one.
+- **Line endings:** `.gitattributes` has `* -text`, so a tool that writes CR LF changes every
+  line of an LF file. Edit sources byte for byte.

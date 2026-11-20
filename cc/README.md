@@ -60,38 +60,76 @@ CC1 [-o out] file
 ```
 
 CC1 reads a `.I` and writes its `.ASM`: lwasm's syntax, with `SECTION`, `EXPORT` and `IMPORT`,
-so that ASM (or lwasm) makes an object file of it. Its C, so far:
+so that ASM (or lwasm) makes an object file of it. Its C:
 
 - **Types:** `char` (signed), `signed char`, `unsigned char`, `short` and `int` (16 bits,
-  the same), `unsigned`, `void`, pointers, arrays (of arrays too), functions, and `typedef`.
-  `const` and `volatile` are accepted and do nothing.
-- **Declarations:** prototypes (with `...`) and old-style `()`, `extern`, `static` (at file
-  level and in functions), and `register` and `auto` (which do nothing). Globals and statics
-  take initializers: numbers, addresses (`&x`, `a + 2`, `"strings"`), and `{ lists }` for
-  arrays. An array's size can come from its initializer. Locals may be declared at the start
-  of any block, or at the start of a `for`, and take any expression as an initializer, or
-  `{ lists }` and strings for arrays.
-- **Statements:** all of them: `if`, `while`, `do`, `for`, `switch` with `case` and
-  `default`, `break`, `continue`, `return`, `goto` and labels.
+  the same), `unsigned`, `long` and `unsigned long` (32 bits), `void`, pointers, arrays (of
+  arrays too), functions, `struct`, `union`, `enum`, and `typedef`. `const` and `volatile`
+  are accepted and do nothing.
+- **Constants** have C's types: a decimal one too big for an `int` is a `long`, a hex or
+  octal one an `unsigned int` first; `u` and `l` (in any order, any case) as usual.
+- **Structs and unions:** members of any type but a function (no bit-fields), with no
+  padding. `.` and `->`; assignment, arguments and return values copy them whole. Tags have
+  their own names and scopes, so `struct node { struct node *next; }` and a tag declared before
+  it's defined both work. An `enum`'s constants are `int`s; the type is `int`.
+- **Declarations:** prototypes (with `...`) and old-style `()`, `extern` (in a block too, where
+  it hides a local of that name), `static` (at file level and in functions), and `register` and
+  `auto` (which do nothing). `interrupt` before a function makes it end with `RTI`.
+- **Initializers:** globals and statics take constants: numbers, addresses (`&x`, `a + 2`,
+  `&s.m`, `"strings"`), and `{ lists }` for arrays, structs and unions (a union's first member),
+  nested or with braces left out as C allows. What a list leaves out is zeros. An array's size
+  can come from its initializer. Locals may be declared at the start of any block, or at the
+  start of a `for`, and take any expression; a struct can be initialized from another, and an
+  array with no size from a `{ list }` (of constants, then copied from `rodata`) or a string.
+- **Statements:** all of them: `if`, `while`, `do`, `for`, `switch` (on a `long` too) with
+  `case` and `default`, `break`, `continue`, `return`, `goto` and labels; and `asm { }`.
 - **Expressions:** every operator, with C's conversions: arithmetic on `char`s promotes them
-  to `int`, either side `unsigned` makes an operation unsigned (`/`, `%`, `>>` and the
-  comparisons), pointer arithmetic is scaled, and arrays and functions decay to pointers.
-  Calls go directly or through pointers. Constants are folded.
-- **Not yet** (phase 3): `long`, `struct`, `union`, `enum`, bitfields, `asm { }` and
-  `interrupt`. Floating point comes later still.
+  to `int`, a `long` on either side makes an operation `long`, either side `unsigned` makes it
+  unsigned (`/`, `%`, `>>` and the comparisons), pointer arithmetic is scaled, and arrays and
+  functions decay to pointers. Calls go directly or through pointers. Constants are folded,
+  `long`s in 32 bits.
+- **Not yet:** bit-fields, floating point, and `-9` (code for a plain 6809).
 
-The code is plain: D holds a value, an operand already in memory or a constant is used where
-it is (`ADDD 4,U`, `LDD [p,U]`, `CMPD #3`), and anything else is pushed. Division, `%` and
-shifts by a variable call the library's helpers (`lib/arith.asm`); `*` uses `MULD`.
+The code is plain: D holds a value (a `long` is in Q), an operand already in memory or a
+constant is used where it is (`ADDD 4,U`, `LDD [p,U]`, `CMPD #3`, `ADDW _l+2` / `ADCD _l`),
+and anything else is pushed. A struct's value is its address. Division, `%` and shifts by a
+variable call the library's helpers (`lib/arith.asm`, and `lib/larith.asm` for longs, which
+`*` uses too); an `int`'s `*` is `MULD`. Copying a struct is `__scopy` (`lib/scopy.asm`).
+
+### asm { }
+
+```c
+int twice(int x)
+{
+    asm {
+        ldd   x
+        lslb
+        rola
+        std   x
+    }
+    return x;
+}
+```
+
+An `asm { }` block (in a function, or at file level, where it goes in `code`) is copied into
+the output line by line. An indented line is an instruction; a line that starts in its first
+column starts with a label. In an operand, a C name in scope becomes what it is in assembly: a
+local or parameter `n,U`, a global `_name` (IMPORTed if it isn't defined here), a static in a
+function `Ln`, an `enum` constant its value. A register's name (`a`, `x`, `pc`, ...) is the
+register next to a comma or after `-` (`,x`, `d,y`, `,-s`), and in the operands of `PSHS`,
+`PULS`, `TFR`, `EXG` and the other register-only instructions; on its own, `x` is a C name if
+there is one. The block must keep U, Y, S and DP. CPP has been through it already, so its
+macros expand there, and its comments should be C's (`;` comments may hold a `'`, which CPP
+reads as a character constant).
 
 ## The library
 
 | Header | Functions |
 |---|---|
-| `<stdio.h>` | `printf` `fprintf` `sprintf` `vprintf` `vfprintf` `vsprintf`; `putchar` `getchar` `puts` `fputs` `fgets` `fputc` `fgetc` `putc` `getc` `ungetc`; `fopen` `fclose` `fread` `fwrite` `rewind` `fflush` `feof` `ferror` `clearerr` `remove` `rename`; `stdin` `stdout` `stderr` (`fseek` and `ftell` come with `long`) |
+| `<stdio.h>` | `printf` `fprintf` `sprintf` `vprintf` `vfprintf` `vsprintf`; `putchar` `getchar` `puts` `fputs` `fgets` `fputc` `fgetc` `putc` `getc` `ungetc`; `fopen` `fclose` `fread` `fwrite` `fseek` `ftell` `rewind` `fflush` `feof` `ferror` `clearerr` `remove` `rename`; `stdin` `stdout` `stderr` |
 | `<string.h>` | `strlen` `strcpy` `strncpy` `strcat` `strcmp` `strncmp` `strchr` `strrchr` `strstr` `memcpy` `memmove` `memset` `memcmp` |
 | `<ctype.h>` | `isalpha` `isdigit` `isalnum` `isxdigit` `isspace` `isupper` `islower` `ispunct` `iscntrl` `isgraph` `isprint` `isblank` `toupper` `tolower` |
-| `<stdlib.h>` | `malloc` `free` `calloc` `realloc` `sbrk` `atoi` `abs` `rand` `srand` `exit` |
+| `<stdlib.h>` | `malloc` `free` `calloc` `realloc` `sbrk` `atoi` `atol` `abs` `labs` `rand` `srand` `exit` |
 | `<stdarg.h>` | `va_list`, `va_start`, `va_arg` and `va_end`, for writing variadic functions |
 | `<stddef.h>`, `<limits.h>` | `size_t`, `ptrdiff_t`, `NULL`; the integer types' limits |
 
@@ -101,8 +139,8 @@ shifts by a variable call the library's helpers (`lib/arith.asm`); `*` uses `MUL
 - **Files**: fopen's modes are `r`, `w`, `a`, and each of those with `+`. A `b` makes a file
   binary. In text mode, the default, `'\n'` is written as CR LF, and CR, CR LF or LF reads as
   `'\n'`. DOS allows 8 files open at once. `rename` keeps a file in its directory, taking only
-  the last part of the new name. Until CC has structs, `FILE` is declared as a `char`, which a
-  program never looks into anyway.
+  the last part of the new name. `FILE` is a struct that isn't defined: a program only uses
+  pointers to one.
 - **The console**: `stdin` reads a line at a time, echoing as you type. Backspace takes a
   character back, Enter ends the line, and Ctrl-D at the start of a line is the end of the
   file. `stdout` and `stderr` go straight to the console.
@@ -123,11 +161,15 @@ From `cc/lib/libc.d`, and what CC1's code follows:
 - Arguments are pushed right to left, each a whole number of 16-bit words. A `char` is
   widened to 2 bytes, and a `long` takes 4, high word first. The caller pops them. So on entry,
   a function's first argument is at `2,S`.
+- A struct argument is its bytes, rounded up to a whole number of words.
 - A `char` comes back in B (with D holding the widened value), an `int` or pointer in D, and a
-  `long` in Q (D is the high word, W the low one).
+  `long` in Q (D is the high word, W the low one). A function returning a struct gets a
+  pointer to where it goes as a hidden first argument (pushed last), copies its value there,
+  and returns the pointer in D.
 - A function keeps U, Y, S and DP as it found them. D, W, X and CC are scratch.
 - CC1's functions make a frame: `PSHS U` / `TFR S,U` / `LEAS -n,S`. Their arguments are at
-  `4,U` and up (a `char`'s value in the second byte of its word), and their locals below U.
+  `4,U` and up (`6,U` returning a struct), a `char`'s value in the second byte of its word,
+  and their locals below U.
 
 `printf("%d items\n", n)` in assembly:
 
@@ -165,8 +207,8 @@ rebuilds CPP and CC1 (`ASM -o CPP.COM cpp.asm`, `ASM -o CC1.COM cc1.asm`), and `
 the library (`AR @libc.rsp` makes `LIBC.A`), byte for byte as they were built.
 
 Memory: CPP keeps its macros in RAM pages from `B_PAGE_ALLOC`, mapped into bank 3 as ASM's
-symbols are. CC1 keeps its names, types and symbols in its own 16KB heap; a function's locals
-go when it ends.
+symbols are. CC1 keeps its names, types and symbols in its own heap (11KB, after its 21KB of
+code and 13KB of buffers); a function's locals go when it ends.
 
 ## Tests
 

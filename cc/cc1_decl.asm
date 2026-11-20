@@ -21,6 +21,7 @@ PR_END      JMP  FINISHFILE
 DECLSPEC    CLR  <DSSC
             CLR  <SPBITS
             CLR  <SPANY
+            CLR  <DSINTR
             CLRD
             STD  <SPTDEF
 DS_LOOP     LDA  <TOK
@@ -33,7 +34,11 @@ DS_FIND     TST  ,X
             BRA  DS_FIND
 DS_GOT      LDA  1,X
             BEQ  DS_TAKEN              ; const, volatile: no matter
-            CMPA #1
+            CMPA #3
+            BNE  DS_NINTR
+            STA  <DSINTR               ; interrupt
+            BRA  DS_TAKEN
+DS_NINTR    CMPA #1
             BNE  DS_BIT
             TST  <DSSC                 ; a storage class
             LBNE DS_TWOSC
@@ -69,11 +74,11 @@ DS_OTHER    CMPA #T_ID                 ; a typedef's name (with nothing else)
             STD  <SPTDEF
             BRA  DS_TAKEN
 DS_NOTID    CMPA #K_STRUCT
-            BEQ  DS_LATER
+            BEQ  DS_STRUCT
             CMPA #K_UNION
-            BEQ  DS_LATER
+            BEQ  DS_STRUCT
             CMPA #K_ENUM
-            BEQ  DS_LATER
+            BEQ  DS_ENUM
             CMPA #K_FLOAT
             BEQ  DS_FLOAT
             CMPA #K_DOUBLE
@@ -98,10 +103,15 @@ DS_TYPE     LDX  <SPTDEF               ; the type the words make
             BNE  DS_SET
             LDX  #TYP_CHAR
             BRA  DS_SET
-DS_NCHAR    BITA #SB_LONG              ; (long: CC's next phase)
+DS_NCHAR    BITA #SB_LONG
             BEQ  DS_NLONG
-            LDX  #M_NOLONG
-            JMP  ERROR
+            BITA #SB_SHORT
+            BNE  DS_BAD
+            LDX  #TYP_ULONG
+            BITA #SB_UNS
+            BNE  DS_SET
+            LDX  #TYP_LONG
+            BRA  DS_SET
 DS_NLONG    LDX  #TYP_UINT
             BITA #SB_UNS
             BNE  DS_SET
@@ -113,11 +123,24 @@ DS_TWOSC    LDX  #M_TWOSC
             JMP  ERROR
 DS_BAD      LDX  #M_BADTYPE
             JMP  ERROR
-DS_LATER    LDX  #M_NOSTRUCT
-            JMP  ERROR
+DS_STRUCT   JSR  DS_ALONE              ; struct / union: the type
+            JSR  STRUCTSPEC
+            BRA  DS_SPEC
+DS_ENUM     JSR  DS_ALONE              ; enum: int
+            JSR  ENUMSPEC
+DS_SPEC     STX  <SPTDEF
+            LDA  #1
+            STA  <SPANY
+            JMP  DS_LOOP
+DS_ALONE    TST  <SPBITS               ; (with no other type)
+            BNE  DS_BAD
+            LDD  <SPTDEF
+            BNE  DS_BAD
+            RTS
 DS_FLOAT    LDX  #M_FLOAT
             JMP  ERROR
 DSTAB       FCB  K_TYPEDEF,1,SC_TYPEDEF
+            FCB  K_INTERRUPT,3,0
             FCB  K_EXTERN,1,SC_EXTERN
             FCB  K_STATIC,1,SC_STATIC
             FCB  K_AUTO,1,SC_AUTO
@@ -164,6 +187,299 @@ DK_YES      ANDCC #$FE
             PULS X,PC
 DK_NOTONE   ORCC #1
             PULS X,PC
+;------------------------------------------------------------------------------
+; struct, union and enum.
+;------------------------------------------------------------------------------
+DECLSZ      equ  DSINTR+1-DSTYPE
+; SAVEDECL: the declaration being read (DSTYPE to DSINTR) onto the stack,
+; under the return address. RESTDECL: back (from there).
+SAVEDECL    PULS X
+            LEAS -DECLSZ,S
+            PSHS X,Y
+            LEAY 4,S
+            LDX  #DSTYPE
+            LDW  #DECLSZ
+            TFM  X+,Y+
+            PULS X,Y
+            JMP  ,X
+RESTDECL    PULS X
+            PSHS X,Y
+            LEAX 4,S
+            LDY  #DSTYPE
+            LDW  #DECLSZ
+            TFM  X+,Y+
+            PULS X,Y
+            LEAS DECLSZ,S
+            JMP  ,X
+; struct or union (the token), its tag and/or its members -> X = the type.
+STRUCTSPEC  JSR  SAVEDECL
+            LDA  <TOK
+            PSHS A                     ; 2,S: the keyword
+            JSR  NEXT
+            CLRD
+            PSHS D                     ; ,S: the tag (0: none)
+            LDA  <TOK
+            CMPA #T_ID
+            BNE  SS_NONAME
+            LDD  <TOKV
+            STD  ,S
+            JSR  NEXT
+            LDY  ,S
+            LDX  NM_TAG,Y
+            LDA  <TOK
+            CMPA #'{'
+            BEQ  SS_DEFINE
+            CMPA #';'
+            BEQ  SS_DECL
+            CMPX #0                    ; struct tag: the one it means now, or a
+            BNE  SS_FOUND              ; new one here
+SS_NEW      BSR  SS_TAG
+            BRA  SS_END
+SS_DECL     CMPX #0                    ; struct tag; : one here
+            BEQ  SS_NEW
+            LDA  SY_DEPTH,X
+            CMPA <DEPTH
+            BNE  SS_NEW
+SS_FOUND    LDA  SY_VAL+1,X            ; (a tag of the same kind)
+            CMPA 2,S
+            BNE  SS_WRONG
+            LDX  SY_TYPE,X
+            BRA  SS_END
+SS_DEFINE   CMPX #0                    ; struct tag {: the one here, if it was
+            BEQ  SS_DNEW               ; only declared, or a new one
+            LDA  SY_DEPTH,X
+            CMPA <DEPTH
+            BNE  SS_DNEW
+            LDA  SY_VAL+1,X
+            CMPA 2,S
+            BNE  SS_WRONG
+            LDX  SY_TYPE,X
+            LDA  TY_FL,X
+            BITA #TYF_NOSIZE
+            BNE  SS_BODY
+            LDY  ,S
+            LDX  #M_REDEF
+            JMP  ERRORN
+SS_DNEW     BSR  SS_TAG
+            BRA  SS_BODY
+SS_NONAME   LDA  <TOK                  ; struct {: no tag
+            CMPA #'{'
+            LBNE EP_ID
+            LDA  2,S
+            BSR  NEWSTYPE
+SS_BODY     JSR  MEMBERS
+SS_END      STX  <TMP2
+            LEAS 3,S
+            JSR  RESTDECL
+            LDX  <TMP2
+            RTS
+SS_WRONG    LDY  ,S
+            LDX  #M_WRONGTAG
+            JMP  ERRORN
+; A new type, and the tag (,S+2 on entry) for it here -> X = the type.
+SS_TAG      LDA  4,S
+            BSR  NEWSTYPE
+            PSHS X
+            LDY  4,S
+            LDA  6,S
+            JSR  NEWTAG
+            PULS X,PC
+; A = K_STRUCT or K_UNION -> X = a new type for it, not yet defined.
+NEWSTYPE    PSHS A
+            LDD  #TYSIZE
+            JSR  ALLOC
+            LDA  #TK_STRUCT
+            STA  TY_KIND,X
+            LDB  #TYF_NOSIZE
+            PULS A
+            CMPA #K_UNION
+            BNE  NT_FL
+            ORB  #TYF_UNION
+NT_FL       STB  TY_FL,X
+            RTS
+; X = a struct type, "{" next: its members, to the "}" (and past it).
+MEMBERS     PSHS X                     ; 2,S: the type
+            CLRD
+            PSHS D                     ; ,S: the last member so far
+            JSR  NEXT
+MS_DECL     LDA  <TOK
+            CMPA #'}'
+            LBEQ MS_END
+            JSR  DECLSPEC
+            LBCS MS_BAD
+            LDA  <DSSC
+            LBNE MS_BAD
+            LDA  <TOK
+            CMPA #';'
+            LBEQ MS_SEMI
+MS_LOOP     CLR  <ABSTRACT
+            JSR  DECLARATOR
+            LDY  <DNAME
+            LBEQ ED_NONAME
+            LDA  <TOK
+            CMPA #':'
+            LBEQ MS_BITS
+            LDX  <DTYPE                ; it needs a size
+            LDA  TY_KIND,X
+            CMPA #TK_FUNC
+            LBEQ MS_FUNC
+            LDA  TY_FL,X
+            BITA #TYF_NOSIZE
+            LBNE MS_NOSIZE
+            LDD  TY_SIZE,X
+            LBEQ MS_NOSIZE
+            LDX  2,S                   ; not twice
+            LDX  TY_PAR,X
+MS_DUP      BEQ  MS_NEW
+            CMPY ME_NAME,X
+            LBEQ MS_TWICE
+            LDX  ME_NEXT,X
+            BRA  MS_DUP
+MS_NEW      LDD  #MESIZE
+            JSR  ALLOC
+            STY  ME_NAME,X
+            LDY  <DTYPE
+            STY  ME_TYPE,X
+            LDY  2,S
+            LDA  TY_FL,Y
+            BITA #TYF_UNION
+            BNE  MS_UNION
+            LDD  TY_SIZE,Y             ; a struct's: after the others
+            STD  ME_OFF,X
+            PSHS X
+            LDX  <DTYPE
+            ADDD TY_SIZE,X
+            STD  TY_SIZE,Y
+            PULS X
+            BRA  MS_LINK
+MS_UNION    PSHS X                     ; a union's: at 0, the size the largest
+            LDX  <DTYPE
+            LDD  TY_SIZE,X
+            CMPD TY_SIZE,Y
+            BLS  MS_USIZE
+            STD  TY_SIZE,Y
+MS_USIZE    PULS X
+MS_LINK     LDY  ,S
+            BEQ  MS_FIRST
+            STX  ME_NEXT,Y
+            BRA  MS_LAST
+MS_FIRST    LDY  2,S
+            STX  TY_PAR,Y
+MS_LAST     STX  ,S
+            LDA  <TOK
+            CMPA #44
+            BNE  MS_SEMI
+            JSR  NEXT
+            LBRA MS_LOOP
+MS_SEMI     LDA  #';'
+            JSR  EXPECT
+            LBRA MS_DECL
+MS_END      JSR  NEXT
+            PULS D,X
+            LDD  TY_PAR,X
+            BEQ  MS_EMPTY
+            LDA  TY_FL,X
+            ANDA #$FF-TYF_NOSIZE
+            STA  TY_FL,X
+            RTS
+MS_BAD      LDX  #M_MEMBER
+            JMP  ERROR
+MS_BITS     LDX  #M_BITFIELD
+            JMP  ERROR
+MS_FUNC     LDX  #M_MEMFUNC
+            JMP  ERRORN
+MS_NOSIZE   LDX  #M_NOSIZE
+            JMP  ERRORN
+MS_TWICE    LDX  #M_MEMTWICE
+            JMP  ERRORN
+MS_EMPTY    LDX  #M_NOMEMBERS
+            JMP  ERROR
+; X = a struct type, Y = a name -> X = its member of that name.
+FINDMEMBER  LDA  TY_FL,X
+            BITA #TYF_NOSIZE
+            BNE  FM_UNDEF
+            LDX  TY_PAR,X
+FM_LOOP     BEQ  FM_NONE
+            CMPY ME_NAME,X
+            BEQ  FM_RET
+            LDX  ME_NEXT,X
+            BRA  FM_LOOP
+FM_RET      RTS
+FM_NONE     LDX  #M_NOMEMB
+            JMP  ERRORN
+FM_UNDEF    LDX  #M_UNDEFSTR
+            JMP  ERROR
+; enum, its tag and/or its constants -> X = the type (int).
+ENUMSPEC    JSR  NEXT
+            LDA  <TOK
+            CMPA #T_ID
+            BNE  EN_BODY
+            LDY  <TOKV
+            PSHS Y
+            JSR  NEXT
+            PULS Y
+            LDX  NM_TAG,Y
+            LDA  <TOK
+            CMPA #'{'
+            BEQ  EN_DEFINE
+            CMPX #0                    ; enum tag: an enum's, if it's known
+            LBEQ EN_INT
+            LDA  SY_VAL+1,X
+            CMPA #K_ENUM
+            BEQ  EN_INT
+            LDX  #M_WRONGTAG
+            JMP  ERRORN
+EN_DEFINE   CMPX #0                    ; enum tag {: once in a scope
+            BEQ  EN_TAG
+            LDA  SY_DEPTH,X
+            CMPA <DEPTH
+            BNE  EN_TAG
+            LDX  #M_REDEF
+            JMP  ERRORN
+EN_TAG      LDX  #TYP_INT
+            LDA  #K_ENUM
+            JSR  NEWTAG
+EN_BODY     LDA  #'{'
+            JSR  EXPECT
+            CLRD
+            PSHS D                     ; the next constant's value
+EN_LOOP     LDA  <TOK
+            CMPA #'}'
+            BEQ  EN_END
+            CMPA #T_ID
+            LBNE EP_ID
+            LDY  <TOKV
+            PSHS Y
+            JSR  NEXT
+            LDA  <TOK
+            CMPA #'='
+            BNE  EN_VAL
+            JSR  NEXT
+            JSR  CONSTEXPR
+            STD  2,S
+EN_VAL      PULS Y
+            LDX  NM_SYM,Y              ; once in a scope
+            BEQ  EN_NEW
+            LDA  SY_DEPTH,X
+            CMPA <DEPTH
+            LBEQ REDECL
+EN_NEW      LDX  #TYP_INT
+            LDA  #SK_ENUMC
+            JSR  NEWSYM
+            LDD  ,S
+            STD  SY_VAL,X
+            ADDD #1
+            STD  ,S
+            LDA  <TOK
+            CMPA #44
+            BNE  EN_END
+            JSR  NEXT
+            BRA  EN_LOOP
+EN_END      LEAS 2,S
+            LDA  #'}'
+            JSR  EXPECT
+EN_INT      LDX  #TYP_INT
+            RTS
 ;------------------------------------------------------------------------------
 ; A declarator, for the type DSTYPE -> DNAME (0: none; ABSTRACT says whether
 ; that may be), DTYPE. How it's written is collected on OPSTK (DCL), then made
@@ -336,7 +652,9 @@ PUSHOP      LDY  <OPTOP
             STY  <OPTOP
             RTS
 ; After "(": a function's parameters, to the ")" -> X = their list (PL_*).
-PARAMS      LDX  <DSTYPE               ; (the declaration they're in)
+PARAMS      LDA  <DSINTR               ; (the declaration they're in)
+            PSHS A
+            LDX  <DSTYPE
             LDY  <DNAME
             LDA  <DSSC
             LDB  <ABSTRACT
@@ -421,6 +739,8 @@ PL2_COPIED   PULS X
             STY  <DSTYPE
             PULS Y
             STY  <DNAME
+            PULS A
+            STA  <DSINTR
             RTS
 PL2_BAD      LDX  #M_PARAM
             JMP  ERROR
@@ -429,7 +749,10 @@ PL2_MANY     LDX  #M_MANYPAR
 ;------------------------------------------------------------------------------
 ; A declaration at file level (or a function's definition).
 ;------------------------------------------------------------------------------
-EXTDECL     JSR  DECLSPEC
+EXTDECL     LDA  <TOK                  ; asm { } (in code)
+            CMPA #K_ASM
+            LBEQ ST_ASM
+            JSR  DECLSPEC
             BCC  ED_HAVE
             LDA  <TOK                  ; none: "f() {...}" is int, as of old
             CMPA #T_ID
@@ -462,7 +785,12 @@ ED_LOOP     CLR  <ABSTRACT
             JSR  GLOBINIT
             BRA  ED_NEXT
 ED_FUNC     JSR  DECLFUNC
-            LDA  <TOK
+            TST  <DSINTR
+            BEQ  ED_NINTR
+            LDA  SY_FL,X
+            ORA  #SF_INTR
+            STA  SY_FL,X
+ED_NINTR    LDA  <TOK
             CMPA #'{'
             BNE  ED_NEXT
             JMP  FUNCDEF
@@ -608,29 +936,217 @@ GI_RET      RTS
 GI_REDEF    LDY  SY_NAME,X
             LDX  #M_REDEF
             JMP  ERRORN
+;------------------------------------------------------------------------------
+; Initializers. One walk does both kinds: IMODE 0 writes data (FCB, FDB, ZMB)
+; where the output is; IMODE 1 writes code storing into the frame at IBASE
+; (n,U). The object's bytes are done in order (IDONE: how many so far), so a
+; gap (what an initializer leaves out) is zeros: FILLTO.
+;------------------------------------------------------------------------------
 ; X = a type: its initializer -> data. -> D = the elements an array has.
-INITDATA    LDA  TY_KIND,X
+INITDATA    CLR  <IMODE
+            CLRD
+            STD  <IDONE
+            JMP  INIT
+; A local's initializer: X = the type, D = where (n,U). A struct may be given
+; an expression of its type.
+LINIT       STD  <IBASE
+            LDA  #1
+            STA  <IMODE
+            CLRD
+            STD  <IDONE
+            JSR  TISSTRUCT
+            BCS  LT_INIT
+            LDA  <TOK
+            CMPA #'{'
+            BEQ  LT_INIT
+            CLRD
+            JMP  ISCALAR
+LT_INIT     CLRD
+            JMP  INIT
+; X = a type, D = its offset in the object: one initializer for it. -> D = how
+; many elements (an array's; 1 for anything else).
+INIT        PSHS D,X                   ; (,S the offset, 2,S the type)
+            LDA  TY_KIND,X
             CMPA #TK_ARRAY
-            BEQ  IN_ARRAY
+            BEQ  IT_ARRAY
+            CMPA #TK_STRUCT
+            BEQ  IT_AGG
             LDA  <TOK                  ; a scalar, maybe in braces
             CMPA #'{'
-            BNE  IN_SCALAR
-            PSHS X
+            BNE  IT_SCALAR
             JSR  NEXT
-            PULS X
-            JSR  INITDATA
+            PULS D,X
+            BSR  INIT
+            LDA  #44
+            JSR  ACCEPT
             LDA  #'}'
-            JMP  EXPECT
-IN_SCALAR   PSHS X
+            JSR  EXPECT
+            LDD  #1
+            RTS
+IT_SCALAR   PULS D,X
+            JSR  ISCALAR
+            LDD  #1
+            RTS
+IT_ARRAY    LDX  TY_BASE,X             ; chars from a string, maybe in braces?
+            JSR  TISCHAR
+            BCS  IT_AGG
+            LDA  <TOK
+            CMPA #T_STR
+            BEQ  IT_STR
+            CMPA #'{'
+            BNE  IT_AGG
+            JSR  PEEK
+            CMPA #T_STR
+            BNE  IT_AGG
+            JSR  NEXT
+            PULS D,X
+            JSR  ISTRING
+            PSHS D
+            LDA  #44
+            JSR  ACCEPT
+            LDA  #'}'
+            JSR  EXPECT
+            PULS D,PC
+IT_STR      PULS D,X
+            JMP  ISTRING
+IT_AGG      PULS D,X
+; An array or a struct (X), at D: its elements, in braces or (brace elision)
+; as many as it takes of the list it's in. -> D = how many.
+AGG         PSHS D,X
+            CLRA
+            LDB  <TOK
+            CMPB #'{'
+            BNE  AG_NB
+            INCA
+AG_NB       PSHS A
+            TSTA
+            BEQ  AG_GO
+            JSR  NEXT
+AG_GO       LDX  3,S                   ; (a struct: its first member)
+            LDX  TY_PAR,X
+            CLRD
+            PSHS D,X                   ; ,S the count, 2,S the next member,
+AG_LOOP     LDA  <TOK                  ; 4,S braced, 5,S the offset, 7,S the
+            CMPA #'}'                  ; type
+            LBEQ AG_END
+            LDX  7,S
+            LDA  TY_KIND,X
+            CMPA #TK_STRUCT
+            BEQ  AG_MEMB
+            LDD  TY_N,X                ; an array: room for another?
+            CMPD #$FFFF
+            BEQ  AG_ELEM
+            CMPD ,S
+            BLS  AG_FULL
+AG_ELEM     LDY  TY_BASE,X             ; at offset + count * its size
+            LDD  TY_SIZE,Y
+            MULD ,S
+            TFR  W,D
+            ADDD 5,S
+            TFR  Y,X
+            JSR  INIT
+            BRA  AG_NEXT
+AG_MEMB     LDY  2,S                   ; a struct: its next member (a union:
+            BEQ  AG_FULL               ; only the first)
+            LDA  TY_FL,X
+            BITA #TYF_UNION
+            BEQ  AG_M
+            LDD  ,S
+            BNE  AG_FULL
+AG_M        LDD  ME_OFF,Y
+            ADDD 5,S
+            LDX  ME_TYPE,Y
+            JSR  INIT
+            LDX  2,S
+            LDX  ME_NEXT,X
+            STX  2,S
+AG_NEXT     LDD  ,S
+            ADDD #1
+            STD  ,S
+            LDA  <TOK
+            CMPA #44
+            BNE  AG_END
+            TST  4,S                   ; with no braces, once it's full the
+            BNE  AG_COMMA              ; comma is the list's around it
+            LDX  7,S
+            LDA  TY_KIND,X
+            CMPA #TK_STRUCT
+            BEQ  AG_FS
+            LDD  TY_N,X
+            CMPD #$FFFF
+            BEQ  AG_COMMA
+            CMPD ,S
+            BLS  AG_END
+            BRA  AG_COMMA
+AG_FS       LDD  2,S
+            BEQ  AG_END
+            LDA  TY_FL,X
+            BITA #TYF_UNION
+            BNE  AG_END
+AG_COMMA    JSR  NEXT
+            LBRA AG_LOOP
+AG_FULL     TST  4,S
+            BEQ  AG_END
+IN_MANY     LDX  #M_MANYINIT
+            JMP  ERROR
+AG_END      TST  4,S
+            BEQ  AG_FILL
+            LDA  #'}'
+            JSR  EXPECT
+AG_FILL     LDX  7,S                   ; the rest: zeros
+            LDA  TY_FL,X
+            BITA #TYF_NOSIZE
+            BNE  AG_RET
+            LDD  TY_SIZE,X
+            ADDD 5,S
+            JSR  FILLTO
+AG_RET      PULS D
+            LEAS 7,S
+            RTS
+; D = an offset: zeros from IDONE to it.
+FILLTO      PSHS D
+            SUBD <IDONE
+            BLS  FT_RET
+            TST  <IMODE
+            BNE  FT_CODE
+            JSR  EMITZEROS
+            BRA  FT_SET
+FT_CODE     PSHS D
+            LDD  <IDONE
+            ADDD <IBASE
+            TFR  D,Y
+            PULS D
+            JSR  ZEROFILL
+FT_SET      LDD  ,S
+            STD  <IDONE
+FT_RET      PULS D,PC
+; X = a scalar's type (or, in code, a struct's), D = its offset: its
+; initializer, an expression.
+ISCALAR     PSHS D,X
+            JSR  FILLTO
             JSR  RESETNODES
-            JSR  ASSIGNEXPR
-            JSR  DECAY
+            TST  <IMODE
+            BNE  IS_CODE
+            JSR  ASSIGNEXPR            ; data: a constant, as the type
+            LDY  2,S
+            JSR  MKCONVERT
+            TFR  X,Y
+            LDX  2,S
+            JSR  TISCHAR
+            BCC  IS_CHAR
+            JSR  TISLONG
+            BCC  IS_LONG
+            TFR  Y,X
             JSR  EVALCONST
             BCS  IN_NOTCONST
-            PULS X
-            JSR  TISCHAR
-            BCS  IN_WORD
-            LDD  <CVSYM                ; a char: a number
+            LDX  #S_FDB
+            JSR  EMITI
+            JSR  OUTCONST
+            BRA  IS_NL
+IS_CHAR     TFR  Y,X
+            JSR  EVALCONST
+            BCS  IN_NOTCONST
+            LDD  <CVSYM
             BNE  IN_NOTCONST
             LDD  <CVLBL
             BNE  IN_NOTCONST
@@ -639,89 +1155,115 @@ IN_SCALAR   PSHS X
             LDD  <CVVAL
             CLRA
             JSR  OUTDEC
-            JMP  OUTNL
-IN_WORD     JSR  TISLONG
-            BCC  IN_LONG
+            BRA  IS_NL
+IS_LONG     LDA  N_OP,Y                ; (a long: a number)
+            CMPA #O_NUM
+            BNE  IN_NOTCONST
             LDX  #S_FDB
             JSR  EMITI
-            JSR  OUTCONST
-            JMP  OUTNL
-IN_LONG     LDX  #M_NOTYET
-            JMP  ERROR
+            LDD  N_X,Y
+            JSR  OUTDEC
+            LDA  #44
+            JSR  OUTC
+            LDD  N_V,Y
+            JSR  OUTDEC
+IS_NL       JSR  OUTNL
+IS_DONE     LDX  2,S                   ; done to its end
+            LDD  TY_SIZE,X
+            ADDD ,S
+            STD  <IDONE
+            PULS D,X,PC
+IS_CODE     LDA  #O_FRAME              ; code: its place = the expression
+            JSR  NEWNODE
+            LDD  ,S
+            ADDD <IBASE
+            STD  N_V,X
+            LDD  2,S
+            STD  N_TYPE,X
+            LDA  #NF_LVAL
+            STA  N_FL,X
+            PSHS X
+            JSR  ASSIGNEXPR
+            TFR  X,Y
+            PULS X
+            JSR  MKASSIGN
+            JSR  GENVOID
+            BRA  IS_DONE
 IN_NOTCONST LDX  #M_NOTCONST
             JMP  ERROR
-IN_ARRAY    LDY  TY_BASE,X             ; an array
-            PSHS X,Y                   ; (the type, the element type)
-            LDX  TY_BASE,X
-            JSR  TISCHAR
-            BCS  IN_BRACE
-            LDA  <TOK
-            CMPA #T_STR
-            BNE  IN_BRACE
-            LDX  ,S                    ; chars from a string
+; X = an array of chars, D = its offset, a string next: its bytes. -> D = the
+; array's size.
+ISTRING     PSHS D,X
+            JSR  FILLTO
+            LDX  2,S
             LDD  TY_N,X
             CMPD #$FFFF
-            BNE  IN_SSIZED
-            LDD  <TOKSL
+            BNE  IG_SIZED
+            LDD  <TOKSL                ; no size: the string's, and its NUL
             ADDD #1
-IN_SSIZED   PSHS D                     ; the array's size
-            LDD  <TOKSL
+IG_SIZED    PSHS D                     ; (,S the size, 2,S the offset, 4,S
+            LDD  <TOKSL                ; the type)
             CMPD ,S
             BHI  IN_SLONG
-            BEQ  IN_SBYTES
-            ADDD #1                    ; with its NUL, if that fits
-IN_SBYTES   LDX  <TOKSB
+            BEQ  IG_N
+            ADDD #1                    ; the NUL too, if it fits
+IG_N        TST  <IMODE
+            BNE  IG_CODE
+            LDX  <TOKSB
             JSR  EMITBYTES
+            BRA  IG_DONE
+IG_CODE     CMPD #0                    ; copied from rodata
+            BEQ  IG_DONE
             PSHS D
-            LDD  2,S
-            SUBD ,S++
-            JSR  EMITZEROS
+            JSR  EMITSTRING
+            LDX  4,S
+            EXG  D,X
+            ADDD <IBASE
+            EXG  D,X
+            LDY  ,S
+            JSR  COPYCODE
+            PULS D
+IG_DONE     ADDD 2,S
+            STD  <IDONE
             JSR  NEXT
+            LDD  ,S                    ; zeros to its end
+            ADDD 2,S
+            JSR  FILLTO
             PULS D
             LEAS 4,S
             RTS
 IN_SLONG    LDX  #M_STRLONG
             JMP  ERROR
-IN_BRACE    LDA  #'{'
-            JSR  EXPECT
-            CLRD
-            PSHS D                     ; how many so far
-IN_ELOOP    LDA  <TOK                  ; (,S: the count, 2,S: the type, 4,S:
-            CMPA #'}'                  ; the element type)
-            BEQ  IN_EEND
-            LDX  2,S
-            LDD  TY_N,X
-            CMPD ,S
-            BLS  IN_MANY
-            LDX  4,S
-            JSR  INITDATA
+; Code copying Y bytes from the label D to X,U.
+COPYCODE    PSHS D,X,Y
+            LDX  #S_PSHSY
+            JSR  EMITL
+            LDX  #S_LDX
+            JSR  EMITI
+            LDA  #'#'
+            JSR  OUTC
             LDD  ,S
-            ADDD #1
-            STD  ,S
-            LDA  <TOK
-            CMPA #44
-            BNE  IN_EEND
-            JSR  NEXT
-            BRA  IN_ELOOP
-IN_EEND     LDA  #'}'
-            JSR  EXPECT
-            LDX  2,S                   ; the rest: zeros
-            LDD  TY_N,X
-            CMPD #$FFFF
-            BEQ  IN_ECOUNT
-            SUBD ,S
-            LDX  4,S
-            MULD TY_SIZE,X
-            TFR  W,D
-            JSR  EMITZEROS
-            LDX  2,S
-            LDD  TY_N,X
-            STD  ,S
-IN_ECOUNT   PULS D
-            LEAS 4,S
-            RTS
-IN_MANY     LDX  #M_MANYINIT
-            JMP  ERROR
+            JSR  OUTLBL
+            JSR  OUTNL
+            LDX  #S_LEAY
+            JSR  EMITI
+            LDD  2,S
+            JSR  OUTDEC
+            LDX  #S_COMMAU
+            JSR  OUTS
+            JSR  OUTNL
+            LDX  #S_LDW
+            JSR  EMITI
+            LDA  #'#'
+            JSR  OUTC
+            LDD  4,S
+            JSR  OUTDEC
+            JSR  OUTNL
+            LDX  #S_TFMXY
+            JSR  EMITL
+            LDX  #S_PULSY
+            JSR  EMITL
+            PULS D,X,Y,PC
 ; The constant EVALCONST found -> the output (an FDB's operand).
 OUTCONST    LDX  <CVSYM
             BEQ  OC_LBL
@@ -816,11 +1358,17 @@ FUNCDEF     LDA  SY_FL,X
             CLR  <NLABELS
             CLR  <INSWITCH
             JSR  PUSHSCOPE
-            LDX  <DTYPE                ; the parameters: 4,U on, a word each (a
-            LDX  TY_PAR,X              ; char in its second byte)
+            LDX  <DTYPE                ; the parameters: 4,U on (6,U returning
+            LDX  TY_BASE,X             ; a struct: its place is at 4,U), words
+            LDY  #4                    ; each (a char in its second byte)
+            JSR  TISSTRUCT
+            BCS  FD_P4
+            LDY  #6
+FD_P4       LDX  <DTYPE
+            LDX  TY_PAR,X
             LDB  PL_N,X
-            LEAY PL_PAR,X
-            LDX  #4
+            LEAX PL_PAR,X
+            EXG  X,Y
             PSHS B,X,Y
 FD_PAR      TST  ,S
             BEQ  FD_BODY
@@ -830,17 +1378,22 @@ FD_PAR      TST  ,S
             BEQ  FD_NONAME
             LDA  #SK_LOCAL
             JSR  NEWSYM
-            PSHS X
+            PSHS X                     ; (the symbol)
             LDX  SY_TYPE,X
+            JSR  TWORDS                ; the next one's place
+            LSLB
+            ROLA
+            ADDD 3,S
+            PSHS D
+            LDD  5,S                   ; this one's
             JSR  TISCHAR
-            PULS X
-            LDD  1,S
             BCS  FD_OFF
             ADDD #1
-FD_OFF      STD  SY_VAL,X
-            LDD  1,S
-            ADDD #2
-            STD  1,S
+FD_OFF      LDY  2,S
+            STD  SY_VAL,Y
+            PULS D
+            STD  3,S
+            LEAS 2,S
             LDD  3,S
             ADDD #4
             STD  3,S
@@ -854,8 +1407,16 @@ FD_BODY     LEAS 5,S
             JSR  LABELHERE
             LDX  #S_LEASU
             JSR  EMITL
+            LDX  <CURFUNC
+            LDA  SY_FL,X
             LDX  #S_PULSU
-            JSR  EMITL
+            BITA #SF_INTR
+            BEQ  FD_RTS
+            LDX  #S_PULSURTI           ; (an interrupt's: RTI)
+            JSR  EMITLINES
+            BRA  FD_FRAME
+FD_RTS      JSR  EMITL
+FD_FRAME
             LDD  <FRMLBL
             JSR  OUTLBL
             LDX  #S_EQU
@@ -891,12 +1452,21 @@ LD_NTDEF    LDX  <DTYPE
             LDA  TY_KIND,X
             CMPA #TK_FUNC
             BNE  LD_NFUNC
+            PSHS Y
             JSR  DECLFUNC              ; a function's prototype
-            BRA  LD_NEXT
+            BRA  LD_ALIAS
 LD_NFUNC    LDA  <DSSC
             CMPA #SC_EXTERN
             BNE  LD_NEXTERN
+            PSHS Y
             JSR  DECLOBJ
+LD_ALIAS    PULS Y                     ; the name means the file's symbol here
+            PSHS X                     ; (in this block)
+            LDX  SY_TYPE,X
+            LDA  #SK_EXTREF
+            JSR  NEWSYM
+            PULS D
+            STD  SY_VAL,X
             BRA  LD_NEXT
 LD_NEXTERN  LDX  NM_SYM,Y              ; not twice in a block
             BEQ  LD_FRESH
@@ -950,20 +1520,47 @@ SL_BSS      PSHS X
 SL_CODE     LDA  #SEC_CODE
             JMP  SECT
 ; An automatic local: Y = its name, DTYPE its type. It gets a place in the
-; frame (n,U, below U); an initializer is code.
+; frame (n,U, below U); an initializer is code. An array with no size takes
+; its initializer's: a string's, or a { list }'s, which is then made as data
+; in rodata (so constants only) and copied.
 AUTOLOCAL   LDX  <DTYPE
+            CLRD
+            PSHS D                     ; the label of a copy in rodata (0: none)
             LDA  TY_FL,X
             BITA #TYF_NOSIZE
             BEQ  AU_SIZED
-            LDA  <TOK                  ; char s[] = "...": the string's size
+            LDA  <TOK
             CMPA #'='
-            BNE  AU_NOSIZE
+            LBNE AU_NOSIZE
             PSHS X,Y
             JSR  PEEK
             PULS X,Y
             CMPA #T_STR
-            BNE  AU_NOSIZE
-            LDD  <AHEADSL
+            BEQ  AU_STR
+            CMPA #'{'
+            LBNE AU_NOSIZE
+            PSHS X,Y                   ; = { list }
+            JSR  NEXT
+            LDA  <CURSECT
+            PSHS A                     ; (,S the section, 1,S the type, 3,S
+            LDA  #SEC_RODATA           ; the name, 5,S the label)
+            JSR  SECT
+            JSR  NEWLABEL
+            STD  5,S
+            JSR  LABELHERE
+            LDX  1,S
+            JSR  INITDATA
+            PSHS D
+            LDA  2,S
+            JSR  SECT
+            PULS D
+            LDX  1,S
+            LDX  TY_BASE,X
+            JSR  ARRAYOF
+            LEAS 3,S
+            PULS Y
+            BRA  AU_SIZED
+AU_STR      LDD  <AHEADSL              ; = "...": the string's size
             ADDD #1
             PSHS Y
             LDX  TY_BASE,X
@@ -981,6 +1578,8 @@ AU_MAX      LDA  #SK_LOCAL
             CLRD
             SUBD <FRAMESZ
             STD  SY_VAL,X
+            LDD  ,S
+            BNE  AU_COPY
             LDA  <TOK
             CMPA #'='
             BNE  AU_RET
@@ -989,141 +1588,15 @@ AU_MAX      LDA  #SK_LOCAL
             PULS X
             LDD  SY_VAL,X
             LDX  SY_TYPE,X
-            JMP  LINIT
-AU_RET      RTS
+            JSR  LINIT
+AU_RET      PULS D,PC
+AU_COPY     LDY  SY_TYPE,X             ; the copy
+            LDY  TY_SIZE,Y
+            LDX  SY_VAL,X
+            JSR  COPYCODE
+            PULS D,PC
 AU_NOSIZE   LDX  #M_NOSIZE
             JMP  ERRORN
-; A local's initializer: X = the type, D = where (n,U).
-LINIT       PSHS D,X
-            LDA  TY_KIND,X
-            CMPA #TK_ARRAY
-            BEQ  LI_ARRAY
-            LDA  <TOK                  ; a scalar, maybe in braces
-            CMPA #'{'
-            BNE  LI_SCALAR
-            JSR  NEXT
-            PULS D,X
-            JSR  LINIT
-            LDA  #'}'
-            JMP  EXPECT
-LI_SCALAR   JSR  RESETNODES
-            LDA  #O_FRAME              ; its place = the expression
-            JSR  NEWNODE
-            LDD  ,S
-            STD  N_V,X
-            LDD  2,S
-            STD  N_TYPE,X
-            LDA  #NF_LVAL
-            STA  N_FL,X
-            PSHS X
-            JSR  ASSIGNEXPR
-            TFR  X,Y
-            PULS X
-            JSR  MKASSIGN
-            JSR  GENVOID
-            PULS D,X,PC
-LI_ARRAY    LDX  2,S                   ; an array: 2,S = its type, ,S = where
-            LDX  TY_BASE,X
-            JSR  TISCHAR
-            LBCS LI_BRACE
-            LDA  <TOK
-            CMPA #T_STR
-            LBNE LI_BRACE
-            LDX  2,S                   ; chars from a string: copied from one
-            LDD  <TOKSL                ; in rodata
-            CMPD TY_N,X
-            LBHI IN_SLONG
-            BEQ  LI_SNONUL
-            ADDD #1
-LI_SNONUL   PSHS D                     ; the bytes copied
-            JSR  EMITSTRING            ; -> D = its label
-            PSHS D
-            LDX  #S_PSHSY
-            JSR  EMITL
-            LDX  #S_LDX
-            JSR  EMITI
-            LDA  #'#'
-            JSR  OUTC
-            PULS D
-            JSR  OUTLBL
-            JSR  OUTNL
-            LDX  #S_LEAY
-            JSR  EMITI
-            LDD  2,S
-            JSR  OUTDEC
-            LDX  #S_COMMAU
-            JSR  OUTS
-            JSR  OUTNL
-            LDX  #S_LDW
-            JSR  EMITI
-            LDA  #'#'
-            JSR  OUTC
-            LDD  ,S
-            JSR  OUTDEC
-            JSR  OUTNL
-            LDX  #S_TFMXY
-            JSR  EMITL
-            LDX  4,S                   ; the rest: the NUL again, from X-1
-            LDD  TY_N,X
-            SUBD ,S++
-            BEQ  LI_SDONE
-            PSHS D
-            LDX  #S_LEAXM1
-            JSR  EMITL
-            LDX  #S_LDW
-            JSR  EMITI
-            LDA  #'#'
-            JSR  OUTC
-            PULS D
-            JSR  OUTDEC
-            JSR  OUTNL
-            LDX  #S_TFMX1
-            JSR  EMITL
-LI_SDONE    LDX  #S_PULSY
-            JSR  EMITL
-            JSR  NEXT
-            PULS D,X,PC
-LI_BRACE    LDA  #'{'
-            JSR  EXPECT
-            CLRD
-            PSHS D                     ; elements so far
-LI_ELOOP    LDA  <TOK
-            CMPA #'}'
-            BEQ  LI_EEND
-            LDX  4,S
-            LDD  TY_N,X
-            CMPD ,S
-            LBLS IN_MANY
-            LDY  TY_BASE,X             ; this one's place: where + n * its size
-            LDD  TY_SIZE,Y
-            MULD ,S
-            TFR  W,D
-            ADDD 2,S
-            TFR  Y,X
-            JSR  LINIT
-            LDD  ,S
-            ADDD #1
-            STD  ,S
-            LDA  <TOK
-            CMPA #44
-            BNE  LI_EEND
-            JSR  NEXT
-            BRA  LI_ELOOP
-LI_EEND     LDA  #'}'
-            JSR  EXPECT
-            LDX  4,S                   ; the rest: zeros
-            LDY  TY_BASE,X
-            LDD  TY_SIZE,Y
-            MULD ,S
-            TFR  W,D                   ; the bytes done
-            PSHS D
-            ADDD 4,S
-            TFR  D,Y                   ; where the rest starts
-            LDD  TY_SIZE,X
-            SUBD ,S++
-            JSR  ZEROFILL
-            PULS D
-            PULS D,X,PC
 ; D = how many bytes, Y = where (n,U): code making them zeros.
 ZEROFILL    CMPD #0
             BLE  ZF_RET
@@ -1246,21 +1719,23 @@ FF_TENT     PSHS X
 FF_NEXT     LDX  SY_NEXT,X
             BRA  FF_LOOP
 FF_HELP     LDX  #HELPNAMES
-            LDB  #1
+            LDD  #1
 FF_HLOOP    TST  ,X
             BEQ  FF_RET
-            BITB <HELPERS
+            PSHS D
+            ANDD <HELPERS
+            PULS D
             BEQ  FF_HSKIP
-            PSHS B,X
+            PSHS D,X
             LDX  #S_IMPORT
             JSR  EMITI
-            LDX  1,S
+            LDX  2,S
             JSR  OUTS
             JSR  OUTNL
-            PULS B,X
+            PULS D,X
 FF_HSKIP    TST  ,X+
             BNE  FF_HSKIP
-            LSLB
+            LSLD
             BRA  FF_HLOOP
 FF_RET      RTS
 ; X = a symbol: "NAME RMB size". Keeps X.
@@ -1294,8 +1769,14 @@ LABELSYM    JSR  OUTSYMNAME
 M_TWOSC     FCN  "more than one storage class"
 M_BADTYPE   FCN  "invalid type"
 M_NOTYET    FCN  "not supported yet"
-M_NOLONG    FCN  "long is not supported yet"
-M_NOSTRUCT  FCN  "struct, union and enum are not supported yet"
+M_WRONGTAG  FCN  "used as the wrong kind of tag:"
+M_MEMBER    FCN  "a member's declaration was expected"
+M_BITFIELD  FCN  "bit-fields are not supported"
+M_MEMFUNC   FCN  "a member can't be a function:"
+M_MEMTWICE  FCN  "duplicate member"
+M_NOMEMBERS FCN  "a struct or union needs members"
+M_NOMEMB    FCN  "no such member:"
+M_UNDEFSTR  FCN  "the struct or union isn't defined"
 M_NEGSIZE   FCN  "array size is negative"
 M_DCLCOMPLEX FCN "declaration too complex"
 M_PARAM     FCN  "a parameter declaration was expected"
@@ -1327,6 +1808,9 @@ S_COMMAS    FCN  ",S"
 S_COMMAU    FCN  ",U"
 S_LEASU     FCN  "LEAS ,U"
 S_PULSU     FCN  "PULS U,PC"
+S_PULSURTI  FCN  "PULS U"
+            FCN  "RTI"
+            FCB  0
 S_PSHSY     FCN  "PSHS Y"
 S_PULSY     FCN  "PULS Y"
 S_LDX       FCN  "LDX"

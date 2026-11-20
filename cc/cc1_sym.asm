@@ -135,6 +135,25 @@ TISLONG     PSHS A
             CMPA #TK_ULONG
             BEQ  TY_YES
             BRA  TY_NO
+TISSTRUCT   PSHS A
+            LDA  TY_KIND,X
+            CMPA #TK_STRUCT
+            BEQ  TY_YES
+            BRA  TY_NO
+; -> D = the words an argument of the type X takes on the stack (a long 2, a
+; struct its size rounded up, anything else 1). Keeps X.
+TWORDS      LDD  #2
+            JSR  TISLONG
+            BCC  TW_RET
+            JSR  TISSTRUCT
+            BCC  TW_STRUCT
+            LDD  #1
+TW_RET      RTS
+TW_STRUCT   LDD  TY_SIZE,X
+            ADDD #1
+            LSRA
+            RORB
+            RTS
 ; Z set if the types X and Y are the same (or close enough: an array of no
 ; size is the same as one with a size; a function's parameters aren't
 ; compared). Keeps X and Y.
@@ -145,6 +164,8 @@ TS_LOOP     PSHS X
             LDA  TY_KIND,X
             CMPA TY_KIND,Y
             BNE  TS_NO
+            CMPA #TK_STRUCT            ; (a struct is only itself)
+            BEQ  TS_NO
             CMPA #TK_PTR
             BEQ  TS_BASE
             CMPA #TK_FUNC
@@ -171,7 +192,18 @@ TS_NO       ANDCC #$FB
 ;------------------------------------------------------------------------------
 ; Y = a name, A = a kind (SK_*), X = a type -> X = a new symbol for them, in
 ; the current scope (it hides any other of that name until the scope ends).
-NEWSYM      PSHS A,X,Y
+; NEWTAG: a tag (SK_TAG, A = its keyword), which the name's NM_TAG means.
+NEWTAG      STA  <TMPB
+            LDA  #SK_TAG
+            LDB  #NM_TAG
+            BSR  NS_ANY
+            LDB  <TMPB
+            CLRA
+            STD  SY_VAL,X
+            RTS
+NEWSYM      LDB  #NM_SYM
+NS_ANY      PSHS B
+            PSHS A,X,Y                 ; (5,S: where in the name it goes)
             LDD  #SYSIZE
             TST  <DEPTH
             BNE  NS_TEMP
@@ -180,9 +212,11 @@ NEWSYM      PSHS A,X,Y
 NS_TEMP     JSR  TALLOC
 NS_GOT      LDY  3,S
             STY  SY_NAME,X
-            LDD  NM_SYM,Y
+            LDB  5,S
+            LEAY B,Y
+            LDD  ,Y
             STD  SY_SHADOW,X
-            STX  NM_SYM,Y
+            STX  ,Y
             LDA  ,S
             STA  SY_KIND,X
             LDD  1,S
@@ -196,7 +230,7 @@ NS_GOT      LDY  3,S
             LDD  ,Y
             STD  SY_NEXT,X
             STX  ,Y
-            LEAS 5,S
+            LEAS 6,S
             RTS
 ; Y = a name -> X = the symbol of that name at file level; Z set if there's
 ; none.
@@ -259,7 +293,11 @@ POPSCOPE    LDB  <DEPTH
             LDX  ,X
 PO_LOOP     BEQ  PO_DONE
             LDY  SY_NAME,X
-            LDD  SY_SHADOW,X
+            LDA  SY_KIND,X
+            CMPA #SK_TAG
+            BNE  PO_SYM
+            LEAY NM_TAG-NM_SYM,Y
+PO_SYM      LDD  SY_SHADOW,X
             STD  NM_SYM,Y
             LDX  SY_NEXT,X
             BRA  PO_LOOP

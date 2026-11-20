@@ -1450,8 +1450,9 @@ DOS_FWRITE  STX  IO_BUF
 FW_RET      RTS
 ;------------------------------------------------------------------------------
 ; IN: B = handle, A = whence (SEEK_SET/CUR/END), X:Y = 32-bit offset (X = high
-; word). Read and update modes only. OUT: carry clear + X:Y = the new position;
-; carry set + A = ERR_BADMODE / ERR_TOOBIG (a position beyond 32 bits).
+; word; signed for SEEK_CUR and SEEK_END). Read and update modes only. OUT:
+; carry clear + X:Y = the new position; carry set + A = ERR_BADMODE /
+; ERR_TOOBIG (a position before the start, or beyond 31 bits).
 ;------------------------------------------------------------------------------
 DOS_FSEEK   STA  SK_WHENCE
             STX  SK_HI
@@ -1477,7 +1478,7 @@ SK_MODE_OK  LDA  SK_WHENCE
 SK_CUR      LDQ  fslot.pos,X
 SK_ADD      ADDW SK_LO
             ADCD SK_HI
-            BCS  SK_TOOBIG
+            BMI  SK_TOOBIG            ; (a signed offset: the sign is the test)
             BRA  SK_STORE
 SK_SET      LDD  SK_HI
             LDW  SK_LO

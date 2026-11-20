@@ -1,0 +1,12 @@
+stock 3 nut 10 100000 gear 0 0
+123450 un 4142 B nest 1 2 3
+loc 8 9 6
+two pin 5 3
+find bolt 400000 250
+total 400250
+lsw 1 2 3 4
+twice 42
+extern 7
+local 99
+ops -808182895 -3298263 804884632
+ulong 2678601506 0

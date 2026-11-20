@@ -159,8 +159,12 @@ HV_NO       ORCC #1
             RTS
 ;------------------------------------------------------------------------------
 ; Names: NAMEBUF -> X = its record (one per spelling, made the first time).
+; FINDNAME: -> X = its record, or 0 (Z set) if there's none.
 ;------------------------------------------------------------------------------
-INTERN      LDX  #NAMEBUF
+INTERN      BSR  FINDNAME
+            BEQ  IT_NEW
+            RTS
+FINDNAME    LDX  #NAMEBUF
             CLRB
 HN_LOOP     LDA  ,X+
             BEQ  HN_END
@@ -176,7 +180,7 @@ HN_END      CLRA
             LEAX D,X
             STX  <TMP                  ; the bucket
             LDY  ,X
-IT_LOOP     BEQ  IT_NEW
+IT_LOOP     BEQ  IT_NONE
             LEAX NM_TEXT,Y
             PSHS Y
             LDY  #NAMEBUF
@@ -185,7 +189,9 @@ IT_LOOP     BEQ  IT_NEW
             BEQ  IT_FOUND
             LDY  NM_NEXT,Y
             BRA  IT_LOOP
-IT_FOUND    TFR  Y,X
+IT_FOUND    LEAX ,Y
+            RTS
+IT_NONE     LDX  #0
             RTS
 IT_NEW      LDX  #NAMEBUF
             JSR  STRLEN
@@ -493,6 +499,8 @@ LX_NUM      PSHS A
             BNE  LN_CHK
             LDB  #8                    ; 0...: octal, or 0x: hex
             STB  <TMPB
+            LDB  #TF_NDEC
+            STB  <LXFL
             JSR  GETCH
             LBCS LN_END
             CMPA #'x'
@@ -581,6 +589,8 @@ LC_VAL      PSHS A
             STD  <LXV+2
             TFR  A,B
             STD  <LXV
+            LDA  #TF_CHAR
+            STA  <LXFL
             LDA  #T_NUM
             STA  <LXTOK
             RTS

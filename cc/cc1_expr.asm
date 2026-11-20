@@ -86,6 +86,8 @@ MKCONVERT   PSHS Y
             LDA  TY_KIND,Y
             CMPA #TK_VOID
             BEQ  MC_RET
+            CMPA #TK_STRUCT
+            BEQ  MC_STRUCT
             EXG  X,Y
             JSR  TISSCALAR
             EXG  X,Y
@@ -93,8 +95,18 @@ MKCONVERT   PSHS Y
             PSHS X
             LDX  N_TYPE,X
             JSR  TISSCALAR
-            PULS X
             BCS  MC_BAD
+            JSR  TISLONG               ; to or from a long (not both): a cast
+            TFR  CC,A
+            PULS X
+            EXG  X,Y
+            JSR  TISLONG
+            EXG  X,Y
+            TFR  CC,B
+            PSHS A
+            EORB ,S+
+            BITB #1
+            LBNE MKCAST
             EXG  X,Y                   ; to a char: a cast, unless it's that
             JSR  TISCHAR               ; char already
             EXG  X,Y
@@ -107,6 +119,11 @@ MKCONVERT   PSHS Y
             BEQ  MC_RET
             JMP  MKCAST
 MC_RET      RTS
+MC_STRUCT   PSHS X                     ; a struct: from the same one
+            LDX  N_TYPE,X
+            JSR  TSAME
+            PULS X
+            BEQ  MC_RET
 MC_BAD      LDX  #M_BADCONV
             JMP  ERROR
 ; X = a node, Y = a type: (type) X -> X.
@@ -131,7 +148,7 @@ MKCAST      LDA  TY_KIND,Y
             EXG  X,Y
             JSR  TISCHAR
             EXG  X,Y
-            BCS  CA_RETYPE
+            BCS  CA_WIDE
             LDA  TY_KIND,Y
             LDB  N_V+1,X
             CMPA #TK_UCHAR
@@ -142,29 +159,69 @@ CA_UCHAR    CLRA
 CA_SET      STD  N_V,X
 CA_RETYPE   STY  N_TYPE,X
             RTS
+CA_WIDE     EXG  X,Y                   ; to a long (from what isn't): its high
+            JSR  TISLONG               ; word
+            EXG  X,Y
+            BCS  CA_RETYPE
+            PSHS X,Y
+            LDX  N_TYPE,X
+            JSR  TISLONG
+            BCC  CA_HDONE
+            CLRD
+            JSR  TISUNS
+            BCC  CA_HSET
+            LDX  ,S
+            TST  N_V,X
+            BPL  CA_HSET
+            LDD  #$FFFF
+CA_HSET     LDX  ,S
+            STD  N_X,X
+CA_HDONE    PULS X,Y
+            BRA  CA_RETYPE
 CA_NODE     LDA  #O_CAST
             JMP  MKUNODE
 CA_BAD      LDX  #M_BADCAST
             JMP  ERROR
 ; X, Y = (promoted) integer types -> X = the type of an arithmetic operation
-; on them: unsigned int if either is, otherwise int. (long comes later.)
-USUALTYPE   JSR  TISLONG
-            BCC  UT_LONG
-            EXG  X,Y
-            JSR  TISLONG
-            BCC  UT_LONG
-            LDA  TY_KIND,X
+; on them: unsigned long if either is, long if either is (a long holds every
+; unsigned int), unsigned int if either is, otherwise int.
+USUALTYPE   LDA  TY_KIND,X
+            CMPA TY_KIND,Y
+            BHS  UT_KIND
+            LDA  TY_KIND,Y             ; (TK_INT < TK_UINT < TK_LONG < TK_ULONG)
+UT_KIND     LDX  #TYP_ULONG
+            CMPA #TK_ULONG
+            BEQ  UT_RET
+            LDX  #TYP_LONG
+            CMPA #TK_LONG
+            BEQ  UT_RET
+            LDX  #TYP_UINT
             CMPA #TK_UINT
-            BEQ  UT_UNS
-            LDA  TY_KIND,Y
-            CMPA #TK_UINT
-            BEQ  UT_UNS
+            BEQ  UT_RET
             LDX  #TYP_INT
-            RTS
-UT_UNS      LDX  #TYP_UINT
-            RTS
-UT_LONG     LDX  #M_NOTYET
-            JMP  ERROR
+UT_RET      RTS
+; If ETY is a long: EL and ER made it.
+TOLONG      LDX  <ETY
+            JSR  TISLONG
+            BCS  TL_RET
+            LDX  <EL
+            LDY  <ETY
+            JSR  MKCONVERT
+            STX  <EL
+            LDX  <ER
+            LDY  <ETY
+            JSR  MKCONVERT
+            STX  <ER
+TL_RET      RTS
+; X = a node: Z set if it's a number that's 0 (a long's whole value).
+NUMZERO     PSHS X
+            LDX  N_TYPE,X
+            JSR  TISLONG
+            PULS X
+            LDD  N_V,X
+            BCS  NZ_RET
+            ORD  N_X,X
+NZ_RET      RTS
 ; X = a type -> X = its promoted type (char -> int).
 PROMOTE     JSR  TISCHAR
             BCS  PR_RET
@@ -239,7 +296,7 @@ MKBINARY    STA  <EOP
             CMPA #O_LOR
             BEQ  MB_LOGIC
             CMPA #O_EQ
-            BHS  MB_COMPARE
+            LBHS MB_COMPARE
             CMPA #O_ADD
             LBEQ MB_ADD
             CMPA #O_SUB
@@ -247,11 +304,18 @@ MKBINARY    STA  <EOP
 MB_ARITH    JSR  BOTHINT               ; integers
             JSR  PROMBOTH
             LDA  <EOP
-            CMPA #O_SHL                ; a shift: the left one's type
-            BEQ  MB_TYPE
+            CMPA #O_SHL                ; a shift: the left one's type (the
+            BEQ  MB_SHIFT              ; count an int)
             CMPA #O_SHR
-            BEQ  MB_TYPE
+            BEQ  MB_SHIFT
             JSR  USUALTYPE
+            STX  <ETY
+            JSR  TOLONG
+            LDX  <ETY
+            BRA  MB_TYPE
+MB_SHIFT    STX  <ETY
+            JSR  INTCOUNT
+            LDX  <ETY
 MB_TYPE     STX  <ETY
             JSR  SETUNS
 MB_BUILD    JSR  BOTHNUM
@@ -274,13 +338,29 @@ BINNODE     LDA  <EOP
             LDA  <EUNS
             STA  N_FL,X
             RTS
-MB_LOGIC    JSR  BOTHSCALAR            ; && ||
-            LDX  #TYP_INT
+MB_LOGIC    JSR  BOTHSCALAR            ; && || (a long and something else:
+            JSR  BOTHNUM               ; both longs, to fold them)
+            BCS  ML_INT
+            JSR  PROMBOTH
+            JSR  TISLONG
+            BCC  ML_LONG
+            TFR  Y,X
+            JSR  TISLONG
+            BCS  ML_INT
+ML_LONG     LDX  #TYP_LONG
+            STX  <ETY
+            JSR  TOLONG
+ML_INT      LDX  #TYP_INT
             STX  <ETY
             CLR  <EUNS
             BRA  MB_BUILD
 MB_COMPARE  JSR  BOTHSCALAR            ; == != < > <= >=: int, signed or not
-            JSR  PROMBOTH              ; as the operands are
+            JSR  PROMBOTH              ; as the operands are (a long: both
+            JSR  TISLONG               ; made the usual type)
+            BCC  MP_LONG
+            EXG  X,Y
+            JSR  TISLONG
+            BCC  MP_LONG
             JSR  SETUNS
             TFR  Y,X
             LDA  <EUNS
@@ -289,9 +369,26 @@ MB_COMPARE  JSR  BOTHSCALAR            ; == != < > <= >=: int, signed or not
             PULS A
             ORA  <EUNS
             STA  <EUNS
-            LDX  #TYP_INT
+MP_INT      LDX  #TYP_INT
             STX  <ETY
-            BRA  MB_BUILD
+            LBRA MB_BUILD
+MP_LONG     JSR  BOTHINT
+            JSR  PROMBOTH
+            JSR  USUALTYPE
+            STX  <ETY
+            JSR  SETUNS
+            JSR  TOLONG
+            BRA  MP_INT
+; A shift's count (ER): an int, if it's a long.
+INTCOUNT    LDX  <ER
+            LDX  N_TYPE,X
+            JSR  TISLONG
+            BCS  IC_RET
+            LDX  <ER
+            LDY  #TYP_INT
+            JSR  MKCONVERT
+            STX  <ER
+IC_RET      RTS
 MB_ADD      LDX  <EL                   ; pointer + integer
             LDX  N_TYPE,X
             JSR  TISPTR
@@ -352,8 +449,10 @@ MS_DIV      PULS D
             CLR  <EUNS
             JMP  MB_BUILD
 MS_RET      RTS
-; ER (an integer added to a pointer, EL) times the size of what EL points to.
-SCALEER     LDY  <EL
+; ER (an integer added to a pointer, EL) times the size of what EL points to
+; (a long made an int first).
+SCALEER     JSR  INTCOUNT
+            LDY  <EL
             LDY  N_TYPE,Y
             LDY  TY_BASE,Y
             LDD  TY_SIZE,Y
@@ -390,8 +489,12 @@ SC_NODE     PSHS X
             LDD  #TYP_INT
             STD  N_TYPE,X
 SC_RET      RTS
-; EOP on EL's and ER's numbers (EUNS: unsigned) -> D.
+; EOP on EL's and ER's numbers (EUNS: unsigned) -> D (and longs: FOLD32).
 FOLD        LDX  <EL
+            LDX  N_TYPE,X
+            JSR  TISLONG
+            LBCC FOLD32
+            LDX  <EL
             LDD  N_V,X
             STD  <FA
             LDX  <ER
@@ -518,6 +621,168 @@ FO_GE       TST  <EUNS
 FO_GEU      CMPD <FB
             LBHS FO_1
             LBRA FO_0
+; The same for longs, in MA and MB: the result -> EL's high word (N_X), and
+; D (its low word). (A shift's count is ER's low word.)
+FOLD32      LDX  <EL
+            LDD  N_X,X
+            STD  MA
+            LDD  N_V,X
+            STD  MA+2
+            LDX  <ER
+            LDD  N_X,X
+            STD  MB
+            LDD  N_V,X
+            STD  MB+2
+            LDB  <EOP
+            SUBB #O_LAND
+            LSLB
+            LDX  #F3TAB
+            LDX  B,X
+            LBEQ FD_INTERNAL
+            JSR  ,X
+            LDX  <EL
+            LDD  MA
+            STD  N_X,X
+            LDD  MA+2
+            RTS
+F3TAB       FDB  F3_LAND,F3_LOR,0,F3_ADD,F3_SUB,F3_MUL,F3_DIV,F3_MOD,F3_SHL
+            FDB  F3_SHR,F3_AND,F3_OR,F3_XOR,F3_EQ,F3_NE,F3_LT,F3_GT,F3_LE,F3_GE
+F3_ADD      LDQ  MA
+            ADDW MB+2
+            ADCD MB
+F3_STQ      STQ  MA
+            RTS
+F3_SUB      LDQ  MA
+            SUBW MB+2
+            SBCD MB
+            BRA  F3_STQ
+F3_MUL      JMP  MUL32
+F3_DIV      BSR  F3_DIVIDE
+            RTS
+F3_MOD      BSR  F3_DIVIDE
+            LDQ  MB
+            BRA  F3_STQ
+F3_DIVIDE   LDD  MB
+            ORD  MB+2
+            LBEQ FO_DIV0
+            TST  <EUNS
+            LBEQ DIV32
+            JMP  UDIV32
+F3_AND      LDD  MA
+            ANDD MB
+            STD  MA
+            LDD  MA+2
+            ANDD MB+2
+            STD  MA+2
+            RTS
+F3_OR       LDD  MA
+            ORD  MB
+            STD  MA
+            LDD  MA+2
+            ORD  MB+2
+            STD  MA+2
+            RTS
+F3_XOR      LDD  MA
+            EORD MB
+            STD  MA
+            LDD  MA+2
+            EORD MB+2
+            STD  MA+2
+            RTS
+F3_SHL      LDX  MB+2
+            CMPX #32
+            BHS  F3_ZERO
+            LDQ  MA
+            CMPX #0
+            BEQ  F3_STQ
+F3_SLL      ADDR W,W
+            ROLD
+            LEAX -1,X
+            BNE  F3_SLL
+            BRA  F3_STQ
+F3_ZERO     CLRD
+            CLRW
+            BRA  F3_STQ
+F3_SHR      LDX  MB+2
+            CMPX #32
+            BLO  F3_SR
+            LDX  #32                   ; (all the bits: as 32 shifts)
+F3_SR       LDQ  MA
+            CMPX #0
+            LBEQ F3_STQ
+F3_SRL      TST  <EUNS
+            BNE  F3_SRU
+            ASRD
+            BRA  F3_SRW
+F3_SRU      LSRD
+F3_SRW      RORW
+            LEAX -1,X
+            BNE  F3_SRL
+            LBRA F3_STQ
+F3_LAND     LDD  MA
+            ORD  MA+2
+            BEQ  F3_0
+            LDD  MB
+            ORD  MB+2
+            BEQ  F3_0
+F3_1        LDB  #1
+            BRA  F3_SETB
+F3_0        CLRB
+            BRA  F3_SETB
+F3_LOR      LDD  MA
+            ORD  MA+2
+            BNE  F3_1
+            LDD  MB
+            ORD  MB+2
+            BNE  F3_1
+            BRA  F3_0
+F3_EQ       BSR  F3_CMP
+            BRA  F3_SETB
+F3_NE       BSR  F3_CMP
+            EORB #1
+            BRA  F3_SETB
+F3_LT       BSR  F3_CMP
+            TFR  A,B
+            BRA  F3_SETB
+F3_GE       BSR  F3_CMP
+            TFR  A,B
+            EORB #1
+            BRA  F3_SETB
+F3_GT       BSR  F3_CMP
+            PSHS A
+            ORB  ,S+
+            EORB #1
+            BRA  F3_SETB
+F3_LE       BSR  F3_CMP
+            PSHS A
+            ORB  ,S+
+F3_SETB     CLRA                       ; B = 0 or 1 -> MA
+            STD  MA+2
+            CLRD
+            STD  MA
+            RTS
+; MA vs MB (EUNS: unsigned) -> A = 1 if MA < MB, B = 1 if they're equal.
+F3_CMP      TST  <EUNS                 ; (unsigned: as signed, the top bits
+            BEQ  F3_SIGNED             ; turned over)
+            LDA  MA
+            EORA #$80
+            STA  MA
+            LDA  MB
+            EORA #$80
+            STA  MB
+F3_SIGNED   CLRD
+            LDX  MA
+            CMPX MB
+            BLT  F3_LESS
+            BGT  F3_CRET
+            LDX  MA+2
+            CMPX MB+2
+            BLO  F3_LESS
+            BHI  F3_CRET
+            INCB
+            RTS
+F3_LESS     INCA
+F3_CRET     RTS
 ; X = an operand, A = O_NEG, O_COM or O_NOT -> X.
 MKUNARY     STA  <EOP
             JSR  DECAY
@@ -534,7 +799,11 @@ MKUNARY     STA  <EOP
             LDA  N_OP,X
             CMPA #O_NUM
             BNE  MU_NODE
-            LDD  N_V,X
+            PSHS X
+            LDX  <ETY
+            JSR  TISLONG
+            PULS X
+            BCC  MU_LNUM
             LDA  <EOP
             CMPA #O_NEG
             BEQ  MU_NEG
@@ -544,9 +813,24 @@ MKUNARY     STA  <EOP
 MU_NEG      LDD  N_V,X
             NEGD
 MU_FOLD     STD  N_V,X
-            LDD  <ETY
+MU_TYPE     LDD  <ETY
             STD  N_TYPE,X
             RTS
+MU_LNUM     COM  N_X,X                 ; a long: ~ in 32 bits (and - is ~ + 1)
+            COM  N_X+1,X
+            COM  N_V,X
+            COM  N_V+1,X
+            LDA  <EOP
+            CMPA #O_NEG
+            BNE  MU_TYPE
+            LDD  N_V,X
+            ADDD #1
+            STD  N_V,X
+            LDD  N_X,X
+            ADCB #0
+            ADCA #0
+            STD  N_X,X
+            BRA  MU_TYPE
 MU_NOT      LDX  N_TYPE,X              ; !: a scalar, -> int
             JSR  TISSCALAR
             LBCS BS_BAD
@@ -556,7 +840,7 @@ MU_NOT      LDX  N_TYPE,X              ; !: a scalar, -> int
             LDA  N_OP,X
             CMPA #O_NUM
             BNE  MU_NODE
-            LDD  N_V,X
+            JSR  NUMZERO
             BEQ  MU_TRUE
             CLRD
             BRA  MU_FOLD
@@ -705,6 +989,22 @@ MG_INT      JSR  BOTHINT
             BEQ  MG_TYPE
             JSR  USUALTYPE
 MG_TYPE     JSR  SETUNS
+            LDA  <EOP                  ; y: an int if it's a shift's count, or
+            CMPA #O_SHL                ; a long and x isn't; as x is if x is a
+            BEQ  MG_COUNT              ; long
+            CMPA #O_SHR
+            BEQ  MG_COUNT
+            LDX  <EL
+            LDY  N_TYPE,X
+            EXG  X,Y
+            JSR  TISLONG
+            BCS  MG_COUNT
+            TFR  X,Y
+            LDX  <ER
+            JSR  MKCONVERT
+            STX  <ER
+            BRA  MG_NODE
+MG_COUNT    JSR  INTCOUNT
 MG_NODE     LDX  <EL
             LDD  N_TYPE,X
             STD  <ETY
@@ -721,11 +1021,11 @@ MKCALL      PSHS B,Y
             LDY  N_TYPE,X
             LDA  TY_KIND,Y
             CMPA #TK_PTR
-            BNE  ML_BAD
+            LBNE ML_BAD
             LDY  TY_BASE,Y
             LDA  TY_KIND,Y
             CMPA #TK_FUNC
-            BNE  ML_BAD
+            LBNE ML_BAD
             PSHS X,Y                   ; ,S callee, 2,S its type, 4,S count,
             LDY  TY_PAR,Y              ; 5,S the arguments
             LDA  PL_FL,Y
@@ -733,10 +1033,10 @@ MKCALL      PSHS B,Y
             BEQ  ML_ARGS               ; (no prototype: as they are)
             LDB  PL_N,Y                ; how many: as many as the parameters,
             CMPB 4,S                   ; or more with "..."
-            BHI  ML_COUNT
+            LBHI ML_COUNT
             BEQ  ML_CONV
             BITA #PLF_VAR
-            BEQ  ML_COUNT
+            LBEQ ML_COUNT
 ML_CONV     LEAY PL_PAR,Y              ; each converted to its parameter's type
             LDX  5,S
 ML_CLOOP    TSTB
@@ -770,8 +1070,44 @@ ML_NODE     LDA  #O_CALL
             STD  N_TYPE,X
             PULS B,Y
             STY  N_R,X
-            CLRA
+            PSHS X                     ; the words the arguments take
+            CLRD
+            PSHS D
+ML_WLOOP    CMPY #0
+            BEQ  ML_WEND
+            LDX  N_L,Y
+            LDX  N_TYPE,X
+            JSR  TWORDS
+            ADDD ,S
+            STD  ,S
+            LDY  N_R,Y
+            BRA  ML_WLOOP
+ML_WEND     LDX  2,S                   ; a struct returned: a place for it in
+            LDY  N_TYPE,X              ; the frame, its address pushed too
+            EXG  X,Y
+            JSR  TISSTRUCT
+            EXG  X,Y
+            BCS  ML_WSET
+            LDD  ,S
+            ADDD #1
+            STD  ,S
+            LDD  TY_SIZE,Y
+            JSR  FRAMETEMP
+            STD  N_V,X
+ML_WSET     PULS D
             STD  N_X,X
+            PULS X,PC
+; D = a size: a place for a temporary in the frame -> D = its offset (n,U).
+; (It's there until the block ends.) Keeps X and Y.
+FRAMETEMP   ADDD #1
+            ANDB #$FE
+            ADDD <FRAMESZ
+            STD  <FRAMESZ
+            CMPD <MAXFRAME
+            BLS  FT_MAX
+            STD  <MAXFRAME
+FT_MAX      CLRD
+            SUBD <FRAMESZ
             RTS
 ML_BAD      LDX  #M_NOTFUNC
             JMP  ERROR
@@ -793,11 +1129,13 @@ MKCOND      PSHS D,Y
             LEAS 2,S
             LDX  <EL                   ; the type: integers -> the usual one;
             LDY  N_TYPE,X              ; a pointer (and 0) -> the pointer's;
-            LDA  TY_KIND,Y             ; void -> void
+            LDA  TY_KIND,Y             ; void -> void; a struct -> it
             CMPA #TK_PTR
             BEQ  MO_TYPE
             CMPA #TK_VOID
             BEQ  MO_TYPE
+            CMPA #TK_STRUCT
+            BEQ  MO_STRUCT
             LDX  <ER
             LDY  N_TYPE,X
             LDA  TY_KIND,Y
@@ -806,13 +1144,15 @@ MKCOND      PSHS D,Y
             JSR  BOTHINT
             JSR  PROMBOTH
             JSR  USUALTYPE
-            TFR  X,Y
+            STX  <ETY
+            JSR  TOLONG
+            LDY  <ETY
 MO_TYPE     STY  <ETY
             LDX  <EOPND                ; a constant condition: one or the other
             LDA  N_OP,X
             CMPA #O_NUM
             BNE  MO_NODE
-            LDD  N_V,X
+            JSR  NUMZERO
             BEQ  MO_FALSE
             LDX  <EL
             RTS
@@ -829,6 +1169,11 @@ MO_NODE     LDA  #O_COND
             LDD  <ETY
             STD  N_TYPE,X
             RTS
+MO_STRUCT   LDX  <ER                   ; (the same struct both ways)
+            LDX  N_TYPE,X
+            JSR  TSAME
+            LBNE MC_BAD
+            BRA  MO_TYPE
 ; X , Y -> X.
 MKCOMMA     PSHS X
             TFR  Y,X
@@ -903,11 +1248,16 @@ CONDEXPR    LDB  #1
             PULS X
             JMP  MKCOND
 CE_RET      RTS
-; A constant expression -> D (in the nodes as they are: no RESETNODES).
-CONSTEXPR   JSR  CONDEXPR
+; A constant expression -> D, and X = its node (O_NUM), which is free again
+; (good until the next NEWNODE).
+CONSTEXPR   LDD  <NODEP
+            PSHS D
+            JSR  CONDEXPR
             LDA  N_OP,X
             CMPA #O_NUM
             BNE  CX_BAD
+            PULS D
+            STD  <NODEP
             LDD  N_V,X
             RTS
 CX_BAD      LDX  #M_NOTCONST2
@@ -1098,10 +1448,23 @@ PX_LOOP     LDA  <TOK
             CMPA #T_DEC
             BEQ  PX_DEC
             CMPA #'.'
-            BEQ  PX_LATER
+            BEQ  PX_DOT
             CMPA #T_ARROW
-            BEQ  PX_LATER
+            BEQ  PX_ARROW
             RTS
+PX_ARROW    JSR  MKDEREF               ; p->m is (*p).m
+PX_DOT      PSHS X
+            JSR  NEXT
+            LDA  <TOK
+            CMPA #T_ID
+            LBNE EP_ID
+            PULS X
+            LDY  <TOKV
+            JSR  MKMEMBER
+            PSHS X
+            JSR  NEXT
+            PULS X
+            BRA  PX_LOOP
 PX_INDEX    PSHS X                     ; a[i] is *(a + i)
             JSR  NEXT
             JSR  EXPR
@@ -1128,7 +1491,80 @@ PX_INCDEC   PSHS A,X
             PULS A,X
             JSR  MKINCDEC
             BRA  PX_LOOP
-PX_LATER    LDX  #M_NOTYET
+; X = a struct, Y = a member's name: X.name -> X. It is *(type *)(&X + its
+; offset): OPND and GENADDR know that as n,U, _x+n, n,X.
+MKMEMBER    PSHS X,Y
+            LDX  N_TYPE,X
+            JSR  TISSTRUCT
+            LBCS MM_BAD
+            JSR  FINDMEMBER
+            PULS Y                     ; (Y = the struct)
+            STX  ,S                    ; 1,S the member
+            TFR  Y,X
+            LDA  N_FL,X
+            PSHS A                     ; ,S an lvalue or not
+            LDA  N_OP,X
+            CMPA #O_SYM
+            BEQ  MM_LV
+            CMPA #O_FRAME
+            BEQ  MM_LV
+            CMPA #O_DEREF
+            BEQ  MM_LV
+            PSHS X                     ; a value (a call's, an assignment's):
+            LDX  N_TYPE,X              ; its address, as (struct *)
+            JSR  PTRTO
+            TFR  X,Y
+            PULS X
+            LDA  #O_CAST
+            JSR  MKUNODE
+            CLR  ,S
+            BRA  MM_ADD
+MM_LV       JSR  MKADDR
+MM_ADD      LDY  1,S                   ; + the offset, as a pointer to the
+            PSHS X                     ; member
+            LDX  ME_TYPE,Y
+            JSR  PTRTO
+            TFR  X,Y
+            PULS X
+            LDA  N_OP,X                ; (&x + n) + m is &x + (n+m)
+            CMPA #O_ADD
+            BNE  MM_NEW
+            PSHS Y
+            LDY  N_R,X
+            LDA  N_OP,Y
+            PULS Y
+            CMPA #O_NUM
+            BNE  MM_NEW
+            STY  N_TYPE,X
+            LDY  N_R,X
+            LDD  N_V,Y
+            PSHS X
+            LDX  3,S
+            ADDD ME_OFF,X
+            PULS X
+            STD  N_V,Y
+            BRA  MM_DEREF
+MM_NEW      PSHS X,Y                   ; (,S the address, 2,S the type)
+            LDY  5,S
+            LDD  ME_OFF,Y
+            LDY  #TYP_INT
+            JSR  MKNUM
+            PSHS X
+            LDA  #O_ADD
+            JSR  NEWNODE
+            PULS D
+            STD  N_R,X
+            PULS D,Y
+            STD  N_L,X
+            STY  N_TYPE,X
+MM_DEREF    JSR  MKDEREF
+            PULS A
+            LEAS 2,S
+            BITA #NF_LVAL
+            BNE  MM_RET
+            CLR  N_FL,X
+MM_RET      RTS
+MM_BAD      LDX  #M_NOTSTRUCT
             JMP  ERROR
 ; After "(": the arguments, to ")" -> Y = the O_ARG list, B = how many.
 ARGS        CLRD
@@ -1185,7 +1621,12 @@ PM_ID       LDY  <TOKV                 ; a name: what it means now
             LDA  SY_KIND,X
             CMPA #SK_TYPEDEF
             BEQ  PM_TYPE
-            LDA  SY_FL,X
+            CMPA #SK_ENUMC
+            BEQ  PM_ENUM
+            CMPA #SK_EXTREF            ; (an extern in a block: the file's)
+            BNE  PM_SYM
+            LDX  SY_VAL,X
+PM_SYM      LDA  SY_FL,X
             ORA  #SF_USED
             STA  SY_FL,X
             PSHS X
@@ -1204,34 +1645,45 @@ PM_UNDECL   LDX  #M_UNDECL
             JMP  ERRORN
 PM_TYPE     LDX  #M_TYPEHERE
             JMP  ERRORN
-PM_NUM      LDA  <TOKFL                ; a number: int, or unsigned int if it's
-            BITA #TF_LONG              ; u or doesn't fit in an int
-            BNE  PM_LONG
+PM_ENUM     LDD  SY_VAL,X              ; an enum's constant: a number
             LDY  #TYP_INT
-            BITA #TF_UNS
-            BNE  PM_UNS
-            LDD  <TOKV                 ; (a char's -1 is $FFFFFFFF)
-            CMPD #$FFFF
-            BEQ  PM_NEG
-            CMPD #0
+            BRA  PM_NUMD
+; A number's type, as C has it: the first of int, (unsigned int: not for
+; decimal), long, unsigned long that holds it; u: unsigned int or long; l:
+; long or unsigned long. (A character constant is an int.)
+PM_NUM      LDY  #TYP_INT
+            LDA  <TOKFL
+            BITA #TF_CHAR
+            BNE  PM_MAKE
+            LDX  <TOKV
+            BNE  PM_LONG               ; (more than 16 bits)
+            BITA #TF_LONG
             BNE  PM_LONG
-            LDD  <TOKV+2
-            BPL  PM_MAKE
             LDY  #TYP_UINT
+            BITA #TF_UNS
+            BNE  PM_MAKE
+            LDX  <TOKV+2
+            BPL  PM_INT
+            BITA #TF_NDEC
+            BNE  PM_MAKE
+            BRA  PM_SLONG
+PM_INT      LDY  #TYP_INT
             BRA  PM_MAKE
-PM_NEG      LDD  <TOKV+2
-            BPL  PM_LONG
-            BRA  PM_MAKE
-PM_UNS      LDY  #TYP_UINT
-            LDD  <TOKV
-            BNE  PM_LONG
+PM_LONG     LDY  #TYP_ULONG
+            BITA #TF_UNS
+            BNE  PM_MAKE
+            LDX  <TOKV
+            BMI  PM_MAKE
+PM_SLONG    LDY  #TYP_LONG
 PM_MAKE     LDD  <TOKV+2
             JSR  MKNUM
-            PSHS X
+            LDD  <TOKV
+            STD  N_X,X
+            BRA  PM_NEXT
+PM_NUMD     JSR  MKNUM
+PM_NEXT     PSHS X
             JSR  NEXT
             PULS X,PC
-PM_LONG     LDX  #M_LONGNUM
-            JMP  ERROR
 PM_STR      JSR  EMITSTRING            ; a string: its bytes in rodata, now
             LDY  #TYP_CHAR
             PSHS D
@@ -1360,7 +1812,7 @@ M_TYPENAME  FCN  "a type was expected"
 M_EXPRESSION FCN "an expression was expected"
 M_UNDECL    FCN  "undeclared:"
 M_TYPEHERE  FCN  "a type's name where a value was expected:"
-M_LONGNUM   FCN  "constant too large (long isn't supported yet)"
+M_NOTSTRUCT FCN  "a struct or union was expected"
 ;------------------------------------------------------------------------------
 ; End of cc1_expr.asm
 ;------------------------------------------------------------------------------

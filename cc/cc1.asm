@@ -10,10 +10,11 @@
 ;     -o FILE   the output (default: the source's name with .ASM)
 ;     -T        (testing) the tokens instead, one a line
 ;
-; The C it takes so far: char, short, int, signed, unsigned, void, pointers,
-; arrays, functions with prototypes (and "..."), typedef, extern and static,
-; globals with initializers, string literals, locals in any block, every
-; statement and every operator. The calling convention is cc/README.md's.
+; The C it takes: char, short, int, long, signed, unsigned, void, pointers,
+; arrays, functions with prototypes (and "..."), struct, union, enum, typedef,
+; extern and static, initializers, string literals, locals in any block, every
+; statement and every operator, asm { } and interrupt (not yet: bit-fields,
+; float, -9). The calling convention is cc/README.md's.
 ;
 ; How it works: one top-level declaration at a time; a function one statement
 ; at a time. Each full expression is parsed to a tree (NODES, used again for
@@ -110,11 +111,13 @@ K_INTERRUPT equ  $C1
 K_LAST      equ  $C1
 TF_UNS      equ  1                 ; a number's suffix: u
 TF_LONG     equ  2                 ; l
+TF_NDEC     equ  4                 ; written in hex or octal
+TF_CHAR     equ  8                 ; a character constant
 ;------------------------------------------------------------------------------
 ; A name (interned: one record per spelling):
 NM_NEXT     equ  0                 ; the next in its hash bucket
 NM_SYM      equ  2                 ; the symbol it means now (0: none)
-NM_TAG      equ  4                 ; (struct, union and enum tags: later)
+NM_TAG      equ  4                 ; the struct, union or enum tag it means now
 NM_KW       equ  6                 ; a keyword's token (0: not one)
 NM_TEXT     equ  7                 ; the spelling, NUL-terminated
 ; A type:
@@ -124,8 +127,8 @@ TY_BASE     equ  2                 ; what it points to / is an array of /
 TY_SIZE     equ  4                 ; returns; its size in bytes
 TY_N        equ  6                 ; an array's elements
 TY_PTR      equ  8                 ; the pointer type to it (made when asked)
-TY_PAR      equ  10                ; a function's parameters (PL_*)
-TYSIZE      equ  12
+TY_PAR      equ  10                ; a function's parameters (PL_*); a struct's
+TYSIZE      equ  12                ; members (MB_*)
 TK_VOID     equ  0
 TK_CHAR     equ  1                 ; char (signed)
 TK_SCHAR    equ  2
@@ -137,7 +140,15 @@ TK_ULONG    equ  7
 TK_PTR      equ  8
 TK_ARRAY    equ  9
 TK_FUNC     equ  10
-TYF_NOSIZE  equ  1                 ; an array of no size given (yet)
+TK_STRUCT   equ  11                ; (and union: TYF_UNION)
+TYF_NOSIZE  equ  1                 ; an array of no size given (yet), a struct
+TYF_UNION   equ  2                 ; not defined (yet)
+; A struct's or union's member:
+ME_NEXT     equ  0
+ME_NAME     equ  2
+ME_TYPE     equ  4
+ME_OFF      equ  6
+MESIZE      equ  8
 ; A parameter list (a function type's TY_PAR):
 PL_N        equ  0                 ; how many
 PL_FL       equ  1                 ; PLF_*
@@ -151,29 +162,35 @@ SY_NEXT     equ  4                 ; the next in its scope
 SY_KIND     equ  6                 ; SK_*
 SY_FL       equ  7                 ; SF_*
 SY_TYPE     equ  8
-SY_VAL      equ  10                ; a local's offset from U; a label number
-SY_DEPTH    equ  12                ; the scope it's in (0: the file)
-SYSIZE      equ  13
+SY_VAL      equ  10                ; a local's offset from U; a label number; an
+SY_DEPTH    equ  12                ; enum constant's value; a tag's keyword; an
+SYSIZE      equ  13                ; extern in a block: the file's symbol
+                                   ; (SY_DEPTH: the scope it's in, 0: the file)
 SK_GLOBAL   equ  1                 ; an object or function at file level: _name
 SK_LOCAL    equ  2                 ; on the stack: n,U
 SK_STATLOC  equ  3                 ; a static in a function: Ln
 SK_TYPEDEF  equ  4
+SK_TAG      equ  5                 ; a struct, union or enum tag (NM_TAG)
+SK_ENUMC    equ  6                 ; an enum's constant
+SK_EXTREF   equ  7                 ; an extern declared in a block
 SF_DEFINED  equ  1                 ; defined in this file (not just declared)
 SF_USED     equ  2                 ; referred to (IMPORTed, if not defined)
 SF_STATIC   equ  4                 ; static (not EXPORTed)
 SF_TENT     equ  8                 ; a tentative definition (int x;): to bss
 SF_EXTERN   equ  16                ; declared extern
+SF_INTR     equ  32                ; an interrupt function (RTI)
 ; An expression node:
 N_OP        equ  0                 ; O_*
 N_FL        equ  1                 ; NF_*
 N_TYPE      equ  2
 N_L         equ  4
 N_R         equ  6
-N_V         equ  8                 ; O_NUM: the value; O_SYM: the symbol;
-N_X         equ  10                ; O_STR: the label; O_ASGOP: the operation;
-NODESZ      equ  12                ; inc/dec: the step. N_X: ?:'s third, a
-NF_LVAL     equ  1                 ; call's arguments' count
-NF_UNS      equ  2                 ; a comparison of unsigned values
+N_V         equ  8                 ; O_NUM: the value (its low word); O_SYM:
+N_X         equ  10                ; the symbol; O_STR: the label; O_ASGOP: the
+NODESZ      equ  12                ; operation; inc/dec: the step; O_CALL of a
+NF_LVAL     equ  1                 ; struct: where it goes (n,U). N_X: O_NUM:
+NF_UNS      equ  2                 ; a long's high word; ?:'s third; a call's
+                                   ; arguments' size in words
 O_NUM       equ  1
 O_SYM       equ  2
 O_STR       equ  3
@@ -301,6 +318,10 @@ DP_VP       SET  DPAGE
             DVAR OPTOP,2               ; OPSTK's top
             DVAR PTTOP,2               ; PTMP's top
             DVAR ABSTRACT,1            ; a declarator may have no name
+            DVAR SPBITS,1              ; DECLSPEC: the type words seen,
+            DVAR SPTDEF,2              ; a typedef's (or struct's) type,
+            DVAR SPANY,1               ; anything at all,
+            DVAR DSINTR,1              ; interrupt (DSTYPE to here: SAVEDECL)
             DVAR CURFUNC,2             ; the function being compiled (symbol)
             DVAR RETLBL,2              ; its return's label
             DVAR FRAMESZ,2             ; its locals: so far, in this block
@@ -311,20 +332,23 @@ DP_VP       SET  DPAGE
             DVAR SWCASES,2             ; the switch's first case
             DVAR SWDEFLT,2             ; its default's label (0: none)
             DVAR INSWITCH,1
+            DVAR SWTYPE,2              ; its cases' type
             DVAR NLABELS,1             ; goto labels
             DVAR OPM,1                 ; an operand (cc1_gen.asm): its mode,
             DVAR OPV,2                 ; number or offset,
             DVAR OPS,2                 ; symbol (or 0),
             DVAR OPL,2                 ; label (or 0)
+            DVAR OPVH,2                ; a long number's high word
             DVAR CVSYM,2               ; a constant (EVALCONST): its symbol,
             DVAR CVLBL,2               ; label,
             DVAR CVVAL,2               ; value or offset
             DVAR EXPECTED,1            ; the token EXPECT wanted
-            DVAR SPBITS,1              ; DECLSPEC: the type words seen,
-            DVAR SPTDEF,2              ; a typedef's type,
-            DVAR SPANY,1               ; anything at all
             DVAR FRMLBL,2              ; the label EQU'd to the frame's size
-            DVAR HELPERS,1             ; the library's helpers used (HB_*)
+            DVAR HELPERS,2             ; the library's helpers used (bit n: the
+                                       ; n'th of HELPNAMES, from bit 0 of +1)
+            DVAR IMODE,1               ; an initializer: 0 data, 1 code (n,U)
+            DVAR IBASE,2               ; code: the object's place (n,U)
+            DVAR IDONE,2               ; its bytes done so far
             DVAR EL,2                  ; an operator being built: its left,
             DVAR ER,2                  ; right,
             DVAR EOP,1                 ; operation,
@@ -576,6 +600,7 @@ TALLOC      PSHS D
     INCLUDE cc1_stmt.asm
     INCLUDE cc1_expr.asm
     INCLUDE cc1_gen.asm
+    INCLUDE cc1_long.asm
     INCLUDE pa_util.asm
     INCLUDE pa_strm.asm
 ;------------------------------------------------------------------------------
@@ -608,7 +633,7 @@ VP          SET  VARS
             VAR  NODES,MAXNODES*NODESZ
             VAR  OPSTK,OPSTKSZ
             VAR  PTMP,PTMPSZ
-            VAR  CASES,MAXCASES*4      ; a switch's cases: value, label
+            VAR  CASES,MAXCASES*6      ; a switch's cases: value (32 bits), label
             VAR  LABELS,MAXLABELS*5    ; goto labels: name, label, defined
             VAR  SCOPES,MAXDEPTH*2     ; each scope's symbols (a list)
             VAR  NUMBUF,16

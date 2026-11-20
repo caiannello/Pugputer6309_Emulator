@@ -4,14 +4,14 @@
 
 #include <stddef.h>
 
-/* A FILE is 4 bytes of libc's (cc/lib/libc.d). Until CC has structs, it is
-   declared as a char, which is never looked into. The console's three are
-   libc's __iob (C's _iob). */
-typedef char FILE;
-extern FILE _iob[];
-#define stdin  (&_iob[0])
-#define stdout (&_iob[4])
-#define stderr (&_iob[8])
+/* A FILE is 4 bytes of libc's (cc/lib/libc.d), never looked into: a struct
+   that isn't defined. The console's three are the first of libc's __iob (C's
+   _iob). */
+typedef struct _iobuf FILE;
+extern char _iob[];
+#define stdin  ((FILE *)&_iob[0])
+#define stdout ((FILE *)&_iob[4])
+#define stderr ((FILE *)&_iob[8])
 
 #define EOF (-1)
 #define SEEK_SET 0
@@ -47,6 +47,7 @@ int ferror(FILE *f);
 void clearerr(FILE *f);
 int remove(const char *name);
 int rename(const char *oldname, const char *newname);
-/* fseek() and ftell() take and give a long: they come with long. */
+int fseek(FILE *f, long offset, int whence);
+long ftell(FILE *f);
 
 #endif

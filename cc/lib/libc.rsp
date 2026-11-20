@@ -14,6 +14,7 @@ memset.o
 memcmp.o
 ctype.o
 atoi.o
+atol.o
 abs.o
 rand.o
 malloc.o
@@ -21,3 +22,5 @@ stdio.o
 fileio.o
 printf.o
 arith.o
+larith.o
+scopy.o

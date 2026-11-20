@@ -5,22 +5,25 @@
 ; that's simple -- a number, a variable, *p for a pointer variable, an element
 ; of an array at a constant index -- is used straight from where it is (OPND:
 ; OPM, OPV, OPS, OPL say how). Otherwise the right side is made first and
-; pushed, the left made, and the operation done with ,S++.
+; pushed, the left made, and the operation done with ,S++. (Longs and structs:
+; cc1_long.asm.)
 ;------------------------------------------------------------------------------
-HB_DIV      equ  1                 ; the library's helpers (HELPERS, IMPORTed)
-HB_UDIV     equ  2
-HB_MOD      equ  4
-HB_UMOD     equ  8
-HB_SHL      equ  16
-HB_SHR      equ  32
-HB_USHR     equ  64
-HELPNAMES   FCN  "__div"
-            FCN  "__udiv"
+HELPNAMES   FCN  "__div"               ; the library's helpers, by number (the
+            FCN  "__udiv"              ; bits of HELPERS: the ones IMPORTed)
             FCN  "__mod"
             FCN  "__umod"
             FCN  "__shl"
             FCN  "__shr"
             FCN  "__ushr"
+            FCN  "__scopy"             ; 7
+            FCN  "__lmul"              ; 8
+            FCN  "__ldiv"
+            FCN  "__uldiv"
+            FCN  "__lmod"
+            FCN  "__ulmod"
+            FCN  "__lshl"              ; 13
+            FCN  "__lshr"
+            FCN  "__lushr"
             FCB  0
 ;------------------------------------------------------------------------------
 ; Writing. These keep every register.
@@ -537,7 +540,15 @@ RESTOP      PULS Y
 ;------------------------------------------------------------------------------
 ; Expressions: X = a tree -> code leaving its value in D.
 ;------------------------------------------------------------------------------
-GEN         LDB  N_OP,X
+GEN         LDY  N_TYPE,X          ; longs and structs: cc1_long.asm
+            LDA  TY_KIND,Y
+            CMPA #TK_LONG
+            LBEQ GENL
+            CMPA #TK_ULONG
+            LBEQ GENL
+            CMPA #TK_STRUCT
+            LBEQ GENS
+GEN_DO      LDB  N_OP,X
             DECB
             LSLB
             LDY  #GENTAB
@@ -588,7 +599,16 @@ G_COM       LDX  N_L,X
 G_CAST      PSHS X                     ; (type) x
             LDX  N_L,X
             JSR  GEN
+            LDX  ,S                    ; from a long: its low word (a char
+            LDX  N_L,X                 ; widened)
+            JSR  ISLONGN
+            BCS  GT_NLONG
+            LDX  #S_TFRWD
+            JSR  EMITL
             PULS X
+            LDX  N_TYPE,X
+            JMP  WIDEN
+GT_NLONG    PULS X
             LDY  N_L,X
             LDX  N_TYPE,X
             JSR  TISCHAR
@@ -919,10 +939,15 @@ GENJUMP     LDB  N_OP,X
             BEQ  GJ_COMMA
             CMPB #O_EQ
             LBHS GJ_CMP
-            PSHS A,Y                   ; any other: its value, tested
+            PSHS A,Y                   ; any other: its value, tested (a
+            PSHS X                     ; long's: D | W)
             JSR  GEN
+            PULS X
+            JSR  ISLONGN
             LDX  #S_TSTD
-            JSR  EMITL
+            BCS  GJ_TST
+            LDX  #S_ORRWD
+GJ_TST      JSR  EMITL
             PULS A,Y
             LDX  #S_LBNE
             TSTA
@@ -935,8 +960,9 @@ GJ_BR       JSR  EMITI
 GJ_NOT      EORA #1
             LDX  N_L,X
             BRA  GENJUMP
-GJ_NUM      LDB  N_V,X                 ; a constant: always, or never
-            ORB  N_V+1,X
+GJ_NUM      PSHS A                     ; a constant: always, or never
+            JSR  NUMZERO
+            PULS A
             BEQ  GJ_N0
             LDB  #1
 GJ_N0       PSHS A
@@ -1043,7 +1069,12 @@ BRUNSIGNED  FCN  "LBEQ"
 ; X = a comparison: the code comparing its two sides (CMPD). -> B = the
 ; comparison it makes (swapped, if the sides went the other way), CMPUNS =
 ; NF_UNS if it's unsigned.
-CMPGEN      LDA  N_FL,X
+CMPGEN      PSHS X                     ; (longs: CMPL)
+            LDX  N_L,X
+            JSR  ISLONGN
+            PULS X
+            LBCC CMPL
+            LDA  N_FL,X
             ANDA #NF_UNS
             STA  <CMPUNS
             LDB  N_OP,X
@@ -1105,7 +1136,13 @@ CG_DO       LDX  #S_CMPD
 ;------------------------------------------------------------------------------
 ; Assignments. A = 1 if the value is wanted too (in D).
 ;------------------------------------------------------------------------------
-GENASSIGN   PSHS A,X
+GENASSIGN   LDY  N_TYPE,X
+            LDB  TY_KIND,Y
+            CMPB #TK_STRUCT
+            LBEQ GS_ASSIGN
+            JSR  ISLONGN
+            LBCC GL_ASSIGN
+            PSHS A,X
             LDX  N_L,X                 ; the left side as it is?
             JSR  OPND
             BCS  GN_NOTLEFT
@@ -1153,7 +1190,9 @@ GN_RET      RTS
 ; x op= y: the right side first (pushed, unless it's a number), then where x
 ; is, x loaded, the operation, x stored. (From GENADDR's return on, nothing
 ; here makes code of a tree again, so AG* can hold what's needed.)
-GENASGOP    PSHS A,X
+GENASGOP    JSR  ISLONGN
+            LBCC GL_ASGOP
+            PSHS A,X
             LDX  N_R,X
             LDA  N_OP,X
             CMPA #O_NUM
@@ -1316,15 +1355,18 @@ HJ_SHL      CMPA #O_SHL
             LDB  #4
             BRA  HJ_IDX
 HJ_SHR      ADDB #5
-HJ_IDX      LDA  #1                    ; its bit in HELPERS
-            PSHS B
+HJ_IDX
+; B = a helper's number (HELPNAMES): JSR to it, and it's to be IMPORTed.
+CALLHELP    PSHS B
+            LDW  #1                    ; its bit in HELPERS
 HJ_BIT      TSTB
             BEQ  HJ_SET
-            LSLA
+            ADDR W,W
             DECB
             BRA  HJ_BIT
-HJ_SET      ORA  <HELPERS
-            STA  <HELPERS
+HJ_SET      TFR  W,D
+            ORD  <HELPERS
+            STD  <HELPERS
             LDX  #S_JSR
             JSR  EMITI
             LDX  #HELPNAMES            ; its name: the B'th
@@ -1338,7 +1380,9 @@ HJ_SKIP     TST  ,X+
 HJ_NAME     JSR  OUTS
             JMP  OUTNL
 ; ++x --x x++ x--.
-GENINCDEC   PSHS A,X
+GENINCDEC   JSR  ISLONGN
+            LBCC GL_INCDEC
+            PSHS A,X
             LDX  N_L,X
             JSR  GENADDR
             PULS A,X
@@ -1409,8 +1453,21 @@ IS_EMIT     JSR  EMITI
 G_CALL      PSHS X
             LDX  N_R,X
             JSR  PUSHARGS
+            LDX  ,S                    ; a struct returned: where it goes,
+            LDY  N_TYPE,X              ; pushed last
+            LDA  TY_KIND,Y
+            CMPA #TK_STRUCT
+            BNE  GL_FUNC
+            LDD  N_V,X
+            STD  <OPV
+            LDA  #OM_UOFF
+            STA  <OPM
+            LDX  #S_LEAX
+            JSR  OPI
+            LDX  #S_PSHSX
+            JSR  EMITL
             LDX  ,S
-            LDX  N_L,X                 ; what's called
+GL_FUNC     LDX  N_L,X                 ; what's called
             LDA  N_OP,X
             CMPA #O_ADDR               ; a function: JSR _f
             BNE  GL_PTR
@@ -1460,7 +1517,14 @@ PUSHARGS    CMPX #0
             BSR  PUSHARGS
             PULS X
             LDX  N_L,X
+            PSHS X
             JSR  GEN
+            PULS X
+            LDX  N_TYPE,X              ; (a long: 4 bytes; a struct: its
+            JSR  TISLONG               ; bytes)
+            LBCC PUSHQ
+            JSR  TISSTRUCT
+            LBCC PUSHSTRUCT
             LDX  #S_PSHSD
             JMP  EMITL
 PA2_RET     RTS
