@@ -259,7 +259,10 @@ ST_SRC      LDX  #PATHBUF
             LDX  #M_ERRORS
             JSR  PRINTS
 ST_DONE     JSR  HEAPDONE
-            LDA  #B_EXIT
+            LDD  <ERRCNT               ; the exit code: 0, or 1 (errors)
+            BEQ  ST_EXIT
+            LDB  #1
+ST_EXIT     LDA  #B_EXIT
             SWI2
 ; A fatal error: X = the message. The output goes; then the program ends.
 FATAL       JSR  PRINTS
@@ -274,6 +277,7 @@ FATAL       JSR  PRINTS
             SWI2
             JSR  KILLOUT
 FATAL3      JSR  HEAPDONE
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 FATAL2      JSR  PRINTS                ; (no output to remove)
@@ -351,6 +355,7 @@ CL_DONE     TST  SRCNAME
 CL_RET      RTS
 USAGE       LDX  #M_USAGE
             JSR  PRINTS
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 ; X is just past an option letter: to its argument (attached, or the next word).

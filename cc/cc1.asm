@@ -6,8 +6,10 @@
 ; one preprocessed file (CPP's .I) and writes its assembly language (.ASM),
 ; for ASM (or lwasm) to make an object file of.
 ;
-;   CC1 [-o FILE] file
+;   CC1 [-o FILE] [-b N] file
 ;     -o FILE   the output (default: the source's name with .ASM)
+;     -b N      as if the file began with #pragma bank N: its functions are
+;               banked code, in overlay N (section ovlN; 0: fixed code)
 ;     -T        (testing) the tokens instead, one a line
 ;
 ; The C it takes: char, short, int, long, signed, unsigned, void, pointers,
@@ -179,6 +181,7 @@ SF_STATIC   equ  4                 ; static (not EXPORTed)
 SF_TENT     equ  8                 ; a tentative definition (int x;): to bss
 SF_EXTERN   equ  16                ; declared extern
 SF_INTR     equ  32                ; an interrupt function (RTI)
+SF_BANKED   equ  64                ; a function in banked code (SY_VAL: its bank)
 ; An expression node:
 N_OP        equ  0                 ; O_*
 N_FL        equ  1                 ; NF_*
@@ -254,6 +257,7 @@ SEC_CODE    equ  1
 SEC_RODATA  equ  2
 SEC_DATA    equ  3
 SEC_BSS     equ  4
+SEC_OVL     equ  5                 ; ovl1 (and ovlN: SEC_OVL-1+N)
 ;------------------------------------------------------------------------------
 ; DVAR name,size: a direct-page variable. VAR name,size: one after the program.
 DVAR        MACRO
@@ -333,6 +337,9 @@ DP_VP       SET  DPAGE
             DVAR SWDEFLT,2             ; its default's label (0: none)
             DVAR INSWITCH,1
             DVAR SWTYPE,2              ; its cases' type
+            DVAR BANKNO,1              ; #pragma bank N (0: fixed code)
+            DVAR FUNCSECT,1            ; the function's section (code or ovlN)
+            DVAR FARUSED,1             ; a stub uses __farcall
             DVAR NLABELS,1             ; goto labels
             DVAR OPM,1                 ; an operand (cc1_gen.asm): its mode,
             DVAR OPV,2                 ; number or offset,
@@ -393,6 +400,8 @@ START       LDS  #STACKTOP
             STD  <PTTOP
             LDD  #NODES
             STD  <NODEP
+            LDA  #SEC_CODE
+            STA  <FUNCSECT
             JSR  CMDLINE
             JSR  LEXINIT
             LDX  #SRCNAME              ; the input
@@ -424,6 +433,7 @@ ST_COMPILE  JSR  PROGRAM
 ST_END      CLR  <OUTON
             LDU  #OUTSTRM
             JSR  SCLOSE
+            CLRB                       ; (the exit code: 0)
             LDA  #B_EXIT
             SWI2
 ; A fatal error: X = the message (on the console). The output goes.
@@ -440,7 +450,8 @@ FATAL       JSR  PRINTS
             LDX  #OUTNAME
             LDA  #B_KILL_NAME
             SWI2
-FA_EXIT     LDA  #B_EXIT
+FA_EXIT     LDB  #1
+            LDA  #B_EXIT
             SWI2
 ; An error in the source: X = the message. "FILE:LINE: error: message".
 ERROR       PSHS X
@@ -490,7 +501,15 @@ CL_NEXT     JSR  SKIPSP
             BEQ  CL_OUT
             CMPA #'T'
             BEQ  CL_TEST
+            CMPA #'b'
+            BEQ  CL_BANK
             BRA  USAGE
+CL_BANK     JSR  OPTARG
+            JSR  GETDEC                ; -b N: #pragma bank N
+            CMPD #15
+            LBHI USAGE
+            STB  <BANKNO
+            BRA  CL_NEXT
 CL_TEST     LDA  #1
             STA  <TESTTOK
             BRA  CL_NEXT
@@ -516,6 +535,7 @@ CL_DONE     TST  SRCNAME
 CL_RET      RTS
 USAGE       LDX  #M_USAGE
             JSR  PRINTS
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 ; X is just past an option letter: to its argument (attached, or the next word).
@@ -604,7 +624,7 @@ TALLOC      PSHS D
     INCLUDE pa_util.asm
     INCLUDE pa_strm.asm
 ;------------------------------------------------------------------------------
-M_USAGE     FCC  "Usage: CC1 [-o out] file"
+M_USAGE     FCC  "Usage: CC1 [-o out] [-b bank] file"
             FCB  CR,LF,0
 M_NOSRC     FCN  "Cannot open "
 M_NOOUT     FCN  "Cannot create "

@@ -80,6 +80,7 @@ struct Machine {
     std::string img;
 
     bool start(const char* name, std::vector<pugputer::Fat16File> files = {}) {
+        if (!add(files, repo("cc/cc.bin"), "CC.COM")) return false;
         if (!add(files, repo("cc/cpp.bin"), "CPP.COM")) return false;
         if (!add(files, repo("cc/cc1.bin"), "CC1.COM")) return false;
         if (!add(files, ASM_BIN_PATH, "ASM.COM")) return false;
@@ -274,6 +275,83 @@ TEST(cc_compiles_variadic_functions_and_reads_argv_and_stdin) {
                "argc 4: <one> <two words> <3>\r\n"
                "Hello, C!\r\nHELLO, C!\r\n",
                printed(m.run(cmd, "Hello, C!\r"), cmd)));
+}
+
+TEST(cc_driver_compiles_assembles_and_links_and_tidies_up) {
+    // CC runs CPP, CC1, ASM and LINK as children: a program from C and
+    // assembly files, -c, -S and -E, and an error (which stops it, with
+    // nothing left behind).
+    Machine m;
+    CHECK(m.start("cc_driver.img", {test_file("prog.c"), test_file("util.c"), test_file("twice.asm"),
+                                    file("BAD.C", "int main(void) { return x; }\n")}));
+    std::string cmd = "CC -o PROG.COM prog.c util.c twice.asm";
+    CHECK(same(cmd.c_str(), "", printed(m.run(cmd), cmd)));
+    CHECK(same("prog", "add 5 twice 42 counter 8\r\n", printed(m.run("PROG"), "PROG")));
+    for (const char* f : {"PROG.I", "PROG.ASM", "PROG.O", "UTIL.I", "UTIL.ASM", "UTIL.O", "TWICE.O", "CCLINK.RSP"})
+        CHECK(m.disk_file(f) == "<none>");
+    m.run("CC -c util.c");
+    CHECK(m.disk_file("UTIL.O") != "<none>");
+    CHECK(m.disk_file("UTIL.ASM") == "<none>");
+    m.run("CC -S -o U.ASM util.c");
+    CHECK(m.disk_file("U.ASM").find("_add") != std::string::npos);
+    CHECK(m.disk_file("UTIL.I") == "<none>");
+    m.run("CC -E util.c");
+    CHECK(m.disk_file("UTIL.I").find("counter") != std::string::npos);
+    cmd = "CC bad.c";
+    CHECK(same(cmd.c_str(), "bad.c:1: error: undeclared: 'x'\r\n", printed(m.run(cmd), cmd)));
+    for (const char* f : {"BAD.COM", "BAD.I", "BAD.ASM", "BAD.O"})
+        CHECK(m.disk_file(f) == "<none>");
+}
+
+TEST(spawn_runs_children_and_gives_back_the_callers_memory) {
+    // B_EXEC's EXEC_CHILD (libc's spawn): children four deep, each in pages
+    // of its own, their exit codes, their files closed when they end, and
+    // the caller's 20KB (across banks 1..3) as it was.
+    Machine m;
+    CHECK(m.start("cc_spawn.img", {test_file("spawn.c"), test_file("kid.c")}));
+    m.run("CC kid.c");
+    m.run("CC spawn.c");
+    CHECK(m.disk_file("KID.COM") != "<none>");
+    CHECK(same("spawn",
+               "kid 0 (deeper): its kid said 0\r\n"
+               "kid 1 (deeper): its kid said 10\r\n"
+               "kid 2 (deeper): its kid said 11\r\n"
+               "kid 3 (hello): its kid said 12\r\n"
+               "parent: kid said 13, 0 bytes changed\r\n"
+               "missing: -1\r\n"
+               "kid 0 (again): its kid said 0\r\n"
+               "again: 10\r\n",
+               printed(m.run("SPAWN"), "SPAWN")));
+    for (const char* f : {"KID0.DAT", "KID1.DAT", "KID2.DAT", "KID3.DAT"})
+        CHECK(m.disk_file(f) == "left open");
+}
+
+TEST(cc_banked_code_runs_from_overlays_loaded_at_the_start) {
+    // #pragma bank N and CC -b N: the functions in ovlN, LINK writing them
+    // after the body (EXE_MORE), libc's start loading them into pages of
+    // their own, calls through __farcall between banks and to fixed code.
+    // The pages are freed when the program ends.
+    Machine m;
+    CHECK(m.start("cc_banked.img", {test_file("banked.c"), test_file("far.c")}));
+    m.run("CC -c -b 3 far.c");
+    std::string cmd = "CC banked.c far.o";
+    CHECK(same(cmd.c_str(), "", printed(m.run(cmd), cmd)));
+    std::string com = m.disk_file("BANKED.COM");
+    CHECK(com.size() > 10 && com[6] == 0 && com[7] == 1); // EXE_MORE
+    std::string mem = printed(m.run("MEM"), "MEM");
+    CHECK(same("banked",
+               "50 200009 25 80\r\n"
+               "fib 610 ping 210 pong 206 fp 81\r\n"
+               "hi from bank 1\r\n"
+               "far3 52\r\n",
+               printed(m.run("BANKED"), "BANKED")));
+    CHECK(same("MEM after", mem, printed(m.run("MEM"), "MEM")));
+}
+
+TEST(cc_programs_keep_data_in_banked_ram) {
+    // <pug/bank.h>: pages, far_read/far_write across a bank's edge (and not
+    // past a page's end), far_peek/far_poke, and a page mapped in a bank.
+    CHECK(runs_as_expected("bankdata", "cc_bankdata.img"));
 }
 
 TEST(cc_programs_are_small) {

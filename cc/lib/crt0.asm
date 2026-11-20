@@ -7,6 +7,11 @@
 ; (sbrk's) after everything else, the command line split into argc/argv, then
 ; exit(main(argc, argv)).
 ;
+; The start is two sections, init and init_end, and exit() two, fini and
+; fini_end: CC.SCR places init_ovl and fini_ovl between them, which are empty
+; unless libc's farcall.asm (banked code) is linked. Each falls through to the
+; next. init_ovl gets B as DOS left it (a program with overlays: its file).
+;
 ; Arguments are separated by spaces; "double quotes" keep spaces in one.
 ; argv[0] is "" (DOS doesn't say what the program was called), and there are
 ; at most MAXARGS.
@@ -21,7 +26,9 @@ STACKTOP    equ  $F000             ; (the first push goes to $EFFF)
             IMPORT s_bss,l_bss,s_heap  ; (CC.SCR's synthetic symbols)
 ;------------------------------------------------------------------------------
             SECTION init
-__start     LDS  #STACKTOP
+__start     LDS  #STACKTOP             ; (B: the file, for init_ovl)
+            ENDSECT
+            SECTION init_end
             LDX  #zero                 ; bss cleared
             LDY  #s_bss
             LDW  #l_bss
@@ -72,11 +79,19 @@ AR_END      CLR  ,U                    ; argv[argc] = NULL
             LEAS 4,S
             PSHS D
             JSR  _exit
-; void exit(int status): the end of the program (DOS closes its files, which
-; writes out what they hold). The status isn't passed on yet.
-_exit       LDA  #B_EXIT
-            SWI2
 zero        FDB  0
+            ENDSECT
+; void exit(int status): the end of the program (DOS closes its files, which
+; writes out what they hold). The status's low byte is the exit code, which a
+; program that started this one with spawn() gets back. (fini_ovl comes
+; between, and keeps S.)
+            SECTION fini
+_exit
+            ENDSECT
+            SECTION fini_end
+            LDB  3,S
+            LDA  #B_EXIT
+            SWI2
             ENDSECT
 ;------------------------------------------------------------------------------
             SECTION bss

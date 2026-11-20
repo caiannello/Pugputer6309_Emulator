@@ -1327,13 +1327,51 @@ FUNCDEF     LDA  SY_FL,X
             STX  <CURFUNC
             LDY  <DTYPE
             STY  SY_TYPE,X
+            LDA  <BANKNO
+            BNE  FD_BANKED
+            LDA  #SEC_CODE             ; in code
+            STA  <FUNCSECT
+            JSR  SECT
+            LDX  <CURFUNC
+            JSR  EXPORTSYM
+            LDX  <CURFUNC
+            JSR  LABELSYM
+            BRA  FD_PROLOG
+FD_BANKED   LDB  SY_FL,X               ; in ovlN (#pragma bank N): its body
+            BITB #SF_INTR              ; there, as __b_name, and in code a stub,
+            LBNE FD_INTRBANK           ; _name: LDB #N / LDX #__b_name / JMP
+            ORB  #SF_BANKED            ; __farcall
+            STB  SY_FL,X
+            STA  SY_VAL+1,X
+            CLR  SY_VAL,X
             LDA  #SEC_CODE
             JSR  SECT
             LDX  <CURFUNC
             JSR  EXPORTSYM
             LDX  <CURFUNC
             JSR  LABELSYM
-            LDX  #S_PSHSU
+            CLRA
+            LDB  <BANKNO
+            LDX  #S_LDB
+            JSR  EMITIMM
+            LDX  #S_LDX
+            JSR  EMITI
+            LDA  #'#'
+            JSR  OUTC
+            LDX  <CURFUNC
+            JSR  OUTBODY
+            JSR  OUTNL
+            LDX  #S_JMPFAR
+            JSR  EMITL
+            INC  <FARUSED
+            LDA  <BANKNO
+            ADDA #SEC_OVL-1
+            STA  <FUNCSECT
+            JSR  SECT
+            LDX  <CURFUNC
+            JSR  OUTBODY
+            JSR  OUTNL
+FD_PROLOG   LDX  #S_PSHSU
             JSR  EMITL
             LDX  #S_TFRSU
             JSR  EMITL
@@ -1401,6 +1439,15 @@ FD_OFF      LDY  2,S
             BRA  FD_PAR
 FD_NONAME   LDX  #M_PARNAME
             JMP  ERROR
+FD_INTRBANK LDX  #M_INTRBANK
+            JMP  ERROR
+; X = a banked function's symbol: its body's name, __b_name. (C reserves the
+; names that this could be: _b_name.)
+OUTBODY     PSHS X
+            LDX  #S_BODY
+            JSR  OUTS
+            PULS X
+            JMP  OUTSYMNAME
 FD_BODY     LEAS 5,S
             JSR  COMPOUND
             LDD  <RETLBL               ; the end
@@ -1430,6 +1477,8 @@ FD_FRAME
             STD  <HEAPHI
             CLRD
             STD  <CURFUNC
+            LDA  #SEC_CODE
+            STA  <FUNCSECT
             RTS
 ;------------------------------------------------------------------------------
 ; A declaration in a block.
@@ -1517,7 +1566,7 @@ SL_BSS      PSHS X
             JSR  SECT
             PULS X
             JSR  RMBSYM
-SL_CODE     LDA  #SEC_CODE
+SL_CODE     LDA  <FUNCSECT
             JMP  SECT
 ; An automatic local: Y = its name, DTYPE its type. It gets a place in the
 ; frame (n,U, below U); an initializer is code. An array with no size takes
@@ -1737,7 +1786,14 @@ FF_HSKIP    TST  ,X+
             BNE  FF_HSKIP
             LSLD
             BRA  FF_HLOOP
-FF_RET      RTS
+FF_RET      TST  <FARUSED            ; (the stubs')
+            BEQ  FF_DONE
+            LDX  #S_IMPORT
+            JSR  EMITI
+            LDX  #S_FARCALL
+            JSR  OUTS
+            JSR  OUTNL
+FF_DONE     RTS
 ; X = a symbol: "NAME RMB size". Keeps X.
 RMBSYM      JSR  OUTSYMNAME
             PSHS X
@@ -1790,6 +1846,10 @@ M_NOTCONST  FCN  "initializer is not a constant"
 M_STRLONG   FCN  "string too long for its array"
 M_MANYINIT  FCN  "too many initializers"
 M_PARNAME   FCN  "a parameter has no name"
+M_INTRBANK  FCN  "an interrupt function can't be in banked code"
+S_BODY      FCN  "__b"
+S_JMPFAR    FCN  "JMP __farcall"
+S_FARCALL   FCN  "__farcall"
 M_NOSIZE    FCN  "no size for"
 M_LBLTWICE  FCN  "label defined twice:"
 M_MANYLBL   FCN  "too many labels in one function"

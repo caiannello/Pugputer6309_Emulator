@@ -1,9 +1,11 @@
 # CC: a C compiler for the Pugputer (design)
 
-Status: phases 1 to 3 done (2026-11-19). Phase 1: LINK's libraries, AR, CRT0
+Status: phases 1 to 4 done (2026-11-19). Phase 1: LINK's libraries, AR, CRT0
 and the first libc. Phase 2: CPP, and CC1 with `char`, `int`, pointers, arrays, functions,
 `typedef` and every statement and operator. Phase 3: `long`, `struct`, `union`, `enum`,
-`asm { }`, `interrupt` and the rest of the declarations and initializers. See
+`asm { }`, `interrupt` and the rest of the declarations and initializers. Phase 4: children
+(DOS's `B_EXEC` with `EXEC_CHILD`, libc's `spawn()`), `CC.COM`, banked code and
+`<pug/bank.h>`. See
 [`README.md`](README.md) for what is there now, and the "Found in phase" sections at the end
 for what each settled. Decisions taken so far (2026-11-19):
 
@@ -12,7 +14,8 @@ for what each settled. Decisions taken so far (2026-11-19):
 - It accepts **CMOC's C dialect** (including `asm { }` blocks and the pragmas that make sense
   here), but uses **its own calling convention**, made for the 6309. Its output is not meant
   to match CMOC's.
-- One command, `CC`, compiles, assembles and links. That needs a new DOS call, **`B_SPAWN`**.
+- One command, `CC`, compiles, assembles and links. That needed DOS to run a program as a
+  child: **`B_SPAWN`**, which became `B_EXEC` with `E = EXEC_CHILD` (see "Found in phase 4").
 - **Banked code works automatically:** a file or function is given a bank, LINK puts it in an
   overlay page, and calls to it go through generated trampolines.
 
@@ -99,23 +102,26 @@ initialized data.
 
 ### Banked code (overlays)
 
-- **Marking code:** `#pragma bank N` marks a whole file (or `__bank(N)` one function, later),
-  and `cc -b N` does the same from the command line. That file's code goes in section
-  `ovlN`.
+- **Marking code:** `#pragma bank N` (1 to 15) puts the functions after it in overlay N, up
+  to the next `#pragma bank` (`0`: fixed code), and `cc -b N` (CC1's `-b N`) starts a file
+  that way. Their code goes in section `ovlN`; their data, strings and statics stay fixed.
 - **The window:** overlays are linked to run in **bank 3, `$C000-$EFFF`**, 12KB each. With
   overlays in the program, the fixed part runs from `$3400` to `$BFFF` (about 35KB), and the
   stack moves to `$BFFF` (`B_BANK_SET` refuses to remap the bank the stack is in).
-- **Calling:** for each function a banked file exports, CC1 writes the body under an
-  internal name, plus a small stub in fixed memory under the real name:
-  `LDB #N` / `LDX #body` / `JMP __farcall`. Every call or function pointer simply uses the
-  stub. `__farcall` moves the return address and the current bank-3 page to a small side
-  stack, maps the overlay's page, and calls the body. Because the arguments sit where the
-  callee expects them, it doesn't need to know it was called through a stub. When the body
-  returns, `__farcall` puts the page back and returns. D and W pass through untouched, so
-  return values survive. Calls inside the same overlay are direct.
-- **On disk:** LINK writes the overlays into the EXE_MORE tail of the `.COM`. CRT0 reads
-  them into pages from `B_PAGE_ALLOC` and fills in the table from overlay number to
-  physical page.
+- **Calling:** for each banked function, CC1 writes the body as `__b_name`, and a small stub
+  in fixed memory under the real name: `LDB #N` / `LDX #__b_name` / `JMP __farcall`. Every
+  call or function pointer simply uses the stub. `__farcall` moves the return address and the
+  current bank-3 page to a small side stack, maps the overlay's page, and calls the body.
+  Because the arguments sit where the callee expects them, it doesn't need to know it was
+  called through a stub. When the body returns, `__farcall` puts the page back and returns. D
+  and W pass through untouched, so return values survive. A call from the same overlay to a
+  body this file has defined is direct.
+- **On disk:** LINK writes the overlays after the `.COM`'s body (EXE_MORE): for each `ovlN`
+  section, `FCB N`, `FDB` its address and size, its bytes; then `FCB 0`. CRT0's start falls
+  through `init_ovl`, which `farcall.asm` fills (and is empty without it): the stack moves
+  below `$C000`, and each overlay is read into a page from `B_PAGE_ALLOC`, the table from
+  overlay number to page filled in. `exit()` falls through `fini_ovl` the same way, which
+  frees the pages.
 - **Cost:** each far call goes through `B_BANK_SET` twice (about 100 cycles or more). If
   that turns out to matter, a fast bank-switch entry in the BIOS would help, one that keeps
   its shadow copies correct.
@@ -125,8 +131,8 @@ initialized data.
 At first, this works through library calls in `<pug/bank.h>`, not a new pointer type:
 `page_alloc()`, `page_free()`, `far_peek()`/`far_poke()`, `far_read()`/`far_write()`
 (copying between a near buffer and a page and offset, through `B_PAGE_COPY`), and
-`bank_map()`/`bank_unmap()` for a program that wants a page in bank 1 or 2 itself. A real
-`__far` pointer type can come later.
+`bank_get()`/`bank_map()` for a program that wants a page in bank 1 or 2 itself (done so in
+phase 4). A real `__far` pointer type can come later.
 
 ## The library
 
@@ -149,9 +155,10 @@ The headers go in `/INCLUDE` and the libraries in `/LIB` on the disk image.
 
 | Where | Change |
 |---|---|
-| LINK | Libraries: `-l`/`-L` and lwar `.a` archives, pulling in a member only when it resolves an undefined symbol, as lwlink does. More than 32 input files. Overlay sections, and the EXE_MORE output that carries them. |
-| DOS | `B_SPAWN`: X is the path and Y the command tail. DOS swaps the caller's memory (`DOS_END`-`$EFFF`, and the caller's bank mapping) out to free pages, runs the child, and on its `B_EXIT` puts the caller back and returns the child's exit code. `B_EXIT` takes an exit code. Open files and allocated pages belong to the program that opened or allocated them: a child's are closed and freed when it exits, and the parent's stay open. |
-| Shell | Shows a program's nonzero exit code. Gets `system()` for free. |
+| LINK | Libraries: `-l`/`-L` and lwar `.a` archives, pulling in a member only when it resolves an undefined symbol, as lwlink does. More than 32 input files (phase 1). Overlay sections (`ovlN`), and the EXE_MORE output that carries them (phase 4). An exit code. |
+| DOS | (Phase 4.) `B_EXEC` with `E = EXEC_CHILD` runs a child: X is the path and Y the command tail. DOS keeps the caller's memory (its pages in banks 1 to 3 stay as they are, the child gets three new ones; `$3400-$3FFF` and a record go in another page), runs the child, and on its `B_EXIT` puts the caller back, B = the child's exit code. `B_EXIT` takes an exit code in B. Open files and directory scans belong to the program that opened them: a child's are closed when it exits, and the parent's stay open. (Pages a child allocates itself are not freed for it: no room in DOS for that.) |
+| Shell | Clears E for `B_EXEC`. (Showing a program's exit code, and `system()`, are left: the shell isn't told the code when a program ends at the top level.) |
+| CPP, CC1, ASM, LINK, AR | Exit codes: 0, or 1 when something failed (CC.COM goes by them). |
 | ASM | Nothing needed, as far as I know. CC1 avoids the expressions ASM refuses (`sym/256` and the like). How fast it runs on the device decides how long a build takes, so it may want looking at. |
 | BIOS | Nothing, unless a fast bank-switch entry is wanted (above). |
 
@@ -171,7 +178,9 @@ Each phase leaves something that works and is tested.
 3. **The rest of the language** (done): `struct`/`union`, `enum`, `long` (and
    `fseek`/`ftell`, `atol`, `labs`), `asm { }`, `interrupt`, brace elision in initializers,
    `extern` in a block, a local array sized by a `{ list }`. (`-9` moved to "Later".)
-4. **`B_SPAWN` and `CC.COM`; overlays** (LINK, CC1's stubs, `__farcall`, CRT0) and
+4. **Children, `CC.COM`, overlays** (done): DOS's `B_EXEC` with `EXEC_CHILD` and `B_EXIT`'s
+   exit code, libc's `spawn()` (`<pug/sys.h>`), the tools' exit codes, `CC.COM`; `#pragma bank`
+   and `-b` (CC1's stubs), LINK's overlay output, `__farcall` and its loader, and
    `<pug/bank.h>`.
 5. **`LIBPUG.A`** (video, sound, input), and a demo written in C.
 6. **Later:** a better `malloc`, `float` (and `double` as the same type, as in CMOC),
@@ -263,3 +272,26 @@ Things that phase 2 onwards has to follow:
   after PSHS, TFR and the like; on its own (`ldd x`) it's a C name if there is one.
 - **Line endings:** `.gitattributes` has `* -text`, so a tool that writes CR LF changes every
   line of an LF file. Edit sources byte for byte.
+
+## Found in phase 4
+
+- **No new call numbers.** The BIOS numbers its own calls straight after the DOS's, and BASIC
+  hard-codes some, so a new DOS call would have moved `B_BANK_SET` and the rest. `B_SPAWN` is
+  `B_EXEC` with `E = EXEC_CHILD` instead (E was ignored before; the shell now clears it), and
+  the exit code comes back in B, written into the caller's SWI2 frame (`B_EXEC`'s outputs
+  are fixed in the ROM).
+- **DOS had 19 bytes to spare** below `$3400`. Its start-up code (and the table it copies into
+  the BIOS) now sits in the first file buffer, which nothing uses until it's done: 400 bytes
+  back. A child's record lives in DOSBUF while it's made, then in a page of its own, so DOS's
+  RAM grew by 8 bytes. An `IFGT` stops a DOS that would pass `$3400`.
+- **Owners are levels:** a file slot's or directory scan's `inuse` byte is its program's level
+  + 1, and `B_EXIT` closes those at its level or deeper.
+- **Pages aren't owned:** the BIOS hands them out, and DOS has no room to track them, so a
+  child's own pages stay allocated (as a top-level program's always have). libc frees the
+  overlays' pages itself, at `exit()`.
+- **The tools' exit codes:** each `B_EXIT` sets B (it was whatever B held).
+- **Fall-through sections** let a library module add start-up and exit code only when it's
+  linked: CRT0 is `init` / `init_ovl` / `init_end` and `fini` / `fini_ovl` / `fini_end`.
+  `init_ovl` runs before bss is cleared, so its state is in `data`.
+- **`@` makes a local label** in ASM and lwasm, so a body can't be `_name@b`; it is `__b_name`.
+- **The overlay records end with one 0 byte,** so the loader takes a short read there.

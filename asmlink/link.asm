@@ -10,7 +10,9 @@
 ;   LINK [options] file.o|file.a ... [-l lib] ...
 ;     -f FMT, --format=FMT     raw (the default), srec, com (raw with a Pugputer
 ;                              program header: load = the first section's
-;                              address, entry = the entry point, if any)
+;                              address, entry = the entry point, if any; and
+;                              sections named ovlN, overlays, after the body:
+;                              see OVLOUT)
 ;     -o FILE, --output=FILE   the output (default A.OUT)
 ;     -m FILE, --map=FILE      a map: the sections, then every symbol
 ;     -s FILE, --script=FILE   the link script (default: lwlink's, by format)
@@ -200,6 +202,8 @@ DP_VP       SET  DPAGE
             DVAR RELP,3                ; the next relocation
             DVAR RESONLY,1             ; PRECONST: only looking
             DVAR PCSECT,3
+            DVAR BODYLEN,2             ; a .COM: its body's bytes (not the overlays')
+            DVAR HASOVL,1              ; overlays (sections ovlN) have bytes
 DP_END      equ  DP_VP
 ;------------------------------------------------------------------------------
     ORG  PL_BASE-EXE_HDRSIZE
@@ -237,6 +241,7 @@ START       LDS  #STACKTOP
             BEQ  QUIT
             JSR  MAP
 QUIT        JSR  HEAPDONE
+            LDB  <SYMERR               ; (the exit code: 0, or not)
             LDA  #B_EXIT
             SWI2
 ; X = a message: printed, and everything given up (a partial output deleted).
@@ -257,6 +262,7 @@ FT_NORD     TST  <OUTON
 FT_NOOUT    LDU  #MAPSTRM
             JSR  SCLOSE
             JSR  HEAPDONE
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 ;------------------------------------------------------------------------------
@@ -485,6 +491,7 @@ CL_RET      RTS
 USAGE       LDX  #M_USAGE
             JSR  PRINTS
             JSR  HEAPDONE
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 ; X is just past an option letter: to its argument (attached, or the next word).
@@ -2468,6 +2475,7 @@ OU_OPEN     LDA  #1
             LDA  <FORMAT
             CMPA #FMT_COM
             BNE  OU_BODY
+            JSR  BODYINFO
             JSR  FIRSTOUT              ; the program header
             LDD  #EXE_MAGIC
             JSR  SPUTW
@@ -2481,8 +2489,13 @@ OU_OPEN     LDA  #1
             BRA  OU_ENTRY2
 OU_ENTRY    LDD  <EXECADDR
 OU_ENTRY2   JSR  SPUTW
-            CLRD
+            CLRD                       ; the flags: 0, or EXE_MORE (overlays)
+            TST  <HASOVL
+            BEQ  OU_FLAGS
+            LDD  #EXE_MORE
             JSR  SPUTW
+            LDD  <BODYLEN              ; (and the body's length)
+OU_FLAGS    JSR  SPUTW
 OU_BODY     LDD  <OHEAD
             STD  <CURSECT
             LDA  <OHEAD+2
@@ -2496,7 +2509,13 @@ OU_SECT     TST  <CURSECT
             LDD  SC_SIZE,X
             BEQ  OU_NEXT
             LDA  <FORMAT
-            CMPA #FMT_SREC
+            CMPA #FMT_COM
+            BNE  OU_NCOM
+            JSR  ISOVL                 ; (a .COM's overlays come after)
+            TSTA
+            BNE  OU_NEXT
+            LDA  <FORMAT
+OU_NCOM     CMPA #FMT_SREC
             BNE  OU_RAW
             JSR  SRECSECT
             BRA  OU_NEXT
@@ -2508,7 +2527,13 @@ OU_NEXT     JSR  SECTMAP
             STA  <CURSECT+2
             BRA  OU_SECT
 OU_END      LDA  <FORMAT
-            CMPA #FMT_SREC
+            CMPA #FMT_COM
+            BNE  OU_NOVL
+            TST  <HASOVL
+            BEQ  OU_CLOSE
+            JSR  OVLOUT
+            BRA  OU_CLOSE
+OU_NOVL     CMPA #FMT_SREC
             BNE  OU_CLOSE
             LDX  #M_S903               ; "S903" addr, checksum
             JSR  SPUTS
@@ -2525,6 +2550,105 @@ OU_END      LDA  <FORMAT
 OU_CLOSE    JSR  SCLOSE
             CLR  <OUTON
             RTS
+;------------------------------------------------------------------------------
+; Overlays. A section named ovlN (N 1 to 255) is banked code: in a .COM it is
+; not in the body (it is linked where it will run: the link script puts each
+; at $C000), but after it, in the rest of the file (EXE_MORE): for each such
+; section with bytes, FCB N, FDB its address, FDB its size, its bytes; then
+; FCB 0. The program loads them (libc's farcall.asm).
+;------------------------------------------------------------------------------
+; X = a section (mapped) -> A = its overlay number (0: it isn't one). Keeps X.
+ISOVL       PSHS X
+            LEAX SC_NAME,X
+            LDA  ,X+
+            CMPA #'o'
+            BNE  IO_NO
+            LDA  ,X+
+            CMPA #'v'
+            BNE  IO_NO
+            LDA  ,X+
+            CMPA #'l'
+            BNE  IO_NO
+            CLRB
+IO_DIG      LDA  ,X+
+            BEQ  IO_END
+            SUBA #'0'
+            CMPA #9
+            BHI  IO_NO
+            PSHS A
+            LDA  #10
+            MUL
+            ADDB ,S+
+            BRA  IO_DIG
+IO_END      TFR  B,A
+            PULS X,PC
+IO_NO       CLRA
+            PULS X,PC
+; -> BODYLEN = the bytes of the sections placed, not bss and not overlays;
+; HASOVL = 1 if an overlay has bytes.
+BODYINFO    CLRD
+            STD  <BODYLEN
+            CLR  <HASOVL
+            LDD  <OHEAD
+            STD  <CURSECT
+            LDA  <OHEAD+2
+            STA  <CURSECT+2
+BI_LOOP     TST  <CURSECT
+            BEQ  BI_RET
+            JSR  SECTMAP
+            LDA  SC_FLAGS,X
+            BITA #SEF_BSS
+            BNE  BI_NEXT
+            JSR  ISOVL
+            TSTA
+            BEQ  BI_BODY
+            LDD  SC_SIZE,X
+            BEQ  BI_NEXT
+            INC  <HASOVL
+            BRA  BI_NEXT
+BI_BODY     LDD  <BODYLEN
+            ADDD SC_SIZE,X
+            STD  <BODYLEN
+BI_NEXT     LDD  SC_ONEXT,X
+            STD  <CURSECT
+            LDA  SC_ONEXT+2,X
+            STA  <CURSECT+2
+            BRA  BI_LOOP
+BI_RET      RTS
+; The overlays, after the body.
+OVLOUT      LDD  <OHEAD
+            STD  <CURSECT
+            LDA  <OHEAD+2
+            STA  <CURSECT+2
+OV_LOOP     TST  <CURSECT
+            BEQ  OV_END
+            JSR  SECTMAP
+            LDA  SC_FLAGS,X
+            BITA #SEF_BSS
+            BNE  OV_NEXT
+            LDD  SC_SIZE,X
+            BEQ  OV_NEXT
+            JSR  ISOVL
+            TSTA
+            BEQ  OV_NEXT
+            LDU  #OUTSTRM
+            JSR  SPUTC                 ; N, the address, the size, the bytes
+            JSR  SECTMAP
+            LDD  SC_LOAD,X
+            JSR  SPUTW
+            JSR  SECTMAP
+            LDD  SC_SIZE,X
+            JSR  SPUTW
+            JSR  RAWSECT
+OV_NEXT     JSR  SECTMAP
+            LDD  SC_ONEXT,X
+            STD  <CURSECT
+            LDA  SC_ONEXT+2,X
+            STA  <CURSECT+2
+            BRA  OV_LOOP
+OV_END      CLRA
+            LDU  #OUTSTRM
+            JMP  SPUTC
 ; -> PVAL = the first output byte's address (the first placed section with
 ; bytes, not bss), for a .COM header.
 FIRSTOUT    CLRD

@@ -24,3 +24,6 @@ printf.o
 arith.o
 larith.o
 scopy.o
+spawn.o
+farcall.o
+pugbank.o

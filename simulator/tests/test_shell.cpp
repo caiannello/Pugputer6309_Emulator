@@ -112,7 +112,7 @@ TEST(shell_info_commands) {
     std::string img = image("shell2.img", {});
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
-    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.3\r\n");
+    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.4\r\n");
     CHECK(cmd(s, "MEM") == "RAM: 1024 KB installed, 960 KB free for programs\r\n");
     std::string help = cmd(s, "help");
     CHECK(has(help, "DIR [path]") && has(help, "COPY from [to]") && has(help, "name [args]"));
@@ -213,8 +213,8 @@ TEST(shell_line_editing) {
     Basic309Session s;
     CHECK(s.boot_shell(PUGBIOS_S19_PATH, img.c_str()));
     // Backspace and Delete erase; the echo shows the erasure.
-    CHECK(cmd(s, "vex\x08r") == "Pugputer 6309 DOS 2.3\r\n");
-    CHECK(cmd(s, "vxx\x7f\x7f" "er") == "Pugputer 6309 DOS 2.3\r\n");
+    CHECK(cmd(s, "vex\x08r") == "Pugputer 6309 DOS 2.4\r\n");
+    CHECK(cmd(s, "vxx\x7f\x7f" "er") == "Pugputer 6309 DOS 2.4\r\n");
     // Ctrl-C abandons the line.
     s.received.clear();
     for (char c : std::string("del importa")) s.send_byte(static_cast<uint8_t>(c));
@@ -223,13 +223,13 @@ TEST(shell_line_editing) {
     uint64_t spent = 0;
     while (!ends_with(s.received, "> ") && spent < 100000000) spent += s.bus.run(20000);
     CHECK(has(s.received, "^C"));
-    CHECK(has(s.received, "Pugputer 6309 DOS 2.3"));
+    CHECK(has(s.received, "Pugputer 6309 DOS 2.4"));
     CHECK(!has(s.received, "Missing argument")); // "del importa" never ran
     // A command is case-insensitive; a long line is capped rather than overrun.
-    CHECK(cmd(s, "VeR") == "Pugputer 6309 DOS 2.3\r\n");
+    CHECK(cmd(s, "VeR") == "Pugputer 6309 DOS 2.4\r\n");
     std::string longline = "ver " + std::string(120, 'x');
-    CHECK(cmd(s, longline) == "Pugputer 6309 DOS 2.3\r\n");
-    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.3\r\n");
+    CHECK(cmd(s, longline) == "Pugputer 6309 DOS 2.4\r\n");
+    CHECK(cmd(s, "ver") == "Pugputer 6309 DOS 2.4\r\n");
 }
 
 TEST(shell_runs_programs_with_a_command_tail_and_returns_to_the_shell) {

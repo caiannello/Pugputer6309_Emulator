@@ -52,6 +52,7 @@
     ORG  DOS_LOAD       ; where the BIOS loads and starts us (defines.d)
 ;------------------------------------------------------------------------------
 ARGMAX      equ  79         ; longest command tail kept (B_EXEC / B_ARGS)
+MAXLEVEL    equ  EXEC_MAXLEVEL ; children within children (SPAWN)
 ;------------------------------------------------------------------------------
 NSLOTS      equ DOS_NFILES  ; open files at once (defines.d). Callers may hold up to
                             ; NSLOTS-1 of them and still have a slot free for LOAD/SAVE.
@@ -88,162 +89,8 @@ left        rmb 2        ; root only: sectors left, counting the current one
 idx         rmb 1        ; next entry (0..15) in that sector
             ENDS
 ;------------------------------------------------------------------------------
-DOS_START   STY  JT_BASE        ; the BIOS's call table (see SD_BOOT_TRY)
-            STS  BOOT_SP        ; programs start (and B_EXIT restarts the shell) on this stack
-            LDQ  #0             ; LBA 0: the boot sector
-            LDY  #DOSBUF
-            JSR  BLKREAD
-
-            ; Pull the BPB fields we need. Each multi-byte field is stored
-            ; little-endian; reading the high byte then the low byte (in
-            ; the opposite order LDD would) reconstructs it correctly into
-            ; D without a byte-swap step.
-            LDA  DOSBUF+13      ; sectors per cluster, offset $0D (1 byte)
-            STA  SECPERCLUS
-            ; A power of two, so "which cluster holds file sector N" is a
-            ; shift and "which sector within it" is a mask -- no divide.
-            DECA
-            STA  SPCMASK
-            CLR  SPCSHIFT
-            LDA  SECPERCLUS
-SHIFTLOOP   CMPA #1
-            BLS  SHIFTDONE
-            LSRA
-            INC  SPCSHIFT
-            BRA  SHIFTLOOP
-SHIFTDONE
-            ; Nothing is open at boot. Clear the whole file table rather
-            ; than trusting RAM to already be zero (it isn't on real
-            ; hardware, and a stray nonzero "inuse" would hide a slot).
-            LDX  #FSLOTS
-            CLR  ,X
-            LDY  #FSLOTS
-            LDW  #NSLOTS*sizeof{fslot}
-            TFM  X,Y+
-            LDX  #DHANDLES
-            CLR  ,X
-            LDY  #DHANDLES
-            LDW  #NDIRH*sizeof{dhandle}
-            TFM  X,Y+
-            LDD  #0
-            STD  CWDCLUS        ; the current directory starts at the root
-            STD  FD_DIR
-            LDD  #$FFFF
-            STD  FATBUFSEC      ; no FAT sector cached yet
-            CLR  FATDIRTY
-            LDD  #2
-            STD  ALLOC_HINT     ; the first free-cluster search starts at the start
-            LDX  #PATH_DEFAULT
-            JSR  DOS_PATH       ; the program search path starts as "/CMD"
-            LDA  DOSBUF+15      ; reserved sector count, offset $0E/$0F
-            LDB  DOSBUF+14
-            STD  RESSEC
-            LDA  DOSBUF+16      ; number of FATs, offset $10 (1 byte)
-            STA  NUMFATS
-            LDA  DOSBUF+18      ; root entry count, offset $11/$12
-            LDB  DOSBUF+17
-            STD  ROOTENTCNT
-            LDA  DOSBUF+23      ; sectors per FAT, offset $16/$17
-            LDB  DOSBUF+22
-            STD  SECPERFAT
-
-            ; Total sectors (32-bit): the 16-bit field at offset $13 if it is
-            ; nonzero, else the 32-bit one at offset $20 (volumes over 65535
-            ; sectors). Kept big-endian in TOTALSEC.
-            LDD  #0
-            STD  TOTALSEC
-            LDA  DOSBUF+20
-            LDB  DOSBUF+19
-            STD  TOTALSEC+2
-            BNE  TS_DONE
-            LDA  DOSBUF+35
-            LDB  DOSBUF+34
-            STD  TOTALSEC
-            LDA  DOSBUF+33
-            LDB  DOSBUF+32
-            STD  TOTALSEC+2
-TS_DONE
-
-            ; FATLBA = RESSEC (the first FAT starts right after the
-            ; reserved sectors).
-            LDD  RESSEC
-            STD  FATLBA
-
-            ; ROOTLBA = RESSEC + NUMFATS*SECPERFAT (NUMFATS is always a
-            ; small integer -- 1 or 2 -- so a counted add-loop is simpler
-            ; than a general multiply), as a 32-bit sum. The counter lives in
-            ; memory (FATCNT), not in a register that is also part of the
-            ; accumulator: a counter in B would be clobbered by the very
-            ; arithmetic it is counting.
-            LDA  NUMFATS
-            STA  FATCNT
-            LDD  #0
-            LDW  RESSEC         ; Q = the running total, seeded with RESSEC
-FATLOOP     TST  FATCNT
-            BEQ  FATDONE
-            ADDW SECPERFAT
-            ADCD #0
-            DEC  FATCNT
-            BRA  FATLOOP
-FATDONE     STQ  ROOTLBA
-
-            ; ROOTDIRSEC = ROOTENTCNT*32/512 = ROOTENTCNT/16 exactly (a
-            ; 32-byte entry, 512-byte sector) -- four right shifts of the
-            ; 16-bit value instead of a divide.
-            LDD  ROOTENTCNT
-            LSRD
-            LSRD
-            LSRD
-            LSRD
-            STD  ROOTDIRSEC
-
-            ; DATALBA = ROOTLBA + ROOTDIRSEC
-            LDQ  ROOTLBA
-            ADDW ROOTDIRSEC
-            ADCD #0
-            STQ  DATALBA
-
-            ; TOTALCLUS = (TOTALSEC - DATALBA) >> SPCSHIFT, capped at what a
-            ; FAT16 volume can number ($FFF4 clusters). MAXCLUS = TOTALCLUS+2
-            ; (clusters are numbered from 2) is ALLOC_CLUSTER's scan bound, and
-            ; is also capped by what the FAT sectors can hold.
-            LDA  SPCSHIFT
-            STA  MULCNT
-            LDQ  TOTALSEC
-            SUBW DATALBA+2
-            SBCD DATALBA
-TCLOOP      TST  MULCNT
-            BEQ  TCDONE
-            LSRD
-            RORW
-            DEC  MULCNT
-            BRA  TCLOOP
-TCDONE      TSTD
-            BNE  TC_CAP
-            CMPW #$FFF4
-            BLS  TC_STORE
-TC_CAP      LDW  #$FFF4
-TC_STORE    STW  TOTALCLUS
-            TFR  W,D
-            ADDD #2
-            STD  MAXCLUS
-            LDD  SECPERFAT      ; entries the FAT can hold: SECPERFAT*256
-            TSTA
-            BNE  MC_OK          ; 256+ FAT sectors: more than the cap anyway
-            TFR  B,A
-            CLRB
-            CMPD MAXCLUS
-            BHS  MC_OK
-            STD  MAXCLUS
-MC_OK
-
-            ; Install the resident file API in the BIOS's DOS call table, in
-            ; function-code order, then start the first program: the shell
-            ; (/SHELL.COM), or on a disk without one, BASIC. Never returns.
-            LDX  #DOS_ENTRIES
-            LDY  JT_BASE
-            LDW  #NUM_DOS_JT*2
-            TFM  X+,Y+
+DOS_START0  JMP  DOS_START      ; (the start-up code is at the end: in the file
+                                ; buffers, which nothing uses until it's done)
 RUN_STARTUP LDX  #PATH_SHELL     ; /CMD/SHELL.COM ...
             BSR  RS_TRY
             LDX  #PATH_SHELL+4   ; ... else /SHELL.COM (the same name without "/CMD")
@@ -258,6 +105,7 @@ RUN_STARTUP LDX  #PATH_SHELL     ; /CMD/SHELL.COM ...
             SWI2
 HANG        BRA  HANG           ; nothing else to do -- not resumable
 RS_TRY      LDY  #0             ; X = a program to start, with no command tail
+            CLRA                ; (not as a child)
             JMP  DOS_EXEC       ; (returns only if it couldn't start it)
 ;==============================================================================
 ; Low-level block/FAT/directory primitives, shared by the boot-time loader
@@ -1201,7 +1049,8 @@ OW_ZEROREST CLR  ,X+                  ; offsets 12..31
             JSR  FREE_CHAIN
             LBCS OPEN_RET
 OPEN_INIT   LDX  OPEN_SLOTPTR
-            LDA  #1
+            LDA  LEVEL            ; in use, by this program (LEVEL+1)
+            INCA
             STA  fslot.inuse,X
             LDA  OPEN_MODE
             STA  fslot.mode,X
@@ -1611,7 +1460,8 @@ OD_GOT      STX  OD_PTR
             BCS  OD_RET
             CLR  DIRENTIDX
             LDX  OD_PTR
-            LDA  #1
+            LDA  LEVEL            ; in use, by this program (LEVEL+1)
+            INCA
             STA  dhandle.inuse,X
             JSR  DH_SAVE
             LDA  OD_IDX
@@ -2114,18 +1964,12 @@ DOS_VERSION LDA  #DOS_API_VERSION
 ; the path is parsed by the open, so nothing depends on the caller's memory once
 ; the body starts loading.
 ;------------------------------------------------------------------------------
-DOS_EXEC    STX  EX_PATH
+DOS_EXEC    CMPA #EXEC_CHILD      ; (A = E) a child: SPAWN
+            LBEQ SPAWN
+            STX  EX_PATH
             LDX  #ARGBUF          ; copy the command tail
-            LDB  #ARGMAX
-            CMPY #0
-            BEQ  EX_ARGEND
-EX_ARGLOOP  LDA  ,Y+
-            BEQ  EX_ARGEND
-            STA  ,X+
-            DECB
-            BNE  EX_ARGLOOP
-EX_ARGEND   CLR  ,X
-            LDX  EX_PATH
+            JSR  EX_TAIL
+EX_OPEN     LDX  EX_PATH
             LDA  #FOPEN_READ
             JSR  DOS_OPEN
             LBCS EX_RET
@@ -2182,7 +2026,7 @@ EX_LENOK    STW  EX_LEN
             STD  IO_BUF
             LDD  EX_LEN
             STD  IO_LEN
-            LDS  BOOT_SP          ; the body may load over the caller's stack (the
+            LDS  START_SP         ; the body may load over the caller's stack (the
                                   ; shell's is at $7F00), so from here on DOS runs on
                                   ; the boot stack: the caller's frame is abandoned,
                                   ; and a failure can only restart the shell
@@ -2195,9 +2039,11 @@ EX_LENOK    STW  EX_LEN
             TST  HDRBUF+7
             BNE  EX_GO            ; EXE_MORE: the file left open, its handle in B
             JSR  DOS_CLOSE
-EX_GO       JMP  [HDRBUF+4]       ; the program has the machine
+EX_GO       CLR  SP_NEW
+            JMP  [HDRBUF+4]       ; the program has the machine
 EX_LOADFAIL LDB  EX_H             ; (the caller's memory may be half overwritten)
             JSR  DOS_CLOSE
+            LDB  #$FF
             JMP  DOS_EXIT
 EX_TOOBIG   LDA  #ERR_TOOBIG
             BRA  EX_FAIL
@@ -2207,7 +2053,178 @@ EX_FAIL     STA  EX_ERR           ; close the file (an error there is not the ne
             JSR  DOS_CLOSE
             LDA  EX_ERR
             ORCC #1
-EX_RET      RTS
+EX_RET      TST  SP_NEW           ; (a child that didn't start: back to SPAWN's
+            BNE  EX_SPFAIL        ; caller)
+            RTS
+EX_SPFAIL   STA  SP_ERR
+            JMP  SP_RESTORE
+; Y = a command tail (or 0) -> X (ARGMAX characters at most, and a NUL).
+EX_TAIL     LDB  #ARGMAX
+            CMPY #0
+            BEQ  ET_END
+ET_LOOP     LDA  ,Y+
+            BEQ  ET_END
+            STA  ,X+
+            DECB
+            BNE  ET_LOOP
+ET_END      CLR  ,X
+            RTS
+;------------------------------------------------------------------------------
+; B_EXEC with E = EXEC_CHILD: the program runs as a child, and its B_EXIT comes
+; back here, the caller then going on with B = the child's exit code. The
+; caller's memory is kept: its pages in banks 1..3 stay as they are (the child
+; gets three new ones there), and $3400-$3FFF (bank 0's part of a program)
+; and the record below (its stack, banks, command tail) go in a page of their
+; own, SAVEPG. The child's open files and directory scans are closed when it
+; ends (inuse holds the owner's LEVEL+1). The child starts on the boot stack
+; (or, if the caller is running on that, below the caller's frames).
+;------------------------------------------------------------------------------
+SP_REC      equ  DOSBUF            ; the record, made here, kept at $0C00 in
+SR_S        equ  0                 ; its page: the caller's S (at its call),
+SR_START    equ  2                 ; START_SP,
+SR_PREV     equ  4                 ; SAVEPG,
+SR_BANKS    equ  5                 ; its pages in banks 1..3,
+SR_PAGES    equ  8                 ; the child's (1..3) and the record's (4th),
+SR_ARGS     equ  12                ; its command tail
+SR_SIZE     equ  SR_ARGS+ARGMAX+1
+SPAWN       LDA  LEVEL
+            CMPA #MAXLEVEL
+            LBHS SP_NOROOM
+            STS  SP_REC+SR_S
+            LDD  START_SP
+            STD  SP_REC+SR_START
+            LDA  SAVEPG
+            STA  SP_REC+SR_PREV
+            PSHS X,Y
+            LDX  #ARGBUF
+            LDY  #SP_REC+SR_ARGS
+            LDW  #ARGMAX+1
+            TFM  X+,Y+
+            LDB  #1                   ; its banks' pages
+SP_BANKS    LDA  #B_BANK_GET
+            SWI2
+            LDX  #SP_REC+SR_BANKS-1
+            STA  B,X
+            INCB
+            CMPB #3
+            BLS  SP_BANKS
+            PULS X,Y                  ; the path and the tail, here (the
+            LDU  #PATHBUF             ; caller's memory goes)
+            LDB  #PATHMAX
+SP_PATH     LDA  ,X+
+            STA  ,U+
+            BEQ  SP_TAIL
+            DECB
+            BNE  SP_PATH
+            LDA  #ERR_BADPATH
+            ORCC #1
+            RTS
+SP_TAIL     LDX  #ARGBUF
+            JSR  EX_TAIL
+            LDB  #4                   ; four pages
+SP_ALLOC    LDA  #B_PAGE_ALLOC
+            SWI2
+            BCS  SP_NOPAGE
+            LDX  #SP_REC+SR_PAGES-1
+            STA  B,X
+            DECB
+            BNE  SP_ALLOC
+            CLRB                      ; the caller's $3400-$3FFF, then the
+            LDE  SP_REC+SR_PAGES+3    ; record, into the record's page
+            LDX  #$3400
+            LDY  #0
+            LDU  #$0C00
+            LDA  #B_PAGE_COPY
+            SWI2
+            CLRB
+            LDX  #SP_REC
+            LDY  #$0C00
+            LDU  #SR_SIZE
+            LDA  #B_PAGE_COPY
+            SWI2
+            LDA  SP_REC+SR_PAGES+3
+            STA  SAVEPG
+            INC  LEVEL
+            INC  SP_NEW
+            LDX  BOOT_SP              ; the child's stack
+            CMPS #$4000
+            BHS  SP_STACK
+            LEAX -2,S
+SP_STACK    STX  START_SP
+            TFR  X,S
+            LDY  #SP_REC+SR_PAGES-1   ; the child's pages in banks 1..3
+            BSR  SP_MAP
+            LDX  #PATHBUF
+            STX  EX_PATH
+            JMP  EX_OPEN
+SP_NOPAGE   INCB                      ; the pages got so far go back
+SP_NPFREE   CMPB #4
+            BHI  SP_NOROOM
+            LDX  #SP_REC+SR_PAGES-1
+            PSHS B
+            LDB  B,X
+            LDA  #B_PAGE_FREE
+            SWI2
+            PULS B
+            INCB
+            BRA  SP_NPFREE
+SP_NOROOM   LDA  #ERR_NOSPACE
+            ORCC #1
+            RTS
+; Y = three pages (less 1): mapped in banks 1..3.
+SP_MAP      LDB  #1
+SM_LOOP     LDE  B,Y
+            LDA  #B_BANK_SET
+            SWI2
+            INCB
+            CMPB #3
+            BLS  SM_LOOP
+            RTS
+; Back to SPAWN's caller (the child ended, or couldn't start: SP_ERR = 0, or
+; the error), on a stack in bank 0.
+SP_RESTORE  LDB  SAVEPG               ; the record, and $3400-$3FFF
+            CLRE
+            LDX  #$0C00
+            LDY  #SP_REC
+            LDU  #SR_SIZE
+            LDA  #B_PAGE_COPY
+            SWI2
+            LDB  SAVEPG
+            LDX  #0
+            LDY  #$3400
+            LDU  #$0C00
+            LDA  #B_PAGE_COPY
+            SWI2
+            LDY  #SP_REC+SR_BANKS-1   ; its pages in banks 1..3 again, and the
+            BSR  SP_MAP               ; child's (and the record's) go
+            LDB  #4
+SR_FREE     LDX  #SP_REC+SR_PAGES-1
+            PSHS B
+            LDB  B,X
+            LDA  #B_PAGE_FREE
+            SWI2
+            PULS B
+            DECB
+            BNE  SR_FREE
+            LDX  #SP_REC+SR_ARGS      ; its tail
+            LDY  #ARGBUF
+            LDW  #ARGMAX+1
+            TFM  X+,Y+
+            LDA  SP_REC+SR_PREV
+            STA  SAVEPG
+            LDD  SP_REC+SR_START
+            STD  START_SP
+            DEC  LEVEL
+            CLR  SP_NEW
+            LDS  SP_REC+SR_S          ; the caller's call (the return into the
+            LDB  EXITCODE             ; BIOS's DOS call, its SWI2 frame above)
+            STB  SWI2_B+2,S
+            LDA  SP_ERR
+            BEQ  SR_OK
+            ORCC #1
+            RTS
+SR_OK       ANDCC #$FE
+            RTS
 ;------------------------------------------------------------------------------
 ; -> X = the current command tail (see B_EXEC), NUL-terminated.
 ;------------------------------------------------------------------------------
@@ -2238,29 +2255,42 @@ PT_DONE     LDX  #PATHVAR
             ANDCC #$FE
             RTS
 ;------------------------------------------------------------------------------
-; The program is done. Closes every open file (flushing what was written) and
-; every directory scan, then starts the shell again on the boot stack. Never
+; The program is done (B = its exit code). Closes its open files (flushing what
+; was written) and directory scans, then goes back to the program that started
+; it as a child (SPAWN), or starts the shell again on the boot stack. Never
 ; returns.
 ;------------------------------------------------------------------------------
-DOS_EXIT    LDS  BOOT_SP
+DOS_EXIT    STB  EXITCODE
+            LDS  START_SP
+            LDA  LEVEL            ; its: inuse LEVEL+1 (or more)
+            INCA
+            STA  EX_OWNER
             CLR  FF_IDX
 EXT_LOOP    LDA  FF_IDX
             CMPA #NSLOTS
-            BHS  EXT_DONE
+            BHS  EXT_DIRS
             JSR  SLOT_ADDR
-            TST  fslot.inuse,X
-            BEQ  EXT_NEXT
+            LDA  fslot.inuse,X
+            CMPA EX_OWNER
+            BLO  EXT_NEXT
             LDB  FF_IDX
             JSR  DOS_CLOSE        ; (a write error here has nobody to tell)
 EXT_NEXT    INC  FF_IDX
             BRA  EXT_LOOP
-EXT_DONE    LDX  #DHANDLES
-            CLR  ,X
-            LDY  #DHANDLES
-            LDW  #NDIRH*sizeof{dhandle}
-            TFM  X,Y+
+EXT_DIRS    LDX  #DHANDLES
+            LDB  #NDIRH
+EXT_DLOOP   LDA  dhandle.inuse,X
+            CMPA EX_OWNER
+            BLO  EXT_DNEXT
+            CLR  dhandle.inuse,X
+EXT_DNEXT   LEAX sizeof{dhandle},X
+            DECB
+            BNE  EXT_DLOOP
             JSR  FAT_COMMIT
-            JMP  RUN_STARTUP
+            TST  LEVEL
+            LBEQ RUN_STARTUP
+            CLR  SP_ERR
+            JMP  SP_RESTORE
 ;==============================================================================
 ; The byte-stream layer under the file API: maps a file's byte position to a
 ; sector via its FAT cluster chain, and caches one sector per open file in
@@ -2779,44 +2809,8 @@ PATH_SHELL  FCC  "/CMD/SHELL.COM"
             FCB  0
 PATH_BASIC  FCC  "/CMD/BASIC.COM"
             FCB  0
-PATH_DEFAULT FCC "/CMD"
-            FCB  0
 MSG_NOSHELL FCC  "No SHELL.COM or BASIC.COM on the disk"
             FCB  LF,CR,0
-;------------------------------------------------------------------------------
-; The resident API's entry points, in function-code order (bios/defines.d,
-; B_FOPEN_NAME upward): ALLDONE copies this table into the BIOS's JT_DOS.
-;------------------------------------------------------------------------------
-DOS_ENTRIES FDB  DOS_OPEN       ; $13 B_FOPEN_NAME
-            FDB  DOS_READLINE   ; $14 B_READLINE
-            FDB  DOS_WRITELINE  ; $15 B_WRITELINE
-            FDB  DOS_CLOSE      ; $16 B_FCLOSE_NAME
-            FDB  DOS_OPENDIR    ; $17 B_OPENDIR
-            FDB  DOS_READDIR    ; $18 B_READDIR
-            FDB  DOS_KILL       ; $19 B_KILL_NAME
-            FDB  DOS_RENAME     ; $1A B_RENAME_NAME
-            FDB  DOS_FGETC      ; $1B B_FGETC
-            FDB  DOS_FPUTC      ; $1C B_FPUTC
-            FDB  DOS_FREAD      ; $1D B_FREAD
-            FDB  DOS_FWRITE     ; $1E B_FWRITE
-            FDB  DOS_FSEEK      ; $1F B_FSEEK_NAME
-            FDB  DOS_FSTAT      ; $20 B_FSTAT_NAME
-            FDB  DOS_FFLUSH     ; $21 B_FFLUSH
-            FDB  DOS_MKDIR      ; $22 B_MKDIR
-            FDB  DOS_RMDIR      ; $23 B_RMDIR
-            FDB  DOS_CHDIR      ; $24 B_CHDIR
-            FDB  DOS_GETCWD     ; $25 B_GETCWD
-            FDB  DOS_CLOSEDIR   ; $26 B_CLOSEDIR
-            FDB  DOS_STAT       ; $27 B_STAT
-            FDB  DOS_VERSION    ; $28 B_DOS_VERSION
-            FDB  DOS_EXEC       ; $29 B_EXEC
-            FDB  DOS_ARGS       ; $2A B_ARGS
-            FDB  DOS_EXIT       ; $2B B_EXIT
-            FDB  DOS_PATH       ; $2C B_PATH
-DOS_ENTRIES_END
-    IFNE (DOS_ENTRIES_END-DOS_ENTRIES)-2*NUM_DOS_JT
-    ERROR "DOS_ENTRIES must have one entry per DOS call (see defines.d)"
-    ENDC
 ;------------------------------------------------------------------------------
 JT_BASE       RMB  2        ; the BIOS's DOS call table (from SD_BOOT_TRY, in Y)
 CWDCLUS       RMB  2        ; the current directory's first cluster (0 = root)
@@ -2842,6 +2836,13 @@ EX_PATH       RMB  2
 EX_H          RMB  1
 EX_LEN        RMB  2
 EX_ERR        RMB  1
+START_SP      RMB  2        ; the stack a program starts on (BOOT_SP, or a child's)
+LEVEL         RMB  1        ; children running (SPAWN): 0 at the shell
+SAVEPG        RMB  1        ; the page that keeps the caller of the latest SPAWN
+SP_NEW        RMB  1        ; nonzero: a child being started (EX_* undo it)
+SP_ERR        RMB  1        ; SP_RESTORE: the error to return (0: none)
+EXITCODE      RMB  1        ; B_EXIT's B
+EX_OWNER      RMB  1        ; DOS_EXIT: the inuse value it closes from
 SICW          RMB  2        ; CLUS_SIC_TO_LBA: sector within the cluster
 ; The FAT cache and free-cluster search
 FATBUFSEC     RMB  2        ; which sector of the FAT FATBUF holds ($FFFF = none)
@@ -2955,13 +2956,217 @@ SEW_S         RMB  3
 ZT_SEC        RMB  3
 ZT_OFS        RMB  2
 PB_BYTE       RMB  1
-; The big buffers are just addresses after the last variable -- no bytes in
-; dos.bin, so they cost no disk space and no load time (they are zero
-; anyway: the BIOS clears RAM at reset and DOS clears what it relies on).
-DOSBUF        equ  *        ; directory / boot sectors (512)
+; The big buffers are just addresses after the last variable: no bytes in
+; dos.bin past the start-up code, which is in the first of them (nothing
+; relies on what they hold at first). DOS has to end below $3400, where
+; programs load.
+SLOTBUFS      equ  *        ; per-file sector buffers: NSLOTS x 512
+;------------------------------------------------------------------------------
+; Start-up, once, in the first file buffer: it's overwritten when the first
+; file is opened (by RUN_STARTUP, after this is done). The table DOS_ENTRIES
+; and PATH_DEFAULT are only needed here too.
+;------------------------------------------------------------------------------
+DOS_START   STY  JT_BASE        ; the BIOS's call table (see SD_BOOT_TRY)
+            STS  BOOT_SP        ; programs start (and B_EXIT restarts the shell) on this stack
+            STS  START_SP
+            LDQ  #0             ; LBA 0: the boot sector
+            LDY  #DOSBUF
+            JSR  BLKREAD
+
+            ; Pull the BPB fields we need. Each multi-byte field is stored
+            ; little-endian; reading the high byte then the low byte (in
+            ; the opposite order LDD would) reconstructs it correctly into
+            ; D without a byte-swap step.
+            LDA  DOSBUF+13      ; sectors per cluster, offset $0D (1 byte)
+            STA  SECPERCLUS
+            ; A power of two, so "which cluster holds file sector N" is a
+            ; shift and "which sector within it" is a mask -- no divide.
+            DECA
+            STA  SPCMASK
+            CLR  SPCSHIFT
+            LDA  SECPERCLUS
+SHIFTLOOP   CMPA #1
+            BLS  SHIFTDONE
+            LSRA
+            INC  SPCSHIFT
+            BRA  SHIFTLOOP
+SHIFTDONE
+            ; Nothing is open at boot. Clear the whole file table rather
+            ; than trusting RAM to already be zero (it isn't on real
+            ; hardware, and a stray nonzero "inuse" would hide a slot).
+            LDX  #FSLOTS
+            CLR  ,X
+            LDY  #FSLOTS
+            LDW  #NSLOTS*sizeof{fslot}
+            TFM  X,Y+
+            LDX  #DHANDLES
+            CLR  ,X
+            LDY  #DHANDLES
+            LDW  #NDIRH*sizeof{dhandle}
+            TFM  X,Y+
+            LDD  #0
+            STD  CWDCLUS        ; the current directory starts at the root
+            STD  FD_DIR
+            LDD  #$FFFF
+            STD  FATBUFSEC      ; no FAT sector cached yet
+            CLR  FATDIRTY
+            LDD  #2
+            STD  ALLOC_HINT     ; the first free-cluster search starts at the start
+            LDX  #PATH_DEFAULT
+            JSR  DOS_PATH       ; the program search path starts as "/CMD"
+            LDA  DOSBUF+15      ; reserved sector count, offset $0E/$0F
+            LDB  DOSBUF+14
+            STD  RESSEC
+            LDA  DOSBUF+16      ; number of FATs, offset $10 (1 byte)
+            STA  NUMFATS
+            LDA  DOSBUF+18      ; root entry count, offset $11/$12
+            LDB  DOSBUF+17
+            STD  ROOTENTCNT
+            LDA  DOSBUF+23      ; sectors per FAT, offset $16/$17
+            LDB  DOSBUF+22
+            STD  SECPERFAT
+
+            ; Total sectors (32-bit): the 16-bit field at offset $13 if it is
+            ; nonzero, else the 32-bit one at offset $20 (volumes over 65535
+            ; sectors). Kept big-endian in TOTALSEC.
+            LDD  #0
+            STD  TOTALSEC
+            LDA  DOSBUF+20
+            LDB  DOSBUF+19
+            STD  TOTALSEC+2
+            BNE  TS_DONE
+            LDA  DOSBUF+35
+            LDB  DOSBUF+34
+            STD  TOTALSEC
+            LDA  DOSBUF+33
+            LDB  DOSBUF+32
+            STD  TOTALSEC+2
+TS_DONE
+
+            ; FATLBA = RESSEC (the first FAT starts right after the
+            ; reserved sectors).
+            LDD  RESSEC
+            STD  FATLBA
+
+            ; ROOTLBA = RESSEC + NUMFATS*SECPERFAT (NUMFATS is always a
+            ; small integer -- 1 or 2 -- so a counted add-loop is simpler
+            ; than a general multiply), as a 32-bit sum. The counter lives in
+            ; memory (FATCNT), not in a register that is also part of the
+            ; accumulator: a counter in B would be clobbered by the very
+            ; arithmetic it is counting.
+            LDA  NUMFATS
+            STA  FATCNT
+            LDD  #0
+            LDW  RESSEC         ; Q = the running total, seeded with RESSEC
+FATLOOP     TST  FATCNT
+            BEQ  FATDONE
+            ADDW SECPERFAT
+            ADCD #0
+            DEC  FATCNT
+            BRA  FATLOOP
+FATDONE     STQ  ROOTLBA
+
+            ; ROOTDIRSEC = ROOTENTCNT*32/512 = ROOTENTCNT/16 exactly (a
+            ; 32-byte entry, 512-byte sector) -- four right shifts of the
+            ; 16-bit value instead of a divide.
+            LDD  ROOTENTCNT
+            LSRD
+            LSRD
+            LSRD
+            LSRD
+            STD  ROOTDIRSEC
+
+            ; DATALBA = ROOTLBA + ROOTDIRSEC
+            LDQ  ROOTLBA
+            ADDW ROOTDIRSEC
+            ADCD #0
+            STQ  DATALBA
+
+            ; TOTALCLUS = (TOTALSEC - DATALBA) >> SPCSHIFT, capped at what a
+            ; FAT16 volume can number ($FFF4 clusters). MAXCLUS = TOTALCLUS+2
+            ; (clusters are numbered from 2) is ALLOC_CLUSTER's scan bound, and
+            ; is also capped by what the FAT sectors can hold.
+            LDA  SPCSHIFT
+            STA  MULCNT
+            LDQ  TOTALSEC
+            SUBW DATALBA+2
+            SBCD DATALBA
+TCLOOP      TST  MULCNT
+            BEQ  TCDONE
+            LSRD
+            RORW
+            DEC  MULCNT
+            BRA  TCLOOP
+TCDONE      TSTD
+            BNE  TC_CAP
+            CMPW #$FFF4
+            BLS  TC_STORE
+TC_CAP      LDW  #$FFF4
+TC_STORE    STW  TOTALCLUS
+            TFR  W,D
+            ADDD #2
+            STD  MAXCLUS
+            LDD  SECPERFAT      ; entries the FAT can hold: SECPERFAT*256
+            TSTA
+            BNE  MC_OK          ; 256+ FAT sectors: more than the cap anyway
+            TFR  B,A
+            CLRB
+            CMPD MAXCLUS
+            BHS  MC_OK
+            STD  MAXCLUS
+MC_OK
+
+            ; Install the resident file API in the BIOS's DOS call table, in
+            ; function-code order, then start the first program: the shell
+            ; (/SHELL.COM), or on a disk without one, BASIC. Never returns.
+            LDX  #DOS_ENTRIES
+            LDY  JT_BASE
+            LDW  #NUM_DOS_JT*2
+            TFM  X+,Y+
+            JMP  RUN_STARTUP
+; The resident API's entry points, in function-code order (bios/defines.d,
+; B_FOPEN_NAME upward): the start-up copies this table into the BIOS's JT_DOS.
+DOS_ENTRIES FDB  DOS_OPEN       ; $13 B_FOPEN_NAME
+            FDB  DOS_READLINE   ; $14 B_READLINE
+            FDB  DOS_WRITELINE  ; $15 B_WRITELINE
+            FDB  DOS_CLOSE      ; $16 B_FCLOSE_NAME
+            FDB  DOS_OPENDIR    ; $17 B_OPENDIR
+            FDB  DOS_READDIR    ; $18 B_READDIR
+            FDB  DOS_KILL       ; $19 B_KILL_NAME
+            FDB  DOS_RENAME     ; $1A B_RENAME_NAME
+            FDB  DOS_FGETC      ; $1B B_FGETC
+            FDB  DOS_FPUTC      ; $1C B_FPUTC
+            FDB  DOS_FREAD      ; $1D B_FREAD
+            FDB  DOS_FWRITE     ; $1E B_FWRITE
+            FDB  DOS_FSEEK      ; $1F B_FSEEK_NAME
+            FDB  DOS_FSTAT      ; $20 B_FSTAT_NAME
+            FDB  DOS_FFLUSH     ; $21 B_FFLUSH
+            FDB  DOS_MKDIR      ; $22 B_MKDIR
+            FDB  DOS_RMDIR      ; $23 B_RMDIR
+            FDB  DOS_CHDIR      ; $24 B_CHDIR
+            FDB  DOS_GETCWD     ; $25 B_GETCWD
+            FDB  DOS_CLOSEDIR   ; $26 B_CLOSEDIR
+            FDB  DOS_STAT       ; $27 B_STAT
+            FDB  DOS_VERSION    ; $28 B_DOS_VERSION
+            FDB  DOS_EXEC       ; $29 B_EXEC
+            FDB  DOS_ARGS       ; $2A B_ARGS
+            FDB  DOS_EXIT       ; $2B B_EXIT
+            FDB  DOS_PATH       ; $2C B_PATH
+DOS_ENTRIES_END
+    IFNE (DOS_ENTRIES_END-DOS_ENTRIES)-2*NUM_DOS_JT
+    ERROR "DOS_ENTRIES must have one entry per DOS call (see defines.d)"
+    ENDC
+PATH_DEFAULT FCC "/CMD"
+            FCB  0
+    IFGT *-(SLOTBUFS+512)
+    ERROR "the start-up code must fit in the first file buffer"
+    ENDC
+DOSBUF        equ  SLOTBUFS+NSLOTS*512 ; directory / boot sectors (512)
 FATBUF        equ  DOSBUF+512   ; the cached FAT sector (512)
-SLOTBUFS      equ  FATBUF+512   ; per-file sector buffers: NSLOTS x 512
-DOS_END       equ  SLOTBUFS+NSLOTS*512
+DOS_END       equ  FATBUF+512
+    IFGT DOS_END-$3400
+    ERROR "DOS must end below $3400, where programs load"
+    ENDC
 ;------------------------------------------------------------------------------
 ; End of dos.asm
 ;------------------------------------------------------------------------------

@@ -5,6 +5,7 @@ plan is in [`DESIGN.md`](DESIGN.md). What exists so far:
 
 | | |
 |---|---|
+| `CC.COM` | the driver: compiles, assembles and links, running the others (`cc.asm`) |
 | `CPP.COM` | the C preprocessor (`cpp.asm`) |
 | `CC1.COM` | the compiler proper: preprocessed C to assembly language for `ASM.COM` (`cc1*.asm`) |
 | `/LIB` | the start-up code, `CRT0.O`, the library, `LIBC.A`, and `CC.SCR`, LINK's script for a C program (`lib/`) |
@@ -17,18 +18,39 @@ they were built.
 
 ## Compiling a program
 
-Until `CC.COM` (the driver, phase 4) runs the four steps itself, they're four commands:
+```
+CC hello.c
+HELLO
+```
+
+```
+CC [-c|-S|-E] [-o out] [-v] [-I dir] [-D name[=val]] [-U name] [-b bank]
+   [-L dir] [-l lib] file...
+```
+
+CC runs CPP, CC1, ASM and LINK in turn, each as a child (it waits, and goes on from where it
+was), and stops at the first that fails. A `.c` file is preprocessed, compiled and assembled;
+a `.asm` (or `.s`) file is assembled; anything else (a `.o`, a library) goes to LINK as it
+is. The program is the first file's name with `.COM`, or `-o`'s.
+
+- `-c` stops at the `.O` files, `-S` at the `.ASM`, `-E` at the `.I` (with `-o`, for one
+  file). Otherwise the files made on the way (in the current directory: the source's name
+  with `.I`, `.ASM`, `.O`) are deleted once used.
+- `-I`, `-D` and `-U` are CPP's; `-b N` is CC1's (see "Banked code"); `-L` and `-l` are LINK's.
+  `/LIB`, `CRT0.O` and `-lc` are always there.
+- `-v` shows each command as it's run.
+- The tools are looked for in the current directory, then along the search path (`PATH`).
+
+Each stage stops at its first error (CPP goes on to the end of the file and counts them), says
+`FILE:LINE: error: what`, and leaves no output file. CC's exit code is 0, or 1 if something
+failed. The four steps by hand:
 
 ```
 CPP hello.c
 CC1 hello.i
 ASM -f obj hello.asm
 LINK -f com -o HELLO.COM -s /lib/cc.scr -L /lib /lib/crt0.o hello.o -lc
-HELLO
 ```
-
-Each stage stops at its first error (CPP goes on to the end of the file and counts them), says
-`FILE:LINE: error: what`, and leaves no output file.
 
 ## CPP
 
@@ -56,7 +78,7 @@ become a space, and `#include`, `#define` (object-like and function-like, with `
 ## CC1
 
 ```
-CC1 [-o out] file
+CC1 [-o out] [-b bank] file
 ```
 
 CC1 reads a `.I` and writes its `.ASM`: lwasm's syntax, with `SECTION`, `EXPORT` and `IMPORT`,
@@ -122,6 +144,35 @@ there is one. The block must keep U, Y, S and DP. CPP has been through it alread
 macros expand there, and its comments should be C's (`;` comments may hold a `'`, which CPP
 reads as a character constant).
 
+### Banked code
+
+A program can have more code than its 47KB: `#pragma bank N` (N from 1 to 15) puts the
+functions after it in overlay N, until another `#pragma bank` (`#pragma bank 0` is fixed code
+again). `CC -b N` (CC1's `-b N`) does it for a whole file.
+
+```c
+#pragma bank 1
+int level_one(int x) { return x * 2; }   /* in overlay 1 */
+#pragma bank 0
+int main(void) { return level_one(21); }  /* fixed code */
+```
+
+- Each overlay is up to 12KB of code, linked to run at `$C000` (bank 3, the window). Its data,
+  strings and statics stay in fixed memory, so anything can use them.
+- A banked function `f` has a stub in fixed memory under its own name: `LDB #N` / `LDX
+  #__b_f` / `JMP __farcall`. Calls, and pointers to `f`, go through it; a call from code in the
+  same overlay goes straight to the body. `__farcall` (`lib/farcall.asm`) keeps the return
+  address and the window's page on a side stack of its own, maps the overlay's page, calls the
+  body, and maps the caller's back: every argument and result (a `long` too) passes through.
+  Each far call costs two `B_BANK_SET`s.
+- LINK writes the overlays after the program's body (`EXE_MORE`). When the program starts,
+  `farcall.asm`'s part of CRT0 moves the stack below `$C000` (bank 3 can't be remapped while
+  the stack is in it), reads each overlay into a page of its own, and frees them at `exit()`.
+  So with overlays, the fixed part (code, data, bss and the heap's start) must end below
+  `$C000`.
+- An `interrupt` function can't be banked. Code that maps bank 3 itself shouldn't call banked
+  code while it does.
+
 ## The library
 
 | Header | Functions |
@@ -132,6 +183,8 @@ reads as a character constant).
 | `<stdlib.h>` | `malloc` `free` `calloc` `realloc` `sbrk` `atoi` `atol` `abs` `labs` `rand` `srand` `exit` |
 | `<stdarg.h>` | `va_list`, `va_start`, `va_arg` and `va_end`, for writing variadic functions |
 | `<stddef.h>`, `<limits.h>` | `size_t`, `ptrdiff_t`, `NULL`; the integer types' limits |
+| `<pug/sys.h>` | `spawn(path, tail)`: runs a program as a child (DOS's `B_EXEC` with `EXEC_CHILD`) and goes on when it ends -> its exit code, or -1 |
+| `<pug/bank.h>` | data in banked RAM: `page_alloc` `page_free` `bank_get` `bank_map`; `far_read` `far_write` `far_peek` `far_poke` (a page and an offset in it, copied through `B_PAGE_COPY` whatever the banks show) |
 
 - **printf** does `%d %i %u %x %X %o %c %s %p %%`, with `-` and `0`, a width (digits or `*`),
   a precision (`.n` or `.*`: the most characters of a `%s`, the fewest digits of a number), and
@@ -148,8 +201,11 @@ reads as a character constant).
   blocks next to it. The heap runs from the end of the program up to 512 bytes below the stack,
   which starts at `$EFFF`.
 - **rand** is a 16-bit xorshift (period 65535), from 0 to 32767.
-- **exit** ends the program. DOS closes its files, which writes out what they hold. The status
-  isn't passed on yet (that comes with `B_SPAWN`).
+- **exit** ends the program. DOS closes its files, which writes out what they hold. The
+  status's low byte is the exit code: the program that ran this one with `spawn()` gets it.
+- **spawn** runs the child in pages of its own: when it ends, the caller's memory (banks 1 to 3,
+  and its part of bank 0, `$3400-$3FFF`) is as it was, and the child's open files are closed.
+  Pages the child allocated itself are not freed. Children can be four deep.
 
 A program that only prints links in only what it uses: "hello" with `printf` is about 1.5KB.
 
@@ -190,9 +246,11 @@ string as `FCB` bytes.)
 
 ## Sections
 
-`CC.SCR` places these, in this order, from `$3400`: `init` (CRT0, so it comes first),
-`code`, `rodata` (CC1's strings), `data` (initialized globals), `bss` (the rest) and `heap`
-(CRT0's, empty, so the heap starts after everything). Code that the program, the library or an
+`CC.SCR` places these, in this order, from `$3400`: `init`, `init_ovl` and `init_end`
+(CRT0's start, so it comes first; `init_ovl` is `farcall.asm`'s, for overlays, and they fall
+through), `code`, `fini`, `fini_ovl` and `fini_end` (`exit()`, the same way), `rodata` (CC1's
+strings), `data` (initialized globals), `bss` (the rest) and `heap` (CRT0's, empty, so the
+heap starts after everything). Then `ovl1` to `ovl15`, each at `$C000`: banked code. Code that the program, the library or an
 assembly module adds must be in one of these sections, because the script places no others. As
 lwlink does, LINK reads `-l` libraries before the files, so the library's `code` comes before
 the program's. Only `init`'s place is fixed.
@@ -216,11 +274,14 @@ code and 13KB of buffers); a function's locals go when it ends.
   as above, runs them and compares what they print with their `.out` files. It also compares
   CPP's output with the `.i` files (the standard's macro examples; includes and line numbers),
   checks that lwasm makes the same object file from CC1's assembly as ASM does, and checks the
-  error messages for programs that must fail, and that they leave no output.
+  error messages for programs that must fail, and that they leave no output. CC.COM builds a
+  program from C and assembly files (and `-c`, `-S`, `-E`, and a failure, tidied up);
+  `spawn` runs children four deep, the caller's memory and their exit codes checked; a program
+  with code in three overlays runs, and gives its pages back; `<pug/bank.h>`'s calls.
 - `simulator/tests/test_libc.cpp` runs programs written in assembly by the calling convention
   (`test_libc/*.asm`), which ASM and LINK build on the emulated machine. It checks their output
   and the files they leave: printf's conversions, the string, ctype and stdlib functions,
   malloc's reuse and joining of blocks, text and binary files, `argv`, and typed input.
-- `test_asmlink.cpp`'s `asm_rebuilds_every_program_from_the_demo_disk_sources` rebuilds CPP,
-  CC1 and the library from `/ASM/CC` and `/ASM/LIBC` on the Pugputer. Every file must match
+- `test_asmlink.cpp`'s `asm_rebuilds_every_program_from_the_demo_disk_sources` rebuilds CC,
+  CPP, CC1 and the library from `/ASM/CC` and `/ASM/LIBC` on the Pugputer. Every file must match
   the one built on the PC.

@@ -100,13 +100,17 @@ START       LDS  #STACKTOP
             LBEQ DOEXTRACT
             JMP  DOBUILD
 ; The end: every file closed (a new archive not finished deleted).
-QUIT        JSR  CLOSEALL
+QUIT        CLRB                       ; (the exit code: 0)
+QUITB       PSHS B
+            JSR  CLOSEALL
+            PULS B
             LDA  #B_EXIT
             SWI2
 ; X = a message: printed, and everything given up.
 FATAL       JSR  PRINTS
             JSR  PRINTNL
-            BRA  QUIT
+            LDB  #1
+            BRA  QUITB
 CLOSEALL    TST  <AROPEN
             BEQ  CA_IN
             CLR  <AROPEN
@@ -284,7 +288,8 @@ SO_D        CMPA #'d'                  ; (lwar's debug: accepted, ignored)
             RTS
 USAGE       LDX  #M_USAGE
             JSR  PRINTS
-            JMP  QUIT
+            LDB  #1
+            JMP  QUITB
 ; X -> Y: a word (to a space or the end), at most PATHMAX characters.
 GETWORD     LDB  #PATHMAX
 GW_LOOP     LDA  ,X

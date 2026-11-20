@@ -63,17 +63,15 @@ Pugputer, byte for byte as they were built.
                  LINK -f com -o PROG.COM -s /lib/cc.scr -L /lib
                       /lib/crt0.o prog.o -lc
 
-  CC/          the C compiler (in /CMD): CPP, the preprocessor, and CC1, the
-               compiler proper (the headers are in /INCLUDE):
+  CC/          the C compiler (in /CMD): CC, the driver, CPP, the preprocessor,
+               and CC1, the compiler proper (the headers are in /INCLUDE):
                  CD CC
+                 ASM -o CC.COM cc.asm
                  ASM -o CPP.COM cpp.asm
                  ASM -o CC1.COM cc1.asm    (it takes a minute or so)
                A C program is compiled and linked with
-                 CPP prog.c
-                 CC1 prog.i
-                 ASM -f obj prog.asm
-                 LINK -f com -o PROG.COM -s /lib/cc.scr -L /lib
-                      /lib/crt0.o prog.o -lc
+                 CC prog.c
+               which runs CPP, CC1, ASM and LINK in turn (CC -v shows them).
 
 These programs carry their own program header, so ASM's usual (raw) output,
 named .COM, is the program. Add -l for a listing (-s adds the symbols).

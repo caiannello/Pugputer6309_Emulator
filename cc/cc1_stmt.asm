@@ -482,7 +482,7 @@ M_CONTOUT   FCN  "continue outside a loop"
 ST_ASM      JSR  ASMBLOCK
             JMP  NEXT
 ; TOK = asm (nothing looked ahead at: the text after it is read here).
-ASMBLOCK    LDA  #SEC_CODE
+ASMBLOCK    LDA  <FUNCSECT             ; (code, or a function's ovlN)
             JSR  SECT
             JSR  SKIPBLANK
             BCS  AB_EOF

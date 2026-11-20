@@ -119,6 +119,8 @@ SECT        TSTA
             PSHS D,X
             LDX  #S_SECTION
             BSR  EMITI
+            CMPA #SEC_OVL              ; ovlN
+            BHS  SN_OVL
             LDX  #SECTNAMES
             DECA
             LDB  #7
@@ -128,6 +130,15 @@ SECT        TSTA
             JSR  OUTNL
             PULS D,X
 SN_RET      RTS
+SN_OVL      LDX  #S_OVL
+            JSR  OUTS
+            SUBA #SEC_OVL-1
+            TFR  A,B
+            CLRA
+            JSR  OUTDEC
+            JSR  OUTNL
+            PULS D,X,PC
+S_OVL       FCN  "ovl"
 SECTNAMES   FCB  'c','o','d','e',0,0,0
             FCB  'r','o','d','a','t','a',0
             FCB  'd','a','t','a',0,0,0
@@ -1473,7 +1484,23 @@ GL_FUNC     LDX  N_L,X                 ; what's called
             BNE  GL_PTR
             JSR  OPND
             BCS  GL_ANY
-            LDA  #OM_EXT
+            LDX  <OPS                  ; (in the same bank as this function:
+            BEQ  GL_EXTJ               ; its body, __b_f, directly)
+            LDA  SY_FL,X
+            BITA #SF_BANKED
+            BEQ  GL_EXTJ
+            LDA  SY_VAL+1,X
+            ADDA #SEC_OVL-1
+            CMPA <FUNCSECT
+            BNE  GL_EXTJ
+            PSHS X
+            LDX  #S_JSR
+            JSR  EMITI
+            PULS X
+            JSR  OUTBODY
+            JSR  OUTNL
+            BRA  GL_POP
+GL_EXTJ     LDA  #OM_EXT
             STA  <OPM
             BRA  GL_JSR
 GL_PTR      JSR  OPNDW                 ; a pointer variable: JSR [p]

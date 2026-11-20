@@ -1,9 +1,9 @@
 // Builds basic309/disk.img: a fresh FAT16 disk image (see
 // pugputer/fat16_image.hpp) containing dos/dos.bin in its reserved
 // sectors (loaded by bios/sdcard.asm's SD_BOOT_TRY) and, in /CMD, SHELL.COM,
-// EDIT.COM, ASM.COM, LINK.COM, AR.COM, CPP.COM, CC1.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM,
+// EDIT.COM, ASM.COM, LINK.COM, AR.COM, CC.COM, CPP.COM, CC1.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM,
 // SONGKIT.COM and SONGPLAY.COM (shell/shell.bin, edit/edit.bin, asmlink/asm.bin,
-// asmlink/link.bin, asmlink/ar.bin, cc/cpp.bin, cc/cc1.bin, utils/hexdump.bin, utils/move.bin
+// asmlink/link.bin, asmlink/ar.bin, cc/cc.bin, cc/cpp.bin, cc/cc1.bin, utils/hexdump.bin, utils/move.bin
 // and gamekit/build/{tilekit,songkit,songplay}.bin as
 // assembled -- they carry their own
 // program headers), TILEKIT.INI (TILEKIT's default palettes, gamekit/TILEKIT.INI) and
@@ -19,7 +19,7 @@
 //   mkdiskimg --dos path/to/dos.bin --basic path/to/exbasrom309.s19
 //             --shell path/to/shell.bin --edit path/to/edit.bin
 //             --asm path/to/asm.bin --link path/to/link.bin --ar path/to/ar.bin
-//             --cpp path/to/cpp.bin --cc1 path/to/cc1.bin
+//             --cc path/to/cc.bin --cpp path/to/cpp.bin --cc1 path/to/cc1.bin
 //             --hexdump path/to/hexdump.bin --move path/to/move.bin
 //             --tilekit path/to/tilekit.bin --songplay path/to/songplay.bin
 //             --songkit path/to/songkit.bin
@@ -132,6 +132,7 @@ int main(int argc, char** argv) {
                                      {"--asm", ASM_BIN_DEFAULT, "ASM.COM"},
                                      {"--link", LINK_BIN_DEFAULT, "LINK.COM"},
                                      {"--ar", AR_BIN_DEFAULT, "AR.COM"},
+                                     {"--cc", CC_BIN_DEFAULT, "CC.COM"},
                                      {"--cpp", CPP_BIN_DEFAULT, "CPP.COM"},
                                      {"--cc1", CC1_BIN_DEFAULT, "CC1.COM"},
                                      {"--hexdump", HEXDUMP_BIN_DEFAULT, "HEXDUMP.COM"},

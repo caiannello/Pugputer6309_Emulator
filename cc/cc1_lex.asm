@@ -312,7 +312,24 @@ DL_END      CLR  ,X
             LDA  ,X
             JSR  ISDIGIT
             BCC  DL_NUM
+            LDY  #S_PRAGMA             ; #pragma bank N: the functions after it
+            JSR  PREFIX                ; are banked code, in ovlN (0: fixed)
+            BNE  DL_RET
+            JSR  SKIPSP
+            LDY  #S_BANK
+            JSR  PREFIX
+            BNE  DL_RET
+            JSR  SKIPSP
+            LDA  ,X
+            JSR  ISDIGIT
+            BCS  DL_BADBANK
+            JSR  GETDEC
+            CMPD #15
+            BHI  DL_BADBANK
+            STB  <BANKNO
             RTS
+DL_BADBANK  LDX  #M_BADBANK
+            JMP  ERROR
 DL_NUM      JSR  SKIPSP
             LDA  ,X
             JSR  ISDIGIT
@@ -799,6 +816,9 @@ M_BADCHR    FCN  "invalid character constant"
 M_UNTSTR    FCN  "unterminated string"
 M_LONGSTR   FCN  "string too long"
 S_LINE      FCN  "line"
+S_PRAGMA    FCN  "pragma"
+S_BANK      FCN  "bank"
+M_BADBANK   FCN  "#pragma bank needs a number from 0 to 15"
 ;------------------------------------------------------------------------------
 ; End of cc1_lex.asm
 ;------------------------------------------------------------------------------

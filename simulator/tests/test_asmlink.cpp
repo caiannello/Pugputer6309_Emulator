@@ -358,9 +358,9 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
                 CHECK(same("/ASM/LIBC/LIBC.A", std::string(f.data.begin(), f.data.end()), m.file("/ASM/LIBC/LIBC.A")));
         m.run("CD /ASM/ASMLINK"); // (where the rest expects to be)
     }
-    // The C compiler's two programs.
+    // The C compiler's programs.
     m.run("CD /ASM/CC");
-    for (const char* prog : {"cpp", "cc1"}) {
+    for (const char* prog : {"cc", "cpp", "cc1"}) {
         std::string cmd = std::string("ASM -o ") + upper(prog) + ".COM " + prog + ".asm";
         CHECK(m.run(cmd).find("ERROR") == std::string::npos);
         std::string built = "/ASM/CC/" + upper(prog) + ".COM";
