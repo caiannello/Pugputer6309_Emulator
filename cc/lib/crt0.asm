@@ -8,9 +8,13 @@
 ; exit(main(argc, argv)).
 ;
 ; The start is two sections, init and init_end, and exit() two, fini and
-; fini_end: CC.SCR places init_ovl and fini_ovl between them, which are empty
-; unless libc's farcall.asm (banked code) is linked. Each falls through to the
-; next. init_ovl gets B as DOS left it (a program with overlays: its file).
+; fini_end: CC.SCR places init_ovl and init_flt, and fini_ovl, between them,
+; which are empty unless libc's farcall.asm (banked code) or fltio.asm (printf's
+; and scanf's floats) is linked. Each falls through to the next. init_ovl gets
+; B as DOS left it (a program with overlays: its file).
+;
+; __pfhook and __sfhook (data) are where printf and scanf find their float
+; conversions: 0, unless fltio.asm's init_flt sets them.
 ;
 ; Arguments are separated by spaces; "double quotes" keep spaces in one.
 ; argv[0] is "" (DOS doesn't say what the program was called), and there are
@@ -21,7 +25,7 @@
 MAXARGS     equ  16
 ARGBUFSZ    equ  168               ; the tail (<= 80) with a NUL for each word
 STACKTOP    equ  $F000             ; (the first push goes to $EFFF)
-            EXPORT __start,_exit,__brk,__argc,__argv
+            EXPORT __start,_exit,__brk,__argc,__argv,__pfhook,__sfhook
             IMPORT _main
             IMPORT s_bss,l_bss,s_heap  ; (CC.SCR's synthetic symbols)
 ;------------------------------------------------------------------------------
@@ -94,6 +98,10 @@ _exit
             SWI2
             ENDSECT
 ;------------------------------------------------------------------------------
+            SECTION data
+__pfhook    FDB  0                     ; printf's %e %f %g (fltio.asm)
+__sfhook    FDB  0                     ; scanf's %e %f %g
+            ENDSECT
             SECTION bss
 __brk       RMB  2                     ; the heap's end (sbrk)
 __argc      RMB  2

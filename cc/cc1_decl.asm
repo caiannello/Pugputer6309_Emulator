@@ -9,6 +9,7 @@ SB_INT      equ  8
 SB_SIGNED   equ  16
 SB_UNS      equ  32
 SB_LONG     equ  64
+SB_FLOAT    equ  128               ; float or double (long double too)
 ; The whole file, a declaration at a time.
 PROGRAM     LDA  <TOK
             BEQ  PR_END
@@ -79,10 +80,8 @@ DS_NOTID    CMPA #K_STRUCT
             BEQ  DS_STRUCT
             CMPA #K_ENUM
             BEQ  DS_ENUM
-            CMPA #K_FLOAT
-            BEQ  DS_FLOAT
-            CMPA #K_DOUBLE
-            BEQ  DS_FLOAT
+            CMPA #K_BOOL
+            LBEQ DS_BOOL
 DS_END      TST  <SPANY
             BNE  DS_TYPE
             ORCC #1
@@ -90,7 +89,13 @@ DS_END      TST  <SPANY
 DS_TYPE     LDX  <SPTDEF               ; the type the words make
             BNE  DS_SET
             LDA  <SPBITS
-            LDX  #TYP_VOID
+            BITA #SB_FLOAT
+            BEQ  DS_NFLOAT
+            BITA #$FF-SB_FLOAT-SB_LONG
+            BNE  DS_BAD
+            LDX  #TYP_FLOAT
+            BRA  DS_SET
+DS_NFLOAT   LDX  #TYP_VOID
             BITA #SB_VOID
             BNE  DS_SET
             BITA #SB_CHAR
@@ -137,8 +142,10 @@ DS_ALONE    TST  <SPBITS               ; (with no other type)
             LDD  <SPTDEF
             BNE  DS_BAD
             RTS
-DS_FLOAT    LDX  #M_FLOAT
-            JMP  ERROR
+DS_BOOL     JSR  DS_ALONE              ; _Bool
+            JSR  NEXT
+            LDX  #TYP_BOOL
+            BRA  DS_SPEC
 DSTAB       FCB  K_TYPEDEF,1,SC_TYPEDEF
             FCB  K_INTERRUPT,3,0
             FCB  K_EXTERN,1,SC_EXTERN
@@ -154,6 +161,8 @@ DSTAB       FCB  K_TYPEDEF,1,SC_TYPEDEF
             FCB  K_SIGNED,2,SB_SIGNED
             FCB  K_UNSIGNED,2,SB_UNS
             FCB  K_LONG,2,SB_LONG
+            FCB  K_FLOAT,2,SB_FLOAT
+            FCB  K_DOUBLE,2,SB_FLOAT
             FCB  0
 ; Carry clear if the current token begins declaration specifiers. Keeps X.
 ISDECLSTART PSHS X
@@ -166,9 +175,7 @@ ISDECLSTART PSHS X
             BEQ  DK_YES
             CMPA #K_ENUM
             BEQ  DK_YES
-            CMPA #K_FLOAT
-            BEQ  DK_YES
-            CMPA #K_DOUBLE
+            CMPA #K_BOOL
             BEQ  DK_YES
             LDX  #DSTAB
 DK_FIND     TST  ,X
@@ -1134,7 +1141,7 @@ ISCALAR     PSHS D,X
             LDX  2,S
             JSR  TISCHAR
             BCC  IS_CHAR
-            JSR  TISLONG
+            JSR  TISQ
             BCC  IS_LONG
             TFR  Y,X
             JSR  EVALCONST
@@ -1156,7 +1163,7 @@ IS_CHAR     TFR  Y,X
             CLRA
             JSR  OUTDEC
             BRA  IS_NL
-IS_LONG     LDA  N_OP,Y                ; (a long: a number)
+IS_LONG     LDA  N_OP,Y                ; (a long or a float: a number)
             CMPA #O_NUM
             BNE  IN_NOTCONST
             LDX  #S_FDB
@@ -1768,23 +1775,21 @@ FF_TENT     PSHS X
 FF_NEXT     LDX  SY_NEXT,X
             BRA  FF_LOOP
 FF_HELP     LDX  #HELPNAMES
-            LDD  #1
+            CLRB
 FF_HLOOP    TST  ,X
             BEQ  FF_RET
-            PSHS D
-            ANDD <HELPERS
-            PULS D
+            JSR  HELPTEST
             BEQ  FF_HSKIP
-            PSHS D,X
+            PSHS B,X
             LDX  #S_IMPORT
             JSR  EMITI
-            LDX  2,S
+            LDX  1,S
             JSR  OUTS
             JSR  OUTNL
-            PULS D,X
+            PULS B,X
 FF_HSKIP    TST  ,X+
             BNE  FF_HSKIP
-            LSLD
+            INCB
             BRA  FF_HLOOP
 FF_RET      TST  <FARUSED            ; (the stubs')
             BEQ  FF_DONE
@@ -1793,7 +1798,18 @@ FF_RET      TST  <FARUSED            ; (the stubs')
             LDX  #S_FARCALL
             JSR  OUTS
             JSR  OUTNL
-FF_DONE     RTS
+FF_DONE     LDB  #H_FLTUSED            ; __fltused: referred to, or the object
+            JSR  HELPTEST              ; wouldn't name it (an IMPORT nothing
+            BEQ  FF_END                ; uses isn't written)
+            LDA  #SEC_RODATA
+            JSR  SECT
+            LDX  #S_FDB
+            JSR  EMITI
+            LDX  #S_FLTUSED
+            JSR  OUTS
+            JMP  OUTNL
+FF_END      RTS
+S_FLTUSED   FCN  "__fltused"
 ; X = a symbol: "NAME RMB size". Keeps X.
 RMBSYM      JSR  OUTSYMNAME
             PSHS X

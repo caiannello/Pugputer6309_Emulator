@@ -28,7 +28,8 @@ CO_END      JSR  NEXT
 CO_EOF      LDX  #M_EOFBLOCK
             JMP  ERROR
 ; One statement.
-STATEMENT   LDA  <TOK
+STATEMENT   JSR  STKCHK
+            LDA  <TOK
             LDX  #STMTAB
 ST_FIND     TST  ,X
             BEQ  ST_OTHER

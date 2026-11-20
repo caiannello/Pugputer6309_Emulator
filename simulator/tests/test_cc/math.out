@@ -1,0 +1,9 @@
+91 checked, 0 off
+floor 2 -3 -3 0
+ceil 3 -2 5 -0
+trunc 2 -2 round 3 -3 2 -0
+fabs 3.5 2 fmod 1.5 -1.5
+modf 0.75 3 frexp 0.75 6 ldexp 48 0.125
+sqrt 1.41421354 4 0 nan
+edges -inf nan inf 0 nan
+pi 3.1415927 3.1415927

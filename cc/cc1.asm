@@ -11,12 +11,15 @@
 ;     -b N      as if the file began with #pragma bank N: its functions are
 ;               banked code, in overlay N (section ovlN; 0: fixed code)
 ;     -T        (testing) the tokens instead, one a line
+;     -M        at the end, the least room the heap had (how close it came
+;               to "out of memory")
 ;
-; The C it takes: char, short, int, long, signed, unsigned, void, pointers,
-; arrays, functions with prototypes (and "..."), struct, union, enum, typedef,
-; extern and static, initializers, string literals, locals in any block, every
-; statement and every operator, asm { } and interrupt (not yet: bit-fields,
-; float, -9). The calling convention is cc/README.md's.
+; The C it takes: char, short, int, long, signed, unsigned, float and double
+; (the same: IEEE single), _Bool, void, pointers, arrays, functions with
+; prototypes (and "..."), struct, union, enum, typedef, extern and static,
+; initializers, string literals, locals in any block, every statement and
+; every operator, asm { } and interrupt (not yet: bit-fields, -9). The
+; calling convention is cc/README.md's.
 ;
 ; How it works: one top-level declaration at a time; a function one statement
 ; at a time. Each full expression is parsed to a tree (NODES, used again for
@@ -34,16 +37,18 @@
 DPAGE       equ  $3400             ; the direct page (not part of the file)
 PA_BASE     equ  $3500
 STACKTOP    equ  $F000
-STACKSZ     equ  3072              ; below STACKTOP: the stack; below that, the heap
+STACKSZ     equ  1536              ; below STACKTOP: the stack (a big program
+                                   ; needs 200 bytes, very deep nesting 800;
+                                   ; STKCHK stops it short); below, the heap
 NAMEMAX     equ  62                ; significant characters in a name
 PATHMAX     equ  79
-INBUFSZ     equ  512
-STRMAX      equ  1024              ; a string literal's bytes
+INBUFSZ     equ  256
+STRMAX      equ  512               ; a string literal's bytes
 NHASH       equ  256               ; name hash buckets (2 bytes each)
-MAXNODES    equ  500
+MAXNODES    equ  400
 OPSTKSZ     equ  384               ; declarator operations being collected
 PTMPSZ      equ  512               ; parameters being collected
-MAXCASES    equ  256
+MAXCASES    equ  128
 MAXLABELS   equ  64                ; goto labels in one function
 MAXDEPTH    equ  32                ; nested scopes
 ;------------------------------------------------------------------------------
@@ -110,11 +115,13 @@ K_VOLATILE  equ  $BE
 K_WHILE     equ  $BF
 K_ASM       equ  $C0
 K_INTERRUPT equ  $C1
-K_LAST      equ  $C1
+K_BOOL      equ  $C2               ; _Bool
+K_LAST      equ  $C2
 TF_UNS      equ  1                 ; a number's suffix: u
 TF_LONG     equ  2                 ; l
 TF_NDEC     equ  4                 ; written in hex or octal
 TF_CHAR     equ  8                 ; a character constant
+TF_FLT      equ  16                ; a floating constant (TOKV: its bits)
 ;------------------------------------------------------------------------------
 ; A name (interned: one record per spelling):
 NM_NEXT     equ  0                 ; the next in its hash bucket
@@ -139,12 +146,14 @@ TK_INT      equ  4                 ; (short too)
 TK_UINT     equ  5
 TK_LONG     equ  6
 TK_ULONG    equ  7
-TK_PTR      equ  8
-TK_ARRAY    equ  9
-TK_FUNC     equ  10
-TK_STRUCT   equ  11                ; (and union: TYF_UNION)
+TK_FLOAT    equ  8                 ; float, double (in Q, as a long is)
+TK_PTR      equ  9                 ; (TISSCALAR: TK_CHAR to TK_PTR)
+TK_ARRAY    equ  10
+TK_FUNC     equ  11
+TK_STRUCT   equ  12                ; (and union: TYF_UNION)
 TYF_NOSIZE  equ  1                 ; an array of no size given (yet), a struct
 TYF_UNION   equ  2                 ; not defined (yet)
+TYF_BOOL    equ  4                 ; _Bool (TK_UCHAR: values made 0 or 1)
 ; A struct's or union's member:
 ME_NEXT     equ  0
 ME_NAME     equ  2
@@ -274,6 +283,8 @@ DP_VP       SET  DPAGE
             DVAR MQ,4
             DVAR MSIGN,1
             DVAR TESTTOK,1             ; -T
+            DVAR SHOWMEM,1             ; -M
+            DVAR HEAPMIN,2             ; the least room between HEAPLO and HEAPHI
             DVAR OUTON,1
             DVAR INH,1                 ; the input
             DVAR INPOS,2
@@ -351,8 +362,12 @@ DP_VP       SET  DPAGE
             DVAR CVVAL,2               ; value or offset
             DVAR EXPECTED,1            ; the token EXPECT wanted
             DVAR FRMLBL,2              ; the label EQU'd to the frame's size
-            DVAR HELPERS,2             ; the library's helpers used (bit n: the
-                                       ; n'th of HELPNAMES, from bit 0 of +1)
+            DVAR HELPERS,4             ; the library's helpers used (bit n: the
+                                       ; n'th of HELPNAMES, from bit 0 of +3)
+            DVAR FLM,4                 ; a floating constant: its digits
+            DVAR FLE,2                 ; and the power of ten they're times
+            DVAR FLX,2                 ; (its exponent part)
+            DVAR FLOCT,1               ; an 8 or 9 in an octal number
             DVAR IMODE,1               ; an initializer: 0 data, 1 code (n,U)
             DVAR IBASE,2               ; code: the object's place (n,U)
             DVAR IDONE,2               ; its bytes done so far
@@ -388,10 +403,16 @@ START       LDS  #STACKTOP
             LDY  #VARS
             LDW  #VARSEND-VARS
             TFM  X,Y+
+            LDX  #FILLB                ; the stack's room marked (for -M)
+            LDY  #STACKTOP-STACKSZ
+            LDW  #STACKSZ-64
+            TFM  X,Y+
             LDD  #HEAPBASE
             STD  <HEAPLO
             LDD  #STACKTOP-STACKSZ
             STD  <HEAPHI
+            SUBD #HEAPBASE
+            STD  <HEAPMIN
             LDD  #CASES
             STD  <CASEP
             LDD  #OPSTK
@@ -430,6 +451,38 @@ ST_OUT      LDA  #1
             JSR  TOKDUMP
             BRA  ST_END
 ST_COMPILE  JSR  PROGRAM
+            TST  <SHOWMEM
+            BEQ  ST_END
+            LDX  #M_HEAP1              ; -M: "heap: N of M bytes free at least"
+            JSR  PRINTS
+            LDD  <HEAPMIN
+            JSR  PRINTDEC
+            LDX  #M_HEAP2
+            JSR  PRINTS
+            LDD  #STACKTOP-STACKSZ-HEAPBASE
+            JSR  PRINTDEC
+            LDX  #M_HEAP3
+            JSR  PRINTS
+            LDX  #STACKTOP-STACKSZ     ; ", stack: N of M used at most"
+SM_FIND     LDA  ,X+
+            CMPA FILLB
+            BEQ  SM_FIND
+            TFR  X,D
+            PSHS D
+            LDD  #STACKTOP+1
+            SUBD ,S++
+            PSHS D
+            LDX  #M_STACK1
+            JSR  PRINTS
+            PULS D
+            JSR  PRINTDEC
+            LDX  #M_HEAP2
+            JSR  PRINTS
+            LDD  #STACKSZ
+            JSR  PRINTDEC
+            LDX  #M_STACK2
+            JSR  PRINTS
+            JSR  PRINTNL
 ST_END      CLR  <OUTON
             LDU  #OUTSTRM
             JSR  SCLOSE
@@ -503,7 +556,11 @@ CL_NEXT     JSR  SKIPSP
             BEQ  CL_TEST
             CMPA #'b'
             BEQ  CL_BANK
+            CMPA #'M'
+            BEQ  CL_MEM
             BRA  USAGE
+CL_MEM      INC  <SHOWMEM
+            BRA  CL_NEXT
 CL_BANK     JSR  OPTARG
             JSR  GETDEC                ; -b N: #pragma bank N
             CMPD #15
@@ -594,7 +651,14 @@ ALLOC       PSHS D
             CMPD <HEAPHI
             BHI  AL_FULL
             STD  <HEAPLO
-AL_CLEAR    PSHS X,Y
+AL_CLEAR    PSHS D
+            LDD  <HEAPHI               ; (the least room yet)
+            SUBD <HEAPLO
+            CMPD <HEAPMIN
+            BHS  AL_MIN
+            STD  <HEAPMIN
+AL_MIN      PULS D
+            PSHS X,Y
             TFR  X,Y
             LDX  #ZERO
             LDW  4,S
@@ -621,6 +685,9 @@ TALLOC      PSHS D
     INCLUDE cc1_expr.asm
     INCLUDE cc1_gen.asm
     INCLUDE cc1_long.asm
+    INCLUDE cc1_flt.asm
+FP_NOLIB    equ  1                     ; (only what CC1 needs of it)
+    INCLUDE fpcore.asm
     INCLUDE pa_util.asm
     INCLUDE pa_strm.asm
 ;------------------------------------------------------------------------------
@@ -632,6 +699,12 @@ M_WRITEERR  FCN  "Cannot write the output (disk full?)"
 M_ERRPFX    FCN  ": error: "
 M_QUOTE1    FCB  ' ',$27,0
 M_NOMEM     FCN  "out of memory"
+M_HEAP1     FCN  "CC1: heap: "
+M_HEAP2     FCN  " of "
+M_HEAP3     FCN  " bytes free at least"
+M_STACK1    FCN  "; stack: "
+M_STACK2    FCN  " used at most"
+FILLB       FCB  $A5
 EXT_ASM     FCN  ".ASM"
 ;------------------------------------------------------------------------------
 PA_END      equ  *

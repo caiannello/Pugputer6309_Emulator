@@ -53,7 +53,7 @@ set(HD6309_TEST_SOURCES
 )
 
 if(EXISTS "${LWASM_EXE}")
-    list(APPEND HD6309_TEST_SOURCES test_asm_golden.cpp)
+    list(APPEND HD6309_TEST_SOURCES test_asm_golden.cpp test_float.cpp)
     set(HD6309_HAVE_LWASM 1)
 else()
     set(HD6309_HAVE_LWASM 0)
@@ -67,6 +67,7 @@ target_compile_definitions(hd6309_tests PRIVATE
     LWASM_EXE_PATH="${LWASM_EXE}"
     HD6309_TEST_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test_asm"
     HD6309_TEST_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}/asm_out"
+    FPCORE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../cc/lib"
 )
 
 add_test(NAME hd6309_tests COMMAND hd6309_tests)

@@ -85,9 +85,10 @@ inline bool c_library_files(const std::string& repo, std::vector<Fat16File>& out
 }
 
 // The C headers (cc/include), as /INCLUDE/NAME.H: where CPP looks for them.
-inline const char* const kCHeaders[] = {"stddef.h", "stdio.h", "string.h", "ctype.h",
-                                        "stdlib.h", "limits.h", "stdarg.h", "pug/sys.h", "pug/bank.h",
-                                        "pug/video.h", "pug/input.h", "pug/sound.h"};
+inline const char* const kCHeaders[] = {"stddef.h", "stdio.h", "string.h", "ctype.h", "stdlib.h",
+                                        "limits.h", "stdarg.h", "stdbool.h", "stdint.h", "float.h", "math.h",
+                                        "pug/sys.h", "pug/bank.h", "pug/video.h", "pug/input.h",
+                                        "pug/sound.h"};
 
 inline bool c_header_files(const std::string& repo, std::vector<Fat16File>& out, std::string& error) {
     for (const char* name : kCHeaders) {

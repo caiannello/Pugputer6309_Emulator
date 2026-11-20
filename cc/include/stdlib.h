@@ -15,6 +15,8 @@ void *realloc(void *p, size_t n);
 void *sbrk(int n);
 int atoi(const char *s);
 long atol(const char *s);
+double atof(const char *s);
+double strtod(const char *s, char **end);
 int abs(int n);
 long labs(long n);
 int rand(void);

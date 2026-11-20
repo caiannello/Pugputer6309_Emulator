@@ -1,13 +1,15 @@
 # CC.SCR: LINK's script for a C program (crt0.o first, then the program's
 # objects, then -lc): a .COM loading at $3400, the sections in this order, the
 # heap (sbrk's) after them all. CRT0 uses s_bss, l_bss and s_heap. Its
-# start and exit() fall through init/fini, *_ovl and *_end (farcall.asm's,
-# for overlays). Banked code (CC1's #pragma bank N) is in ovlN: each at
-# $C000, the window, and LINK writes them after the program's body.
+# start and exit() fall through init/fini, *_ovl (farcall.asm's, for
+# overlays), init_flt (fltio.asm's: printf's floats) and *_end. Banked code
+# (CC1's #pragma bank N) is in ovlN: each at $C000, the window, and LINK
+# writes them after the program's body.
 define basesympat s_%s
 define lensympat l_%s
 section init load 3400
 section init_ovl
+section init_flt
 section init_end
 section code
 section fini

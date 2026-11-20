@@ -47,9 +47,9 @@ GENSADDR    JSR  GENADDR
 ;------------------------------------------------------------------------------
 ; Operands of longs.
 ;------------------------------------------------------------------------------
-; X = a node: carry clear if it is a long, used as it is (OPND), and (a
-; number) a long's (OPVH = its high word). Keeps X and Y.
-OPNDL       JSR  ISLONGN
+; X = a node: carry clear if it is a long (or a float), used as it is (OPND),
+; and (a number) a long's (OPVH = its high word). Keeps X and Y.
+OPNDL       JSR  ISQN
             BCS  OL_RET
             JSR  OPND
             BCS  OL_RET
@@ -234,6 +234,11 @@ GL_CAST     PSHS X                     ; (long) x
             LDX  N_L,X
             JSR  GEN
             LDX  ,S
+            LDX  N_L,X
+            JSR  ISFLTN
+            PULS X
+            LBCC FTOLONG               ; from a float: __ftol (__ftoul)
+            PSHS X
             LDX  N_L,X
             JSR  ISLONGN
             PULS X
@@ -538,6 +543,9 @@ GI2_POST    TST  <AGNEED
             INCB
             JSR  PUSHQ
 GI2_STEP    PSHS B
+            LDX  <AGNODE
+            JSR  ISFLTN
+            BCC  GI2_FLT
             LDX  #S_INCQ
             CMPA #O_PREINC
             BEQ  GI2_DO
@@ -545,7 +553,15 @@ GI2_STEP    PSHS B
             BEQ  GI2_DO
             LDX  #S_DECQ
 GI2_DO      JSR  EMITLINES
-            LDX  #S_STQ
+            BRA  GI2_ST
+GI2_FLT     LDB  #H_FINC               ; a float: __finc, __fdec
+            CMPA #O_PREINC
+            BEQ  GI2_FC
+            CMPA #O_POSTINC
+            BEQ  GI2_FC
+            INCB
+GI2_FC      JSR  CALLHELP
+GI2_ST      LDX  #S_STQ
             JSR  OPI
             PULS B
             TSTB

@@ -24,6 +24,18 @@ HELPNAMES   FCN  "__div"               ; the library's helpers, by number (the
             FCN  "__lshl"              ; 13
             FCN  "__lshr"
             FCN  "__lushr"
+            FCN  "__fadd"              ; 16 (cc1_flt.asm's H_*)
+            FCN  "__fsub"
+            FCN  "__fmul"
+            FCN  "__fdiv"
+            FCN  "__fcmp"              ; 20
+            FCN  "__ltof"
+            FCN  "__ultof"
+            FCN  "__ftol"
+            FCN  "__ftoul"
+            FCN  "__finc"              ; 25
+            FCN  "__fdec"
+            FCN  "__fltused"           ; 27 (only IMPORTed)
             FCB  0
 ;------------------------------------------------------------------------------
 ; Writing. These keep every register.
@@ -557,6 +569,8 @@ GEN         LDY  N_TYPE,X          ; longs and structs: cc1_long.asm
             LBEQ GENL
             CMPA #TK_ULONG
             LBEQ GENL
+            CMPA #TK_FLOAT
+            LBEQ GENF
             CMPA #TK_STRUCT
             LBEQ GENS
 GEN_DO      LDB  N_OP,X
@@ -611,10 +625,14 @@ G_CAST      PSHS X                     ; (type) x
             LDX  N_L,X
             JSR  GEN
             LDX  ,S                    ; from a long: its low word (a char
-            LDX  N_L,X                 ; widened)
-            JSR  ISLONGN
+            LDX  N_L,X                 ; widened); a float made a long first
+            JSR  ISQN
             BCS  GT_NLONG
-            LDX  #S_TFRWD
+            JSR  ISFLTN
+            BCS  GT_LOW
+            LDX  ,S
+            JSR  FTOLONG
+GT_LOW      LDX  #S_TFRWD
             JSR  EMITL
             PULS X
             LDX  N_TYPE,X
@@ -954,10 +972,15 @@ GENJUMP     LDB  N_OP,X
             PSHS X                     ; long's: D | W)
             JSR  GEN
             PULS X
-            JSR  ISLONGN
+            JSR  ISFLTN                ; (a float's: D | W, but not the sign)
+            BCS  GJ_NFLT
+            LDX  #S_ANDA7F
+            JSR  EMITL
+            BRA  GJ_ORR
+GJ_NFLT     JSR  ISLONGN
             LDX  #S_TSTD
             BCS  GJ_TST
-            LDX  #S_ORRWD
+GJ_ORR      LDX  #S_ORRWD
 GJ_TST      JSR  EMITL
             PULS A,Y
             LDX  #S_LBNE
@@ -987,7 +1010,7 @@ GJ_COMMA    PSHS A,X,Y
             JSR  GENVOID
             PULS A,X,Y
             LDX  N_R,X
-            BRA  GENJUMP
+            LBRA GENJUMP
 GJ_LAND     TSTA                       ; a && b
             BEQ  GJ_ANDF
             PSHS X,Y                   ; true: if !a skip; if b jump; skip:
@@ -1080,7 +1103,12 @@ BRUNSIGNED  FCN  "LBEQ"
 ; X = a comparison: the code comparing its two sides (CMPD). -> B = the
 ; comparison it makes (swapped, if the sides went the other way), CMPUNS =
 ; NF_UNS if it's unsigned.
-CMPGEN      PSHS X                     ; (longs: CMPL)
+CMPGEN      PSHS X                     ; (longs: CMPL, floats: CMPF)
+            LDX  N_L,X
+            JSR  ISFLTN
+            PULS X
+            LBCC CMPF
+            PSHS X
             LDX  N_L,X
             JSR  ISLONGN
             PULS X
@@ -1151,7 +1179,7 @@ GENASSIGN   LDY  N_TYPE,X
             LDB  TY_KIND,Y
             CMPB #TK_STRUCT
             LBEQ GS_ASSIGN
-            JSR  ISLONGN
+            JSR  ISQN
             LBCC GL_ASSIGN
             PSHS A,X
             LDX  N_L,X                 ; the left side as it is?
@@ -1201,7 +1229,9 @@ GN_RET      RTS
 ; x op= y: the right side first (pushed, unless it's a number), then where x
 ; is, x loaded, the operation, x stored. (From GENADDR's return on, nothing
 ; here makes code of a tree again, so AG* can hold what's needed.)
-GENASGOP    JSR  ISLONGN
+GENASGOP    JSR  ISFLTN
+            LBCC GF_ASGOP
+            JSR  ISLONGN
             LBCC GL_ASGOP
             PSHS A,X
             LDX  N_R,X
@@ -1368,16 +1398,8 @@ HJ_SHL      CMPA #O_SHL
 HJ_SHR      ADDB #5
 HJ_IDX
 ; B = a helper's number (HELPNAMES): JSR to it, and it's to be IMPORTed.
-CALLHELP    PSHS B
-            LDW  #1                    ; its bit in HELPERS
-HJ_BIT      TSTB
-            BEQ  HJ_SET
-            ADDR W,W
-            DECB
-            BRA  HJ_BIT
-HJ_SET      TFR  W,D
-            ORD  <HELPERS
-            STD  <HELPERS
+CALLHELP    BSR  HELPBIT
+            PSHS B
             LDX  #S_JSR
             JSR  EMITI
             LDX  #HELPNAMES            ; its name: the B'th
@@ -1390,8 +1412,34 @@ HJ_SKIP     TST  ,X+
             BRA  HJ_FIND
 HJ_NAME     JSR  OUTS
             JMP  OUTNL
+; B = a helper's number: its bit in HELPERS set (HELPBIT), or tested (HELPTEST:
+; Z clear if it's set). They keep B, X and Y.
+HELPBIT     PSHS B,X
+            BSR  HELPADDR
+            ORA  ,X
+            STA  ,X
+            PULS B,X,PC
+HELPTEST    PSHS B,X
+            BSR  HELPADDR
+            ANDA ,X
+            PULS B,X,PC
+HELPADDR    TFR  B,A                   ; -> X = its byte, A = its bit
+            LSRA
+            LSRA
+            LSRA
+            NEGA
+            ADDA #3
+            LDX  #HELPERS
+            LEAX A,X
+            ANDB #7
+            LDA  #1
+HA_SHIFT    DECB
+            BMI  HA_RET
+            LSLA
+            BRA  HA_SHIFT
+HA_RET      RTS
 ; ++x --x x++ x--.
-GENINCDEC   JSR  ISLONGN
+GENINCDEC   JSR  ISQN
             LBCC GL_INCDEC
             PSHS A,X
             LDX  N_L,X
@@ -1547,8 +1595,8 @@ PUSHARGS    CMPX #0
             PSHS X
             JSR  GEN
             PULS X
-            LDX  N_TYPE,X              ; (a long: 4 bytes; a struct: its
-            JSR  TISLONG               ; bytes)
+            LDX  N_TYPE,X              ; (a long or a float: 4 bytes; a
+            JSR  TISQ                  ; struct: its bytes)
             LBCC PUSHQ
             JSR  TISSTRUCT
             LBCC PUSHSTRUCT

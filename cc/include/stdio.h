@@ -24,6 +24,12 @@ int sprintf(char *buf, const char *fmt, ...);
 int vprintf(const char *fmt, char *ap);
 int vfprintf(FILE *f, const char *fmt, char *ap);
 int vsprintf(char *buf, const char *fmt, char *ap);
+int scanf(const char *fmt, ...);
+int fscanf(FILE *f, const char *fmt, ...);
+int sscanf(const char *s, const char *fmt, ...);
+int vscanf(const char *fmt, char *ap);
+int vfscanf(FILE *f, const char *fmt, char *ap);
+int vsscanf(const char *s, const char *fmt, char *ap);
 
 int putchar(int c);
 int getchar(void);

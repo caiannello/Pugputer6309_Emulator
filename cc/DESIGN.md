@@ -6,7 +6,9 @@ and the first libc. Phase 2: CPP, and CC1 with `char`, `int`, pointers, arrays, 
 `asm { }`, `interrupt` and the rest of the declarations and initializers. Phase 4: children
 (DOS's `B_EXEC` with `EXEC_CHILD`, libc's `spawn()`), `CC.COM`, banked code and
 `<pug/bank.h>`. Phase 5: `LIBPUG.A` (`<pug/video.h>`, `<pug/input.h>`,
-`<pug/sound.h>`) and SWAMPFLY, a demo in C. See
+`<pug/sound.h>`) and SWAMPFLY, a demo in C. Phase 6 (2026-11-20), the first part: `float`
+and `double` (IEEE single), `_Bool`, `<stdint.h>`, `<stdbool.h>`, `<float.h>`, `<math.h>`,
+scanf, `atof`/`strtod`, printf's floats, and CC's signs of life as it works. See
 [`README.md`](README.md) for what is there now, and the "Found in phase" sections at the end
 for what each settled. Decisions taken so far (2026-11-19):
 
@@ -37,9 +39,9 @@ FOO.C --CPP--> FOO.I --CC1--> FOO.ASM --ASM -f obj--> FOO.O --LINK--> FOO.COM
 
 CPP and CC1 are separate programs because each must fit in the space a program gets
 ($3400-$EFFF, about 47KB) together with its buffers. CPP's macros live in banked RAM through
-`pa_heap.asm`, as ASM's symbols do. CC1 (21KB of code since phase 3) keeps its names, types
-and symbols in an 11KB heap of its own for now; they can move to banked RAM if programs
-outgrow it (the node pool, 6KB, could shrink first).
+`pa_heap.asm`, as ASM's symbols do. CC1 (25KB of code since phase 6) keeps its names, types
+and symbols in a 12KB heap of its own for now; they can move to banked RAM if programs
+outgrow it. `CC1 -M` says how close a file came (see "Found in phase 6").
 
 ### Inside CC1
 
@@ -142,7 +144,7 @@ works.
 
 | Header | First pass |
 |---|---|
-| `stdio.h` | `FILE` over the DOS file calls; `stdin`/`stdout`/`stderr`; `fopen`, `fclose`, `fread`, `fwrite`, `fgetc`, `fputc`, `fgets`, `fputs`, `fseek`, `ftell`, `fflush`, `putchar`, `getchar`, `puts`, `remove`, `rename`; `printf`/`fprintf`/`sprintf` with `%d %u %x %X %o %c %s %p %%`, `l`, width, `-`, `0` (no float) |
+| `stdio.h` | `FILE` over the DOS file calls; `stdin`/`stdout`/`stderr`; `fopen`, `fclose`, `fread`, `fwrite`, `fgetc`, `fputc`, `fgets`, `fputs`, `fseek`, `ftell`, `fflush`, `putchar`, `getchar`, `puts`, `remove`, `rename`; `printf`/`fprintf`/`sprintf` with `%d %u %x %X %o %c %s %p %%`, `l`, width, `-`, `0` (floats and scanf: phase 6) |
 | `string.h` | `mem*`, `str*`, the common ones |
 | `stdlib.h` | `exit`, `atoi`, `atol`, `strtol`, `abs`, `rand`/`srand`, `qsort`. `malloc`/`free` start as a simple first-fit free list over the heap (or a bump allocator, if that comes first), with `sbrk` underneath |
 | `ctype.h`, `stdarg.h`, `stddef.h`, `limits.h`, `setjmp.h` | as usual (`setjmp` is short in assembly) |
@@ -184,10 +186,17 @@ Each phase leaves something that works and is tested.
    and `-b` (CC1's stubs), LINK's overlay output, `__farcall` and its loader, and
    `<pug/bank.h>`.
 5. **`LIBPUG.A`** (video, sound, input), and a demo written in C (done: `SWAMPFLY.C`).
-6. **Later:** a better `malloc`, `float` (and `double` as the same type, as in CMOC),
-   bitfields, `-O`, `__far` pointers, and `-9`: plain 6809 code. That needs a second way of
-   holding a `long` (there's no Q) and a 6809 build of the library, for its code to run on a
-   6809 at all; the Pugputer always has a 6309, so it waits (decided 2026-11-19).
+6. **Floating point and the rest of the library** (the first part done, 2026-11-20): `float`
+   and `double` (the same type, as in CMOC: IEEE single), `_Bool`, `<stdint.h>`,
+   `<stdbool.h>`, `<float.h>`, `<math.h>`, scanf and its family, `atof` and `strtod`, printf's
+   `%e %f %g` (and its `+`, space and `#`), CC's banner and a line for each stage (`-q` for
+   none). Chosen before a better malloc and `-9` (2026-11-20), so that the system can be used
+   for a while first.
+7. **Later:** a better `malloc`, bitfields, `-O`, `__far` pointers, memory for CC1 beyond its
+   12KB heap (banked RAM), more overlays at `$C000` than 15 (agreed; see the end), and `-9`: plain 6809 code. That
+   needs a second way of holding a `long` (there's no Q) and a 6809 build of the library, for
+   its code to run on a 6809 at all; the Pugputer always has a 6309, so it waits (decided
+   2026-11-19).
 
 Not planned: K&R-style function definitions, `goto` into a block from outside it with
 initialized locals, wide characters, and the parts of C99 CMOC doesn't have.
@@ -318,3 +327,62 @@ Things that phase 2 onwards has to follow:
 - **pugrun has `--video`:** the video card (with no window) and the OPL3 on the bus.
 - **The emulator's card takes key events from the test** (`VideoDevice::key`), not from the
   UART, while a program has grabbed the keys.
+
+## Found in phase 6
+
+- **A float lives in Q, as a long does.** So every move of one (loads, stores, arguments,
+  results, `?:`, assignment) is the long code's, and `TISQ` (a long or a float) replaced
+  `TISLONG` wherever only the size mattered. The type kinds were renumbered, `TK_FLOAT` between
+  `TK_ULONG` and `TK_PTR`, so that `TISSCALAR` (char to pointer) takes it and `USUALTYPE`'s
+  "the greater kind" still works. A `long` and a `float` are held alike but aren't the same
+  class: `MKCONVERT` casts whenever the class (`TCLASS`: in D, a long, a float) differs.
+- **One floating-point core, two users.** `lib/fpcore.asm` has no sections and keeps to the
+  stack, so `float.asm` (the library's member) and CC1 include the same file: a constant CC1
+  folds has the bits the program would have made. It's checked against the PC's IEEE single
+  precision bit for bit, on the CPU alone (`test_float.cpp`). There are no denormals (it
+  flushes to 0); near FLT_MIN that differs from IEEE, which rounds a denormal back up.
+- **Decimal is scaled by powers of ten in 32-bit mantissas** (10^1, 10^2 ... 10^64 and their
+  inverses, each correctly rounded), so a constant, `strtod` and printf's digits take at most
+  seven multiplications: correctly rounded in all but about 1 in 700 cases (a unit in the last
+  place off then). `__fxint` (round(x * 10^k), ties to even when they're exact) gives printf
+  its digits; 9 significant ones are exact, more are zeros.
+- **printf mustn't grow for everyone.** Its float conversion is a hook in CRT0's data
+  (`__pfhook`, and scanf's `__sfhook`), set by `fltio.asm`'s part of the start (`init_flt`, a
+  third fall-through section). `fltio.asm` is linked only when CC1 refers to `__fltused`: when
+  a float or a pointer to one is passed to `...` or to a function with no prototype. An
+  `IMPORT` nothing uses doesn't reach the object file, so CC1 writes `FDB __fltused` in
+  `rodata` (2 bytes) to make it real.
+- **The helpers' bitmap grew to 32 bits** (`HELPERS`): 11 float helpers and `__fltused`.
+- **`i op= 1.5`** with an integer `i` is rewritten `i = i op 1.5` (C does it in floats, then
+  converts back); `i` is worked out twice.
+- **CC1's memory:** each function a header declares costs about 50 bytes of heap (its name,
+  symbol, type and parameter list), so scanf's and stdlib's new prototypes took 460 bytes from
+  SWAMPFLY's room, and `<math.h>` takes 1.2KB. `CC1 -M` measured the stack: SWAMPFLY uses 166
+  bytes of the 3KB that was kept for it, and very deep nesting (60 parentheses, 25 blocks) 823.
+  So the stack's room is 1.5KB now, with a check (`STKCHK`, in the parser's recursions) that
+  makes too deep an error ("expression too complex") instead of a crash, and the heap is 12KB.
+  Smaller buffers (a 512-byte string literal at most, 400 nodes, 128 cases a switch) paid for
+  fpcore. `test_cc.cpp` checks that SWAMPFLY leaves at least 2KB.
+- **CC's progress:** a banner and one short line as each stage starts, so a long one (ASM is
+  the slowest, about 7 s for a few hundred lines) is seen to be working, and an error comes on
+  its own line after the stage it's from. `-q` is quiet.
+- **Names are 8.3 on the disk:** `cc1_float.asm` couldn't be included by ASM on the Pugputer
+  (the rebuild test caught it); it's `cc1_flt.asm`.
+
+### Banked code: what limits it now
+
+Overlays are linked to run in bank 3 at `$C000-$EFFF` (12KB: `$F000` up is the BIOS's and the
+I/O's), each in a page of its own, numbered 1 to 15. Neither number is fundamental:
+
+- **15 overlays** is only where the names stop: CC.SCR lists `ovl1` to `ovl15`, CC1's `-b` and
+  `#pragma bank` accept 15 at most, and `farcall.asm`'s table has 16 entries. With 64 pages of
+  RAM (and DOS's, the program's three and the data pages), 40 or more would fit; raising it is
+  those three places. **Agreed (2026-11-20): more overlay pages at `$C000` is the way to grow
+  banked code** (the window and its 12KB stay as they are), when it's wanted.
+- **12KB each** wastes a quarter of each 16KB page. Running overlays in bank 2 (`$8000-$BFFF`)
+  would give them whole pages, but the fixed part (code, data, bss and the heap) would have
+  only `$3400-$7FFF` (19KB) instead of 35KB, and the stack would have to live there too; bank 3
+  for overlays keeps more for data. A program could also pick the window (a link-script and
+  `farcall.asm` choice), or overlays could be packed two to a page at different addresses.
+- So 15 x 12KB = 180KB of banked code, plus about 35KB fixed, today: chosen to leave the fixed
+  part room for working data, and it can grow without changing the scheme.

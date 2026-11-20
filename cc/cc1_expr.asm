@@ -10,7 +10,8 @@ RESETNODES  LDD  #NODES
             STD  <NODEP
             RTS
 ; A = an operation -> X = a new node for it (cleared). Keeps Y.
-NEWNODE     LDX  <NODEP
+NEWNODE     JSR  STKCHK
+            LDX  <NODEP
             CMPX #NODES+MAXNODES*NODESZ
             BHS  NN_FULL
             PSHS A
@@ -29,6 +30,10 @@ NEWNODE     LDX  <NODEP
             RTS
 NN_FULL     LDX  #M_COMPLEX
             JMP  ERROR
+; The stack near the end of its room (nesting too deep): an error. Keeps all.
+STKCHK      CMPS #STACKTOP-STACKSZ+96
+            BLO  NN_FULL
+            RTS
 ; D = a number, Y = its type -> X = a node for it.
 MKNUM       PSHS D
             LDA  #O_NUM
@@ -96,18 +101,25 @@ MKCONVERT   PSHS Y
             LDX  N_TYPE,X
             JSR  TISSCALAR
             BCS  MC_BAD
-            JSR  TISLONG               ; to or from a long (not both): a cast
-            TFR  CC,A
-            PULS X
-            EXG  X,Y
-            JSR  TISLONG
-            EXG  X,Y
-            TFR  CC,B
+            JSR  TCLASS                ; held another way (in D, a long, a
+            PULS X                     ; float): a cast
             PSHS A
-            EORB ,S+
-            BITB #1
+            EXG  X,Y
+            JSR  TCLASS
+            EXG  X,Y
+            CMPA ,S+
             LBNE MKCAST
-            EXG  X,Y                   ; to a char: a cast, unless it's that
+            EXG  X,Y                   ; to a _Bool: a cast (unless from one)
+            JSR  TISBOOL
+            EXG  X,Y
+            BCS  MC_NBOOL
+            PSHS X
+            LDX  N_TYPE,X
+            JSR  TISBOOL
+            PULS X
+            LBCS MKCAST
+            RTS
+MC_NBOOL    EXG  X,Y                   ; to a char: a cast, unless it's that
             JSR  TISCHAR               ; char already
             EXG  X,Y
             BCS  MC_RET
@@ -129,23 +141,37 @@ MC_BAD      LDX  #M_BADCONV
 ; X = a node, Y = a type: (type) X -> X.
 MKCAST      LDA  TY_KIND,Y
             CMPA #TK_VOID
-            BEQ  CA_NODE
+            LBEQ CA_NODE
             PSHS Y
             JSR  DECAY
             PULS Y
             EXG  X,Y
             JSR  TISSCALAR
             EXG  X,Y
-            BCS  CA_BAD
+            LBCS CA_BAD
             PSHS X
             LDX  N_TYPE,X
             JSR  TISSCALAR
             PULS X
-            BCS  CA_BAD
+            LBCS CA_BAD
+            JSR  CA_PTRFLT             ; (a pointer from or to a float: no)
+            EXG  X,Y
+            JSR  TISBOOL
+            EXG  X,Y
+            LBCC CA_BOOL
             LDA  N_OP,X                ; a number: its new value
             CMPA #O_NUM
-            BNE  CA_NODE
+            LBNE CA_NODE
+            PSHS X
+            LDX  N_TYPE,X
+            JSR  TISFLOAT
+            PULS X
+            LBCC CA_FROMF
             EXG  X,Y
+            JSR  TISFLOAT
+            EXG  X,Y
+            LBCC CA_TOF
+CA_INT      EXG  X,Y
             JSR  TISCHAR
             EXG  X,Y
             BCS  CA_WIDE
@@ -182,14 +208,114 @@ CA_NODE     LDA  #O_CAST
             JMP  MKUNODE
 CA_BAD      LDX  #M_BADCAST
             JMP  ERROR
-; X, Y = (promoted) integer types -> X = the type of an arithmetic operation
-; on them: unsigned long if either is, long if either is (a long holds every
-; unsigned int), unsigned int if either is, otherwise int.
+; A float number to another type: a float as it is; an integer through a
+; long (__ftol, __ftoul), on as from a long.
+CA_FROMF    EXG  X,Y
+            JSR  TISFLOAT
+            EXG  X,Y
+            LBCC CA_RETYPE
+            PSHS X,Y
+            LDA  TY_KIND,Y
+            CMPA #TK_ULONG
+            BEQ  CF_U
+            LDD  N_X,X
+            LDW  N_V,X
+            JSR  __ftol
+            BRA  CF_SET
+CF_U        LDD  N_X,X
+            LDW  N_V,X
+            JSR  __ftoul
+CF_SET      LDX  ,S
+            STD  N_X,X
+            STW  N_V,X
+            LDD  #TYP_LONG
+            STD  N_TYPE,X
+            PULS X,Y
+            LBRA CA_INT
+; An integer number to a float: made 32 bits (its sign, or 0), then __ltof
+; (__ultof).
+CA_TOF      PSHS X,Y
+            LDX  N_TYPE,X
+            JSR  TISLONG
+            BCC  CT_LONG
+            CLRD
+            JSR  TISUNS
+            BCC  CT_HIGH
+            LDX  ,S
+            TST  N_V,X
+            BPL  CT_HIGH
+            LDD  #$FFFF
+CT_HIGH     LDX  ,S
+            STD  N_X,X
+CT_LONG     LDX  ,S
+            LDY  N_TYPE,X
+            LDA  TY_KIND,Y
+            CMPA #TK_ULONG
+            BEQ  CT_U
+            LDD  N_X,X
+            LDW  N_V,X
+            JSR  __ltof
+            BRA  CT_SET
+CT_U        LDD  N_X,X
+            LDW  N_V,X
+            JSR  __ultof
+CT_SET      LDX  ,S
+            STD  N_X,X
+            STW  N_V,X
+            PULS X,Y
+            LBRA CA_RETYPE
+; An error if X's type is a pointer and Y a float, or the other way round.
+; Keeps X and Y.
+CA_PTRFLT   PSHS X,Y
+            LDX  N_TYPE,X
+            JSR  TISPTR
+            BCC  CP_SRCPTR
+            JSR  TISFLOAT
+            BCS  CP_OK
+            TFR  Y,X
+            JSR  TISPTR
+            LBCC CA_BAD
+            BRA  CP_OK
+CP_SRCPTR   TFR  Y,X
+            JSR  TISFLOAT
+            LBCC CA_BAD
+CP_OK       PULS X,Y,PC
+; To a _Bool: a number 0 or 1, anything else (x != 0) made one.
+CA_BOOL     LDA  N_OP,X
+            CMPA #O_NUM
+            BNE  CB_NODE
+            PSHS Y
+            JSR  NUMZERO
+            BEQ  CB_SET
+            LDD  #1
+CB_SET      STD  N_V,X
+            CLRD
+            STD  N_X,X
+            PULS Y
+            LBRA CA_RETYPE
+CB_NODE     PSHS X,Y
+            CLRD
+            LDY  #TYP_INT
+            JSR  MKNUM
+            TFR  X,Y
+            PULS X
+            LDA  #O_NE
+            JSR  MKBINARY
+            PULS Y
+            LDA  #O_CAST
+            JMP  MKUNODE
+; X, Y = (promoted) arithmetic types -> X = the type of an arithmetic
+; operation on them: float if either is, unsigned long if either is, long if
+; either is (a long holds every unsigned int), unsigned int if either is,
+; otherwise int.
 USUALTYPE   LDA  TY_KIND,X
             CMPA TY_KIND,Y
             BHS  UT_KIND
-            LDA  TY_KIND,Y             ; (TK_INT < TK_UINT < TK_LONG < TK_ULONG)
-UT_KIND     LDX  #TYP_ULONG
+            LDA  TY_KIND,Y             ; (TK_INT < TK_UINT < TK_LONG < TK_ULONG
+UT_KIND     LDX  #TYP_FLOAT            ; < TK_FLOAT)
+            CMPA #TK_FLOAT
+            BEQ  UT_RET
+            LDX  #TYP_ULONG
             CMPA #TK_ULONG
             BEQ  UT_RET
             LDX  #TYP_LONG
@@ -200,9 +326,9 @@ UT_KIND     LDX  #TYP_ULONG
             BEQ  UT_RET
             LDX  #TYP_INT
 UT_RET      RTS
-; If ETY is a long: EL and ER made it.
+; If ETY is a long or a float: EL and ER made it.
 TOLONG      LDX  <ETY
-            JSR  TISLONG
+            JSR  TISQ
             BCS  TL_RET
             LDX  <EL
             LDY  <ETY
@@ -213,15 +339,22 @@ TOLONG      LDX  <ETY
             JSR  MKCONVERT
             STX  <ER
 TL_RET      RTS
-; X = a node: Z set if it's a number that's 0 (a long's whole value).
+; X = a number: Z set if it's 0 (a long's whole value; a float's, either
+; sign).
 NUMZERO     PSHS X
             LDX  N_TYPE,X
-            JSR  TISLONG
+            JSR  TISQ
+            BCS  NZ_WORD
+            JSR  TISFLOAT
             PULS X
+            LDD  N_X,X
+            BCS  NZ_LONG
+            ANDA #$7F
+NZ_LONG     ORD  N_V,X
+            RTS
+NZ_WORD     PULS X
             LDD  N_V,X
-            BCS  NZ_RET
-            ORD  N_X,X
-NZ_RET      RTS
+            RTS
 ; X = a type -> X = its promoted type (char -> int).
 PROMOTE     JSR  TISCHAR
             BCS  PR_RET
@@ -246,6 +379,17 @@ BOTHINT     LDX  <EL
             BCS  BI_BAD
             RTS
 BI_BAD      LDX  #M_NOTINT
+            JMP  ERROR
+BOTHARITH   LDX  <EL                   ; (integers or floats)
+            LDX  N_TYPE,X
+            JSR  TISARITH
+            BCS  BA_BAD
+            LDX  <ER
+            LDX  N_TYPE,X
+            JSR  TISARITH
+            BCS  BA_BAD
+            RTS
+BA_BAD      LDX  #M_NOTARITH
             JMP  ERROR
 BOTHSCALAR  LDX  <EL
             LDX  N_TYPE,X
@@ -301,8 +445,13 @@ MKBINARY    STA  <EOP
             LBEQ MB_ADD
             CMPA #O_SUB
             LBEQ MB_SUB
-MB_ARITH    JSR  BOTHINT               ; integers
-            JSR  PROMBOTH
+MB_ARITH    LDA  <EOP                  ; + - * /: numbers; the rest integers
+            CMPA #O_DIV
+            BHI  MB_INTS
+            JSR  BOTHARITH
+            BRA  MB_PROM
+MB_INTS     JSR  BOTHINT
+MB_PROM     JSR  PROMBOTH
             LDA  <EOP
             CMPA #O_SHL                ; a shift: the left one's type (the
             BEQ  MB_SHIFT              ; count an int)
@@ -339,8 +488,12 @@ BINNODE     LDA  <EOP
             STA  N_FL,X
             RTS
 MB_LOGIC    JSR  BOTHSCALAR            ; && || (a long and something else:
-            JSR  BOTHNUM               ; both longs, to fold them)
-            BCS  ML_INT
+            JSR  BOTHNUM               ; both longs, to fold them; a float:
+            BCS  ML_INT                ; its truth)
+            LDX  <EL
+            JSR  FTRUTH
+            LDX  <ER
+            JSR  FTRUTH
             JSR  PROMBOTH
             JSR  TISLONG
             BCC  ML_LONG
@@ -355,11 +508,11 @@ ML_INT      LDX  #TYP_INT
             CLR  <EUNS
             BRA  MB_BUILD
 MB_COMPARE  JSR  BOTHSCALAR            ; == != < > <= >=: int, signed or not
-            JSR  PROMBOTH              ; as the operands are (a long: both
-            JSR  TISLONG               ; made the usual type)
+            JSR  PROMBOTH              ; as the operands are (a long or a
+            JSR  TISQ                  ; float: both made the usual type)
             BCC  MP_LONG
             EXG  X,Y
-            JSR  TISLONG
+            JSR  TISQ
             BCC  MP_LONG
             JSR  SETUNS
             TFR  Y,X
@@ -372,7 +525,7 @@ MB_COMPARE  JSR  BOTHSCALAR            ; == != < > <= >=: int, signed or not
 MP_INT      LDX  #TYP_INT
             STX  <ETY
             LBRA MB_BUILD
-MP_LONG     JSR  BOTHINT
+MP_LONG     JSR  BOTHARITH
             JSR  PROMBOTH
             JSR  USUALTYPE
             STX  <ETY
@@ -489,9 +642,12 @@ SC_NODE     PSHS X
             LDD  #TYP_INT
             STD  N_TYPE,X
 SC_RET      RTS
-; EOP on EL's and ER's numbers (EUNS: unsigned) -> D (and longs: FOLD32).
+; EOP on EL's and ER's numbers (EUNS: unsigned) -> D (and longs: FOLD32,
+; floats: FOLDF).
 FOLD        LDX  <EL
             LDX  N_TYPE,X
+            JSR  TISFLOAT
+            LBCC FOLDF
             JSR  TISLONG
             LBCC FOLD32
             LDX  <EL
@@ -790,15 +946,25 @@ MKUNARY     STA  <EOP
             LDA  <EOP
             CMPA #O_NOT
             BEQ  MU_NOT
-            LDX  N_TYPE,X              ; - ~: an integer, promoted
-            JSR  TISINT
+            LDX  N_TYPE,X              ; - ~: an integer, promoted (-: a
+            CMPA #O_NEG                ; float too)
+            BNE  MU_INT
+            JSR  TISARITH
+            LBCS BA_BAD
+            BRA  MU_PROM
+MU_INT      JSR  TISINT
             LBCS BI_BAD
-            JSR  PROMOTE
+MU_PROM     JSR  PROMOTE
             STX  <ETY
             LDX  <EL
             LDA  N_OP,X
             CMPA #O_NUM
             BNE  MU_NODE
+            PSHS X
+            LDX  <ETY
+            JSR  TISFLOAT
+            PULS X
+            BCC  MU_FNUM
             PSHS X
             LDX  <ETY
             JSR  TISLONG
@@ -816,6 +982,10 @@ MU_FOLD     STD  N_V,X
 MU_TYPE     LDD  <ETY
             STD  N_TYPE,X
             RTS
+MU_FNUM     LDA  N_X,X                 ; a float: - turns the sign over
+            EORA #$80
+            STA  N_X,X
+            BRA  MU_TYPE
 MU_LNUM     COM  N_X,X                 ; a long: ~ in 32 bits (and - is ~ + 1)
             COM  N_X+1,X
             COM  N_V,X
@@ -980,14 +1150,27 @@ MG_PTR      LDX  <ER
             JSR  SCALEER
             CLR  <EUNS
             BRA  MG_NODE
-MG_INT      JSR  BOTHINT
-            JSR  PROMBOTH
+MG_INT      LDA  <EOP                  ; (+ - * /: numbers; the rest integers)
+            CMPA #O_DIV
+            BHI  MG_INTS
+            JSR  BOTHARITH
+            BRA  MG_PROM
+MG_INTS     JSR  BOTHINT
+MG_PROM     JSR  PROMBOTH
             LDA  <EOP
             CMPA #O_SHL
             BEQ  MG_TYPE
             CMPA #O_SHR
             BEQ  MG_TYPE
             JSR  USUALTYPE
+            JSR  TISFLOAT              ; done in floats, and x isn't one: it's
+            BCS  MG_TYPE               ; x = x op y
+            PSHS X
+            LDX  <EL
+            LDX  N_TYPE,X
+            JSR  TISFLOAT
+            PULS X
+            BCS  MG_SPLIT
 MG_TYPE     JSR  SETUNS
             LDA  <EOP                  ; y: an int if it's a shift's count, or
             CMPA #O_SHL                ; a long and x isn't; as x is if x is a
@@ -997,13 +1180,21 @@ MG_TYPE     JSR  SETUNS
             LDX  <EL
             LDY  N_TYPE,X
             EXG  X,Y
-            JSR  TISLONG
+            JSR  TISQ
             BCS  MG_COUNT
             TFR  X,Y
             LDX  <ER
             JSR  MKCONVERT
             STX  <ER
             BRA  MG_NODE
+MG_SPLIT    LDX  <EL                   ; (x is made twice: side effects in it
+            LDY  <ER                   ; happen twice)
+            LDA  <EOP
+            PSHS X
+            JSR  MKBINARY
+            TFR  X,Y
+            PULS X
+            JMP  MKASSIGN
 MG_COUNT    JSR  INTCOUNT
 MG_NODE     LDX  <EL
             LDD  N_TYPE,X
@@ -1030,7 +1221,7 @@ MKCALL      PSHS B,Y
             LDY  TY_PAR,Y              ; 5,S the arguments
             LDA  PL_FL,Y
             BITA #PLF_PROTO
-            BEQ  ML_ARGS               ; (no prototype: as they are)
+            BEQ  ML_NOPROTO            ; (no prototype: as they are)
             LDB  PL_N,Y                ; how many: as many as the parameters,
             CMPB 4,S                   ; or more with "..."
             LBHI ML_COUNT
@@ -1040,7 +1231,7 @@ MKCALL      PSHS B,Y
 ML_CONV     LEAY PL_PAR,Y              ; each converted to its parameter's type
             LDX  5,S
 ML_CLOOP    TSTB
-            BEQ  ML_ARGS
+            BEQ  ML_VAR
             PSHS B,X,Y
             LDY  ,Y
             LDX  N_L,X
@@ -1052,6 +1243,26 @@ ML_CLOOP    TSTB
             LEAY 4,Y
             DECB
             BRA  ML_CLOOP
+ML_NOPROTO  LDX  5,S
+ML_VAR      CMPX #0                    ; the rest (what "..." takes): a float
+            BEQ  ML_ARGS               ; or a pointer to one means printf or
+            PSHS X                     ; scanf may convert it (FLTUSE)
+            LDX  N_L,X
+            LDX  N_TYPE,X
+            JSR  TISFLOAT
+            BCC  ML_FLT
+            LDA  TY_KIND,X
+            CMPA #TK_PTR
+            BEQ  ML_BASE
+            CMPA #TK_ARRAY
+            BNE  ML_VNEXT
+ML_BASE     LDX  TY_BASE,X
+            JSR  TISFLOAT
+            BCS  ML_VNEXT
+ML_FLT      JSR  FLTUSE
+ML_VNEXT    PULS X
+            LDX  N_R,X
+            BRA  ML_VAR
 ML_ARGS     LDX  5,S                   ; the rest as their values are
 ML_DLOOP    BEQ  ML_NODE
             PSHS X
@@ -1141,7 +1352,7 @@ MKCOND      PSHS D,Y
             LDA  TY_KIND,Y
             CMPA #TK_PTR
             BEQ  MO_TYPE
-            JSR  BOTHINT
+            JSR  BOTHARITH
             JSR  PROMBOTH
             JSR  USUALTYPE
             STX  <ETY
@@ -1256,6 +1467,11 @@ CONSTEXPR   LDD  <NODEP
             LDA  N_OP,X
             CMPA #O_NUM
             BNE  CX_BAD
+            PSHS X
+            LDX  N_TYPE,X
+            JSR  TISINT
+            PULS X
+            LBCS BI_BAD
             PULS D
             STD  <NODEP
             LDD  N_V,X
@@ -1306,7 +1522,8 @@ BINOPS      FCB  T_OROR,O_LOR,1
             FCB  '%',O_MOD,10
             FCB  0
 ; Unary operators, casts, sizeof.
-UNARY       LDA  <TOK
+UNARY       JSR  STKCHK
+            LDA  <TOK
             LDY  #UNOPS
 UN_FIND     TST  ,Y
             BEQ  UN_OTHER
@@ -1336,9 +1553,9 @@ UN_DEREF    JMP  MKDEREF
 UN_PLUS     JSR  DECAY
             PSHS X
             LDX  N_TYPE,X
-            JSR  TISINT
+            JSR  TISARITH
             PULS X
-            LBCS BI_BAD
+            LBCS BA_BAD
             RTS
 UN_OTHER    CMPA #K_SIZEOF
             BEQ  UN_SIZEOF
@@ -1406,7 +1623,8 @@ TA_ID       LDX  <AHEADV
 TA_NO       ORCC #1
             RTS
 TYPEWORDS   FCB  K_VOID,K_CHAR,K_SHORT,K_INT,K_LONG,K_SIGNED,K_UNSIGNED
-            FCB  K_CONST,K_VOLATILE,K_STRUCT,K_UNION,K_ENUM,K_FLOAT,K_DOUBLE,0
+            FCB  K_CONST,K_VOLATILE,K_STRUCT,K_UNION,K_ENUM,K_FLOAT,K_DOUBLE
+            FCB  K_BOOL,0
 ; A type's name (in a cast or sizeof) -> X = the type. (The declaration it
 ; may be in is kept as it was.)
 TYPENAME    LDX  <DSTYPE
@@ -1609,7 +1827,8 @@ PRIMARY     LDA  <TOK
             BEQ  PM_PAREN
             LDX  #M_EXPRESSION
             JMP  ERROR
-PM_PAREN    JSR  NEXT
+PM_PAREN    JSR  STKCHK
+            JSR  NEXT
             JSR  EXPR
             PSHS X
             LDA  #')'
@@ -1651,8 +1870,11 @@ PM_ENUM     LDD  SY_VAL,X              ; an enum's constant: a number
 ; A number's type, as C has it: the first of int, (unsigned int: not for
 ; decimal), long, unsigned long that holds it; u: unsigned int or long; l:
 ; long or unsigned long. (A character constant is an int.)
-PM_NUM      LDY  #TYP_INT
+PM_NUM      LDY  #TYP_FLOAT
             LDA  <TOKFL
+            BITA #TF_FLT
+            BNE  PM_MAKE
+            LDY  #TYP_INT
             BITA #TF_CHAR
             BNE  PM_MAKE
             LDX  <TOKV
@@ -1797,6 +2019,7 @@ M_COMPLEX   FCN  "expression too complex"
 M_BADCONV   FCN  "incompatible types"
 M_BADCAST   FCN  "invalid cast"
 M_NOTINT    FCN  "an integer was expected"
+M_NOTARITH  FCN  "a number was expected"
 M_NOTSCALAR FCN  "a number or a pointer was expected"
 M_INTERNAL  FCN  "internal error"
 M_DIV0      FCN  "division by zero"

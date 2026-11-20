@@ -21,8 +21,17 @@ malloc.o
 stdio.o
 fileio.o
 printf.o
+scanf.o
 arith.o
 larith.o
+mexp.o
+mtrig.o
+matan.o
+msqrt.o
+mbasic.o
+fltio.o
+strtod.o
+float.o
 scopy.o
 spawn.o
 farcall.o

@@ -183,6 +183,10 @@ bool runs_as_expected(const char* name, const char* img) {
     Machine m;
     if (!m.start(img, {test_file(std::string(name) + ".c")})) return false;
     if (!m.compile(name)) return false;
+    if (const char* dir = std::getenv("CC_DUMP_DIR")) { // (CC1's output, to look at)
+        std::ofstream o(std::string(dir) + "/" + name + ".asm", std::ios::binary);
+        o << m.disk_file(upper(name) + ".ASM");
+    }
     std::string expected = crlf(host_text(repo("simulator/tests/test_cc/" + std::string(name) + ".out")));
     return same(name, expected, printed(m.run(upper(name)), upper(name)));
 }
@@ -272,6 +276,29 @@ TEST(cc_compiles_initializers_asm_blocks_and_the_rest) {
     CHECK(runs_as_expected("inits", "cc_inits.img"));
 }
 
+TEST(cc_compiles_floats_and_prints_and_reads_them) {
+    // float and double (IEEE single, in Q): arithmetic, comparisons and
+    // conversions, constants folded, op= ++ --, arguments, results, arrays and
+    // struct members; printf's %e %f %g with their flags; atof, strtod; _Bool.
+    CHECK(runs_as_expected("float", "cc_float.img"));
+}
+
+TEST(cc_programs_use_math_h) {
+    // Each function against its exact value, within a few units in the last
+    // place; the exact ones; and the edges (0, negatives, overflow).
+    CHECK(runs_as_expected("math", "cc_math.img"));
+}
+
+TEST(cc_programs_read_with_scanf_sscanf_and_fscanf) {
+    // Every conversion and size, widths, *, sets, %n, literals, the return
+    // value; a file; and the console, typed ahead.
+    Machine m;
+    CHECK(m.start("cc_scanf.img", {test_file("scanf.c")}));
+    CHECK(m.compile("scanf"));
+    std::string expected = crlf(host_text(repo("simulator/tests/test_cc/scanf.out")));
+    CHECK(same("scanf", expected, printed(m.run("SCANF", "37 apples\r1.25\r"), "SCANF")));
+}
+
 TEST(cc_programs_seek_in_files_and_use_longs_in_the_library) {
     // fseek (back from the end and the current place: DOS's offsets are
     // signed) and ftell, atol and labs, and limits.h's longs.
@@ -299,7 +326,12 @@ TEST(cc_driver_compiles_assembles_and_links_and_tidies_up) {
     CHECK(m.start("cc_driver.img", {test_file("prog.c"), test_file("util.c"), test_file("twice.asm"),
                                     file("BAD.C", "int main(void) { return x; }\n")}));
     std::string cmd = "CC -o PROG.COM prog.c util.c twice.asm";
-    CHECK(same(cmd.c_str(), "", printed(m.run(cmd), cmd)));
+    CHECK(same(cmd.c_str(),
+               "CC: the Pugputer 6309's C compiler\r\n"
+               "prog.c: cpp\r\nprog.c: cc1\r\nprog.c: asm\r\n"
+               "util.c: cpp\r\nutil.c: cc1\r\nutil.c: asm\r\n"
+               "twice.asm: asm\r\nlink: PROG.COM\r\n",
+               printed(m.run(cmd), cmd)));
     CHECK(same("prog", "add 5 twice 42 counter 8\r\n", printed(m.run("PROG"), "PROG")));
     for (const char* f : {"PROG.I", "PROG.ASM", "PROG.O", "UTIL.I", "UTIL.ASM", "UTIL.O", "TWICE.O", "CCLINK.RSP"})
         CHECK(m.disk_file(f) == "<none>");
@@ -312,7 +344,14 @@ TEST(cc_driver_compiles_assembles_and_links_and_tidies_up) {
     m.run("CC -E util.c");
     CHECK(m.disk_file("UTIL.I").find("counter") != std::string::npos);
     cmd = "CC bad.c";
+    CHECK(same(cmd.c_str(),
+               "CC: the Pugputer 6309's C compiler\r\nbad.c: cpp\r\nbad.c: cc1\r\n"
+               "bad.c:1: error: undeclared: 'x'\r\n",
+               printed(m.run(cmd), cmd)));
+    cmd = "CC -q bad.c"; // (-q: only what's wrong)
     CHECK(same(cmd.c_str(), "bad.c:1: error: undeclared: 'x'\r\n", printed(m.run(cmd), cmd)));
+    m.run("CC -q -c util.c");
+    CHECK(m.disk_file("UTIL.O") != "<none>");
     for (const char* f : {"BAD.COM", "BAD.I", "BAD.ASM", "BAD.O"})
         CHECK(m.disk_file(f) == "<none>");
 }
@@ -348,7 +387,7 @@ TEST(cc_banked_code_runs_from_overlays_loaded_at_the_start) {
     Machine m;
     CHECK(m.start("cc_banked.img", {test_file("banked.c"), test_file("far.c")}));
     m.run("CC -c -b 3 far.c");
-    std::string cmd = "CC banked.c far.o";
+    std::string cmd = "CC -q banked.c far.o";
     CHECK(same(cmd.c_str(), "", printed(m.run(cmd), cmd)));
     std::string com = m.disk_file("BANKED.COM");
     CHECK(com.size() > 10 && com[6] == 0 && com[7] == 1); // EXE_MORE
@@ -397,7 +436,7 @@ TEST(swampfly_the_c_demo_flies_a_firefly_over_the_swamp) {
     for (const char* f : {"SWAMP1.TLS", "SWAMP1.MAP", "SWAMP2.TLS", "SWAMP2.MAP", "SWAMP3.TLS", "SWAMP3.MAP", "SWAMP.SNG"})
         files.push_back(file(std::string("DEMO/") + f, host_text(repo(std::string("demo/swamp/") + f))));
     CHECK(m.start("cc_swampfly.img", files));
-    std::string cmd = "CC swampfly.c";
+    std::string cmd = "CC -q swampfly.c";
     CHECK(same(cmd.c_str(), "", printed(m.run(cmd), cmd)));
     if (std::getenv("CC_TIMING")) std::printf("  %s: %.1f s at 3.58 MHz\n", cmd.c_str(), m.cycles / 3.58e6);
     const uint64_t kSecond = 3580000;
@@ -438,6 +477,20 @@ TEST(swampfly_the_c_demo_flies_a_firefly_over_the_swamp) {
         spent += m.s.bus.run(kSecond / 10);
     CHECK(m.s.received.find("/> ") != std::string::npos); // back at the shell
     CHECK(c.cfg[VC_DC_CTRL] == 0x01);        // the card as it starts
+}
+
+TEST(cc1_has_room_to_spare_for_swampfly) {
+    // CC1 -M: the least room its heap had. SWAMPFLY (with LIBPUG's headers) is
+    // the biggest C program here; it should leave plenty.
+    Machine m;
+    CHECK(m.start("cc_room.img", {file("SWAMPFLY.C", host_text(repo("demo/programs/C/SWAMPFLY.C")))}));
+    CHECK(printed(m.run("CPP swampfly.c"), "CPP swampfly.c").empty());
+    std::string said = printed(m.run("CC1 -M swampfly.i"), "CC1 -M swampfly.i");
+    size_t at = said.find("heap: ");
+    CHECK(at != std::string::npos);
+    long room = at == std::string::npos ? 0 : std::strtol(said.c_str() + at + 6, nullptr, 10);
+    if (std::getenv("CC_TIMING")) std::printf("  %s", said.c_str());
+    CHECK(room >= 2048);
 }
 
 TEST(cc_programs_are_small) {
@@ -490,13 +543,19 @@ TEST(cc1_reports_errors_and_writes_nothing) {
         {"int main(void) { 3 = 4; return 0; }", "t.c:1: error: that can't be assigned to"},
         {"int main(void) { break; }", "t.c:1: error: break outside a loop or a switch"},
         {"int g = 1; int g = 2;", "t.c:1: error: redefinition of 'g'"},
-        {"int main(void) { int *p; return p * 2; }", "t.c:1: error: an integer was expected"},
+        {"int main(void) { int *p; return p * 2; }", "t.c:1: error: a number was expected"},
+        {"int main(void) { int *p; return p % 2; }", "t.c:1: error: an integer was expected"},
         {"int main(void) { char c; return *c; }", "t.c:1: error: a pointer was expected"},
         {"int main(void) {\ngoto nowhere;\n}", "t.c:3: error: label used but not defined: 'nowhere'"},
         {"int main(void) { int a; int a; return 0; }", "t.c:1: error: redeclared: 'a'"},
         {"void f(void) { return 1; }", "t.c:1: error: a value returned from a void function"},
         {"int main(void) {\nreturn 0;\n", "t.c:3: error: the file ends inside a block"},
-        {"int main(void) { float f; }", "t.c:1: error: floating point is not supported yet"},
+        {"int main(void) { float f; return f % 2; }", "t.c:1: error: an integer was expected"},
+        {"int main(void) { double d; int *p = d; return 0; }", "t.c:1: error: invalid cast"},
+        {"float a[2.5];", "t.c:1: error: an integer was expected"},
+        {"int main(void) { return 1.5e; }", "t.c:1: error: invalid number"},
+        {"int main(void) { return 08; }", "t.c:1: error: invalid number"},
+        {"unsigned float f;", "t.c:1: error: invalid type"},
         {"struct s { int a; }; int f(struct s v) { return v.b; }", "t.c:1: error: no such member: 'b'"},
         {"int main(void) { int i; return i.x; }", "t.c:1: error: a struct or union was expected"},
         {"struct s { int a; char a; };", "t.c:1: error: duplicate member 'a'"},
@@ -505,7 +564,7 @@ TEST(cc1_reports_errors_and_writes_nothing) {
         {"struct s { int a; }; struct s { int b; };", "t.c:1: error: redefinition of 's'"},
         {"struct s; int main(void) { struct s v; return 0; }", "t.c:1: error: no size for 'v'"},
         {"struct s { int a; }; int main(void) { struct s v; return v + 1; }",
-         "t.c:1: error: an integer was expected"},
+         "t.c:1: error: a number was expected"},
         {"enum { A, B }; enum { B };", "t.c:1: error: redeclared: 'B'"},
         {"int main(void) {\nasm { nop\n", "t.c:2: error: the file ends inside asm { }"},
     };
@@ -521,4 +580,20 @@ TEST(cc1_reports_errors_and_writes_nothing) {
         CHECK(same(c.first, std::string(c.second) + "\r\n", printed(m.run(cmd), cmd)));
         CHECK(m.disk_file(upper(name) + ".ASM") == "<none>");
     }
+}
+TEST(cc1_handles_deep_nesting_and_stops_short_of_too_deep) {
+    // deep.c: 60 nested parentheses, 20 nested ?: with casts, 25 nested
+    // blocks (CC1 -M: within its stack). Far deeper is an error, not a crash.
+    Machine m;
+    std::string deeper = "int f(int x) { return ";
+    for (int i = 0; i < 400; ++i) deeper += "(";
+    deeper += "x";
+    for (int i = 0; i < 400; ++i) deeper += ")";
+    deeper += "; }\n";
+    CHECK(m.start("cc_deep.img", {test_file("deep.c"), file("DEEPER.I", "#line 1 \"t.c\"\n" + deeper)}));
+    CHECK(m.compile("deep"));
+    CHECK(same("deep", "67\r\n", printed(m.run("DEEP"), "DEEP")));
+    std::string said = printed(m.run("CC1 deeper.i"), "CC1 deeper.i");
+    CHECK(same("CC1 deeper.i", "t.c:1: error: expression too complex\r\n", said));
+    CHECK(m.disk_file("DEEPER.ASM") == "<none>");
 }

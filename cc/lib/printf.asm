@@ -3,19 +3,23 @@
 ;    FILE: printf.asm -- printf(), fprintf(), sprintf(), vprintf(), vfprintf(),
 ;          vsprintf()
 ;
-; Conversions: %d %i %u %x %X %o %c %s %p %%, with the flags - (left-justify)
-; and 0 (pad with zeros), a width (digits or *), a precision (.digits or .*:
-; at most that many characters of a %s, at least that many digits of a
-; number), and l for a long (h is accepted). + # and space are accepted and
-; ignored. No floating point. %p is a pointer as 4 hex digits.
+; Conversions: %d %i %u %x %X %o %c %s %p %%, and %e %E %f %F %g %G, with the
+; flags - (left-justify), 0 (pad with zeros), + and space (a sign, or a space,
+; before a signed number that has none) and # (%g keeps its zeros, %.0f its
+; point), a width (digits or *), a precision (.digits or .*: at most that many
+; characters of a %s, at least that many digits of a number, the digits after
+; the point of a float's), and l for a long (h is accepted). %p is a pointer
+; as 4 hex digits. The floats are fltio.asm's, through __pfhook (CRT0's),
+; which is set only when the program passes a float to "..." (CC1 IMPORTs
+; __fltused then): otherwise a float's conversion is a "?".
 ; Each returns how many characters it wrote (sprintf's NUL not counted).
 ; A va_list is a pointer to the next argument (each a whole number of words).
 ;------------------------------------------------------------------------------
     INCLUDE defines.d
     INCLUDE libc.d
-NBUFSZ      equ  40
+NBUFSZ      equ  64                ; (a float's %f: 39 digits, ., 20 more)
             EXPORT _printf,_fprintf,_sprintf,_vprintf,_vfprintf,_vsprintf
-            IMPORT __iob,__putc
+            IMPORT __iob,__putc,__pfhook
             SECTION code
 ;------------------------------------------------------------------------------
 ; int printf(const char *fmt, ...), int vprintf(const char *fmt, va_list ap)
@@ -75,6 +79,8 @@ DP_END      LDD  count
 DP_CONV     CLR  fleft                 ; %[flags][width][.prec][l]type
             CLR  fzero
             CLR  flong
+            CLR  fsign
+            CLR  falt
             CLRD
             STD  width
             LDD  #-1
@@ -89,11 +95,20 @@ DP_FZ       CMPB #'0'
             INC  fzero
             BRA  DP_FLAGS
 DP_FOTHER   CMPB #'+'
-            BEQ  DP_FLAGS
-            CMPB #' '
-            BEQ  DP_FLAGS
-            CMPB #'#'
-            BEQ  DP_FLAGS
+            BNE  DP_FSP
+            STB  fsign
+            BRA  DP_FLAGS
+DP_FSP      CMPB #' '
+            BNE  DP_FALT
+            TST  fsign                 ; (+ wins)
+            BNE  DP_FLAGS
+            STB  fsign
+            BRA  DP_FLAGS
+DP_FALT     CMPB #'#'
+            BNE  DP_FSTAR
+            INC  falt
+            BRA  DP_FLAGS
+DP_FSTAR
             CMPB #'*'                  ; the width
             BNE  DP_WDIG
             LDD  ,Y++
@@ -132,19 +147,19 @@ DP_TYPE     CMPB #'d'
             CMPB #'u'
             BNE  DP_X
             LDA  #10
-            BRA  DP_UNSIGNED
+            LBRA DP_UNSIGNED
 DP_X        CMPB #'x'
             BNE  DP_BIGX
             LDA  #16
-            BRA  DP_UNSIGNED
+            LBRA DP_UNSIGNED
 DP_BIGX     CMPB #'X'
             BNE  DP_O
             LDA  #16+$80               ; (upper-case digits)
-            BRA  DP_UNSIGNED
+            LBRA DP_UNSIGNED
 DP_O        CMPB #'o'
             BNE  DP_P
             LDA  #8
-            BRA  DP_UNSIGNED
+            LBRA DP_UNSIGNED
 DP_P        CMPB #'p'
             BNE  DP_C
             CLR  flong
@@ -153,8 +168,17 @@ DP_P        CMPB #'p'
             STA  fzero                 ; (A is 0: no; set it to 1)
             INC  fzero
             LDA  #16+$80
-            BRA  DP_UNSIGNED
-DP_C        CMPB #'c'
+            LBRA DP_UNSIGNED
+DP_C        PSHS B                     ; e f g (E F G): floats
+            ORB  #$20
+            CMPB #'e'
+            BEQ  DP_ISFLT
+            CMPB #'f'
+            BEQ  DP_ISFLT
+            CMPB #'g'
+DP_ISFLT    PULS B
+            LBEQ DP_FLT
+            CMPB #'c'
             BNE  DP_S
             LDD  ,Y++                  ; a character: a string of 1
             STB  nbuf
@@ -185,8 +209,32 @@ DP_PCT      TSTB                       ; %% (or anything else: itself)
             LEAX -1,X                  ; (% at the end: stop there)
             LBRA DP_LOOP
 DP_LIT2     LBRA DP_LIT
+; A float: fltio's PFLOAT (B the conversion, X the precision, A the #, U a
+; buffer) -> U the characters, D how many, carry set if it's negative.
+DP_FLT      PSHS X
+            LDX  __pfhook
+            BEQ  DP_NOFLT
+            PSHS X
+            LDX  prec
+            LDA  falt
+            LDU  #nbuf
+            JSR  [,S++]
+            PSHS CC
+            CLR  fneg
+            PULS CC
+            BCC  DP_FPOS
+            INC  fneg
+DP_FPOS     LEAY 4,Y
+            PULS X
+            LBRA DP_SIGN
+DP_NOFLT    LEAY 4,Y                   ; (no float conversions linked)
+            PULS X
+            LDU  #m_nofloat
+            LDD  #1
+            LBRA DP_FIELD
 ; A number: its value (32 bits) in num, its sign in fneg.
 DP_UNSIGNED STA  base
+            CLR  fsign                 ; (+ and space: signed ones only)
             CLR  fneg
             TST  flong
             BNE  DP_U32
@@ -253,12 +301,19 @@ DP_PDIGS    TFR  U,D                   ; at least the precision's digits
             LDA  #'0'
             STA  ,-U
             BRA  DP_PDIGS
-DP_SIGN     TST  fneg
+DP_SIGN     PSHS A                     ; the sign: -, or the + or space
+            LDA  #'-'                  ; asked for
+            TST  fneg
+            BNE  DP_SGN
+            LDA  fsign
+DP_SGN      STA  signch
+            PULS A
+            TST  signch
             BEQ  DP_FIELD
-            TST  fzero                 ; zeros go between the - and the digits
-            BEQ  DP_MINUS
+            TST  fzero                 ; zeros go between the sign and the
+            BEQ  DP_MINUS              ; digits
             PSHS D
-            LDB  #'-'
+            LDB  signch
             JSR  EMIT
             LDD  width
             BEQ  DP_W0
@@ -267,7 +322,7 @@ DP_W0       STD  width
             PULS D
             BRA  DP_FIELD
 DP_MINUS    PSHS B
-            LDB  #'-'
+            LDB  signch
             STB  ,-U
             PULS B
             ADDD #1
@@ -360,6 +415,7 @@ UD_NEXT     DEC  bits
             BNE  UD_LOOP
             RTS
 m_null      FCN  "(null)"
+m_nofloat   FCN  "?"
             ENDSECT
 ;------------------------------------------------------------------------------
             SECTION bss
@@ -370,6 +426,9 @@ fleft       RMB  1
 fzero       RMB  1
 flong       RMB  1
 fneg        RMB  1
+fsign       RMB  1                     ; '+', ' ' or 0 (the flags)
+signch      RMB  1                     ; the sign written, or 0
+falt        RMB  1                     ; #
 base        RMB  1                     ; (bit 7: upper-case hex)
 divisor     RMB  1
 bits        RMB  1

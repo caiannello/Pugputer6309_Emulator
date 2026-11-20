@@ -56,6 +56,7 @@ KEYWORDS    FCN  "auto"
             FCN  "while"
             FCN  "asm"
             FCN  "interrupt"
+            FCN  "_Bool"
             FCB  0
 ;------------------------------------------------------------------------------
 ; Characters.
@@ -459,7 +460,7 @@ LX_DOT      JSR  GETCH                 ; . or ...
             CMPA #'.'
             BEQ  LD_TWO
             JSR  ISDIGIT
-            BCC  LX_FLOAT
+            LBCC LD_FLOAT
             JSR  UNGETCH
 LD_ONE      LDA  #'.'
             STA  <LXTOK
@@ -471,8 +472,6 @@ LD_TWO      JSR  GETCH
             LDA  #T_ELLIP
             STA  <LXTOK
             RTS
-LX_FLOAT    LDX  #M_FLOAT
-            JMP  ERROR
 PUNCTAB     FCB  '+','+',T_INC,'+','=',T_ADDEQ
             FCB  '-','-',T_DEC,'-','=',T_SUBEQ,'-','>',T_ARROW
             FCB  '*','=',T_MULEQ,'/','=',T_DIVEQ,'%','=',T_MODEQ
@@ -504,11 +503,18 @@ LI_END      CLR  ,Y
             LDA  #T_ID
 LI_KWTOK    STA  <LXTOK
             RTS
-; A number (A = its first digit) -> LXV (32 bits), LXFL (u and l).
+; A number (A = its first digit) -> LXV (32 bits), LXFL (u and l). With a .
+; or an exponent it's a floating one: LXV its bits, LXFL TF_FLT. (Its digits
+; are decimal whatever it began with, so they're kept that way too, in FLM
+; and FLE, as they're read.)
 LX_NUM      PSHS A
             CLRD
             STD  <LXV
             STD  <LXV+2
+            STD  <FLM
+            STD  <FLM+2
+            STD  <FLE
+            CLR  <FLOCT
             PULS A
             LDB  #10
             STB  <TMPB
@@ -527,14 +533,20 @@ LX_NUM      PSHS A
 LN_HEX      LDB  #16
             STB  <TMPB
             JSR  GETCH
-            BCS  LN_END
+            LBCS LN_END
 LN_CHK      PSHS A
             JSR  HEXVAL
             BCS  LN_NOT
             CMPA <TMPB
-            BHS  LN_NOT
-            LEAS 1,S
-            PSHS A                     ; LXV = LXV * base + the digit
+            BLO  LN_DIG
+            LDB  <TMPB                 ; an 8 or 9 in an octal number: only a
+            CMPB #8                    ; floating one's
+            BNE  LN_NOT
+            CMPA #9
+            BHI  LN_NOT
+            INC  <FLOCT
+            BRA  LN_DEC
+LN_DIG      PSHS A                     ; LXV = LXV * base + the digit
             LDQ  <LXV
             STQ  MA
             CLRD
@@ -542,26 +554,33 @@ LN_CHK      PSHS A
             LDB  <TMPB
             STD  MB+2
             JSR  MUL32
-            PULS B
+            LDB  ,S
             CLRA
             STD  <TMP
             LDQ  MA
             ADDW <TMP
             ADCD #0
             STQ  <LXV
-            JSR  GETCH
+            PULS A
+LN_DEC      LEAS 1,S
+            LDB  <TMPB
+            CMPB #16
+            BEQ  LN_NEXT
+            CLRB
+            JSR  FLDIGIT
+LN_NEXT     JSR  GETCH
             BCS  LN_END
             BRA  LN_CHK
 LN_NOT      PULS A
-            CMPA #'.'
-            LBEQ LX_FLOAT
             LDB  <TMPB
             CMPB #16
             BEQ  LN_SUF
+            CMPA #'.'
+            LBEQ LX_FRAC
             CMPA #'e'
-            LBEQ LX_FLOAT
+            LBEQ LX_EXP
             CMPA #'E'
-            LBEQ LX_FLOAT
+            LBEQ LX_EXP
 LN_SUF      CMPA #'u'                  ; u and l, in any order
             BEQ  LN_U
             CMPA #'U'
@@ -571,7 +590,7 @@ LN_SUF      CMPA #'u'                  ; u and l, in any order
             CMPA #'L'
             BEQ  LN_L
             JSR  ISIDCH
-            BCC  LN_BAD
+            LBCC LN_BAD
             JSR  UNGETCH
             BRA  LN_END
 LN_U        LDA  #TF_UNS
@@ -581,8 +600,136 @@ LN_FL       ORA  <LXFL
             STA  <LXFL
             JSR  GETCH
             BCC  LN_SUF
-LN_END      LDA  #T_NUM
+LN_END      TST  <FLOCT
+            LBNE LN_BAD
+            LDA  #T_NUM
             STA  <LXTOK
+            RTS
+; A floating constant: ".5" (A = its first digit), or after a number's digits
+; its . or e.
+LD_FLOAT    PSHS A
+            CLRD
+            STD  <FLM
+            STD  <FLM+2
+            STD  <FLE
+            PULS A
+            BRA  LF_DIGIT
+LX_FRAC     JSR  GETCH                 ; the digits after the point
+            LBCS LF_END
+            JSR  ISDIGIT
+            BCS  LF_NOTDIG
+LF_DIGIT    SUBA #'0'
+            LDB  #1
+            JSR  FLDIGIT
+            BRA  LX_FRAC
+LF_NOTDIG   CMPA #'e'
+            BEQ  LX_EXP
+            CMPA #'E'
+            BNE  LF_SUF
+LX_EXP      CLRD                       ; e, a sign, digits (at least one)
+            STD  <FLX
+            CLR  <TMPB2
+            JSR  GETCH
+            LBCS LN_BAD
+            CMPA #'+'
+            BEQ  LE_SIGN
+            CMPA #'-'
+            BNE  LE_FIRST
+            INC  <TMPB2
+LE_SIGN     JSR  GETCH
+            LBCS LN_BAD
+LE_FIRST    JSR  ISDIGIT
+            LBCS LN_BAD
+LE_DIG      SUBA #'0'
+            TFR  A,B
+            CLRA
+            PSHS D
+            LDD  <FLX                  ; (it stops growing at 1000: 0 or
+            CMPD #1000                 ; infinite anyway)
+            BHS  LE_SKIP
+            LSLD
+            PSHS D
+            LSLD
+            LSLD
+            ADDD ,S++
+            ADDD ,S
+            STD  <FLX
+LE_SKIP     LEAS 2,S
+            JSR  GETCH
+            PSHS CC,A
+            BCS  LE_SUM
+            JSR  ISDIGIT
+            BCS  LE_SUM
+            LEAS 2,S
+            BRA  LE_DIG
+LE_SUM      LDD  <FLX                  ; FLE += the exponent
+            TST  <TMPB2
+            BEQ  LE_POS
+            NEGD
+LE_POS      ADDD <FLE
+            STD  <FLE
+            PULS CC,A
+            BCS  LF_END
+LF_SUF      CMPA #'f'                  ; f or l (float, long double: both
+            BEQ  LF_SUF1               ; the same)
+            CMPA #'F'
+            BEQ  LF_SUF1
+            CMPA #'l'
+            BEQ  LF_SUF1
+            CMPA #'L'
+            BNE  LF_SUF2
+LF_SUF1     JSR  GETCH
+            BCS  LF_END
+LF_SUF2     JSR  ISIDCH
+            BCC  LN_BAD
+            JSR  UNGETCH
+LF_END      LDQ  <FLM                  ; FLM * 10^FLE
+            LDX  <FLE
+            JSR  __fdec2f
+            STQ  <LXV
+            LDA  #TF_FLT
+            STA  <LXFL
+            LDA  #T_NUM
+            STA  <LXTOK
+            RTS
+; A = a digit, B = 1 if it's after the point: FLM = FLM * 10 + it while
+; there's room (FLE one less after the point); when there isn't, it's
+; dropped (FLE one more before the point).
+FLDIGIT     PSHS B
+            TFR  A,B
+            CLRA
+            STD  <TMP3
+            LDX  <FLM
+            CMPX #$17D7                ; (400000000: room for one more)
+            BLO  FG_ADD
+            BHI  FG_DROP
+            LDX  <FLM+2
+            CMPX #$8400
+            BHS  FG_DROP
+FG_ADD      LDQ  <FLM
+            ADDR W,W
+            ROLD
+            STQ  MA
+            ADDR W,W
+            ROLD
+            ADDR W,W
+            ROLD
+            ADDW MA+2
+            ADCD MA
+            ADDW <TMP3
+            ADCD #0
+            STQ  <FLM
+            TST  ,S+
+            BEQ  FG_RET
+            LDX  <FLE
+            LEAX -1,X
+            STX  <FLE
+FG_RET      RTS
+FG_DROP     TST  ,S+
+            BNE  FG_RET
+            LDX  <FLE
+            LEAX 1,X
+            STX  <FLE
             RTS
 LN_BAD      LDX  #M_BADNUM
             JMP  ERROR
@@ -810,7 +957,6 @@ M_EXPECT    FCC  "expected "
 M_EXPID     FCN  "expected a name"
 M_SYNTAX    FCN  "syntax error"
 M_STRAY     FCN  "stray character in the program"
-M_FLOAT     FCN  "floating point is not supported yet"
 M_BADNUM    FCN  "invalid number"
 M_BADCHR    FCN  "invalid character constant"
 M_UNTSTR    FCN  "unterminated string"

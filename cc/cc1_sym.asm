@@ -19,6 +19,10 @@ TYP_LONG    FCB  TK_LONG,0
             FDB  0,4,0,0,0
 TYP_ULONG   FCB  TK_ULONG,0
             FDB  0,4,0,0,0
+TYP_FLOAT   FCB  TK_FLOAT,0
+            FDB  0,4,0,0,0
+TYP_BOOL    FCB  TK_UCHAR,TYF_BOOL
+            FDB  0,1,0,0,0
 ;------------------------------------------------------------------------------
 ; Making types. Each takes X = a type -> X = the new one.
 ;------------------------------------------------------------------------------
@@ -109,7 +113,28 @@ TISPTR      PSHS A
             CMPA #TK_PTR
             BEQ  TY_YES
             BRA  TY_NO
-; An integer or a pointer.
+; An integer or a float.
+TISARITH    PSHS A
+            LDA  TY_KIND,X
+            CMPA #TK_CHAR
+            BLO  TY_NO
+            CMPA #TK_FLOAT
+            BHI  TY_NO
+            BRA  TY_YES
+TISFLOAT    PSHS A
+            LDA  TY_KIND,X
+            CMPA #TK_FLOAT
+            BEQ  TY_YES
+            BRA  TY_NO
+; A value in Q: a long or a float.
+TISQ        PSHS A
+            LDA  TY_KIND,X
+            CMPA #TK_LONG
+            BLO  TY_NO
+            CMPA #TK_FLOAT
+            BHI  TY_NO
+            BRA  TY_YES
+; An integer, a float or a pointer.
 TISSCALAR   PSHS A
             LDA  TY_KIND,X
             CMPA #TK_CHAR
@@ -140,10 +165,29 @@ TISSTRUCT   PSHS A
             CMPA #TK_STRUCT
             BEQ  TY_YES
             BRA  TY_NO
+TISBOOL     PSHS A
+            LDA  TY_FL,X
+            ANDA #TYF_BOOL
+            PULS A
+            BEQ  TB_NO
+            ANDCC #$FE
+            RTS
+TB_NO       ORCC #1
+            RTS
+; -> A = how a scalar type X is held: 0 in D (16 bits or less), 1 a long in
+; Q, 2 a float in Q. Keeps X.
+TCLASS      CLRA
+            JSR  TISQ
+            BCS  TC_RET
+            INCA
+            JSR  TISFLOAT
+            BCS  TC_RET
+            INCA
+TC_RET      RTS
 ; -> D = the words an argument of the type X takes on the stack (a long 2, a
 ; struct its size rounded up, anything else 1). Keeps X.
 TWORDS      LDD  #2
-            JSR  TISLONG
+            JSR  TISQ
             BCC  TW_RET
             JSR  TISSTRUCT
             BCC  TW_STRUCT

@@ -16,12 +16,15 @@
 ;     -b N        CC1's: every function banked code, in overlay N (as if each
 ;                 file began with #pragma bank N)
 ;     -v          each command, shown as it's run
+;     -q          quiet: no banner, and no line as each stage starts
 ;
 ; The files made on the way go in the current directory, named as the source
 ; with .I, .ASM and .O, and are deleted once used (the ones stopped at are
 ; kept). The program is the first file's name with .COM, unless -o says. The
 ; tools are looked for in the current directory, then along the search path
-; (B_PATH). The exit code is 0, or 1 if something failed.
+; (B_PATH). The exit code is 0, or 1 if something failed. Unless -q, it
+; says what it is first, then "FILE: cpp" (cc1, asm) and "link: PROG.COM" as
+; each stage starts, so that a long one is seen to be going.
 ;------------------------------------------------------------------------------
     INCLUDE defines.d
 ;------------------------------------------------------------------------------
@@ -48,6 +51,7 @@ DP_VP       SET  DPAGE
             DVAR MSIGN,1
             DVAR STOP,1                ; 0 (link), 'c', 'S' or 'E'
             DVAR VERBOSE,1
+            DVAR QUIET,1
             DVAR FAILED,1
             DVAR NWORDS,1
             DVAR NFILES,1
@@ -88,7 +92,11 @@ START       LDS  #STACKTOP
             LDA  <NFILES
             CMPA #1
             LBNE USAGE
-ST_FILES    LDX  #FILES                ; each file
+ST_FILES    TST  <QUIET                ; the banner
+            BNE  ST_FIRST
+            LDX  #M_BANNER
+            JSR  PRINTS
+ST_FIRST    LDX  #FILES                ; each file
             LDB  <NFILES
 ST_LOOP     PSHS B,X
             LDX  ,X
@@ -177,6 +185,8 @@ OP_OPT      LDA  1,X
             BEQ  OP_STOP
             CMPA #'v'
             BEQ  OP_V
+            CMPA #'q'
+            BEQ  OP_Q
             CMPA #'o'
             BEQ  OP_O
             LDY  #S_OPTI               ; -I -D -U: CPP's, " -I DIR"
@@ -198,6 +208,8 @@ OP_OPT      LDA  1,X
 OP_STOP     STA  <STOP
             BRA  OPTIONS
 OP_V        INC  <VERBOSE
+            BRA  OPTIONS
+OP_Q        INC  <QUIET
             BRA  OPTIONS
 OP_O        JSR  OPTARG
             LDY  #OUTNAME
@@ -311,6 +323,8 @@ DF_C        LDX  #INAME                ; .c: CPP [opts] -o FILE.I file.c
             JSR  APPEND
             LDX  <FILEP
             JSR  APPEND
+            LDX  #L_CPP
+            JSR  STAGE
             LDX  #N_CPP
             JSR  RUN
             LBCS DF_RET
@@ -332,6 +346,8 @@ DF_C        LDX  #INAME                ; .c: CPP [opts] -o FILE.I file.c
             JSR  APPEND
             LDX  #INAME
             JSR  APPEND
+            LDX  #L_CC1
+            JSR  STAGE
             LDX  #N_CC1
             JSR  RUN
             PSHS CC
@@ -364,6 +380,8 @@ DF_ASSEMBLE LDX  #ONAME                ; ASM -f obj -o FILE.O FILE.ASM
             JSR  APPEND
             LDX  #ANAME
             JSR  APPEND
+            LDX  #L_ASM
+            JSR  STAGE
             LDX  #N_ASM
             JSR  RUN
             PSHS CC
@@ -496,7 +514,19 @@ DL_REST     LDX  #S_LINK2
             LDX  #RSPBUF
             JSR  PRINTS
             JSR  PRINTNL
-DL_RUN      LDX  #N_LINK
+DL_RUN      TST  <QUIET                ; "link: PROG.COM"
+            BNE  DL_GO
+            LDX  #L_LINK
+            JSR  PRINTS
+            LDX  #OUTNAME
+            TST  <OUTSET
+            BNE  DL_NAME
+            LDX  #FIRSTSTEM
+            JSR  PRINTS
+            LDX  #S_EXTCOM
+DL_NAME     JSR  PRINTS
+            JSR  PRINTNL
+DL_GO       LDX  #N_LINK
             JSR  RUN
             LDX  #N_RSP
             JMP  KILL
@@ -526,6 +556,18 @@ KO_NEXT     PULS B,X
 ;------------------------------------------------------------------------------
 ; Running the tools.
 ;------------------------------------------------------------------------------
+; X = a stage's name: "FILE: name", a line (unless -q).
+STAGE       TST  <QUIET
+            BNE  SG_RET
+            PSHS X
+            LDX  <FILEP
+            JSR  PRINTS
+            LDX  #S_COLON
+            JSR  PRINTS
+            PULS X
+            JSR  PRINTS
+            JMP  PRINTNL
+SG_RET      RTS
 ; The command tail starts again (TAIL, empty).
 NEWTAIL     LDX  #TAIL
             CLR  ,X
@@ -635,7 +677,9 @@ FAIL        PSHS X
 ;------------------------------------------------------------------------------
     INCLUDE pa_util.asm
 ;------------------------------------------------------------------------------
-M_USAGE     FCC  "Usage: CC [-c|-S|-E] [-o out] [-v] [-I dir] [-D name[=val]]"
+M_BANNER    FCC  "CC: the Pugputer 6309's C compiler"
+            FCB  CR,LF,0
+M_USAGE     FCC  "Usage: CC [-c|-S|-E] [-o out] [-v] [-q] [-I dir] [-D name[=val]]"
             FCB  CR,LF
             FCC  "          [-U name] [-b bank] [-L dir] [-l lib] file..."
             FCB  CR,LF,0
@@ -644,6 +688,11 @@ M_TOOLONG   FCN  "too many options"
 M_NORSP     FCN  "cannot write CCLINK.RSP"
 M_NOPROG    FCN  "CC: cannot find "
 M_NORUN     FCN  "CC: cannot run "
+L_CPP       FCN  "cpp"
+L_CC1       FCN  "cc1"
+L_ASM       FCN  "asm"
+L_LINK      FCN  "link: "
+S_COLON     FCN  ": "
 N_CPP       FCN  "CPP.COM"
 N_CC1       FCN  "CC1.COM"
 N_ASM       FCN  "ASM.COM"

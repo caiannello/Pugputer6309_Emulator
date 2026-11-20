@@ -368,8 +368,10 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     m.run("CD /ASM/CC");
     for (const char* prog : {"cc", "cpp", "cc1"}) {
         std::string cmd = std::string("ASM -o ") + upper(prog) + ".COM " + prog + ".asm";
-        CHECK(m.run(cmd).find("ERROR") == std::string::npos);
+        std::string said = m.run(cmd);
+        CHECK(said.find("ERROR") == std::string::npos);
         std::string built = "/ASM/CC/" + upper(prog) + ".COM";
+        if (m.file(built) == "<none>") std::fprintf(stderr, "  %s said: %s\n", cmd.c_str(), said.c_str());
         CHECK(same(built.c_str(), host_text(repo(std::string("cc/") + prog + ".bin")), m.file(built)));
         if (std::getenv("ASM_TIMING")) std::printf("  %s: %.1f s at 3.58 MHz\n", cmd.c_str(), m.cycles / 3.58e6);
     }
