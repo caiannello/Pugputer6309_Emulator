@@ -17,7 +17,10 @@
 #include "pugputer/c_library.hpp"
 #include "disk_images.hpp"
 #include "fat16_reader.hpp"
+#include "pugputer/opl3_device.hpp"
+#include "pugputer/video_device.hpp"
 #include "test_framework.hpp"
+#include "vc.h"
 
 namespace {
 
@@ -78,6 +81,11 @@ std::string crlf(const std::string& s) {
 struct Machine {
     Basic309Session s;
     std::string img;
+    pugputer::VideoDevice video; // (on the bus with hardware(): LIBPUG's)
+    pugputer::Opl3Device opl3;
+    std::vector<pugputer::Opl3Device::Write> opl_log;
+    bool with_hardware = false;
+    void hardware() { with_hardware = true; }
 
     bool start(const char* name, std::vector<pugputer::Fat16File> files = {}) {
         if (!add(files, repo("cc/cc.bin"), "CC.COM")) return false;
@@ -91,7 +99,13 @@ struct Machine {
             return false;
         }
         img = build_image(name, 32768, 4, std::move(files));
-        return !img.empty() && s.boot_shell(PUGBIOS_S19_PATH, img.c_str());
+        if (with_hardware) s.attach_video(&video);
+        if (img.empty() || !s.boot_shell(PUGBIOS_S19_PATH, img.c_str())) return false;
+        if (with_hardware) {
+            opl3.set_log(&opl_log);
+            s.bus.map_device("opl3", 0xFFE0, 4, &opl3);
+        }
+        return true;
     }
     // Types a command, then `input` (what the program will read); what came
     // back up to the next prompt ("<<TIMEOUT>>" if it didn't).
@@ -352,6 +366,78 @@ TEST(cc_programs_keep_data_in_banked_ram) {
     // <pug/bank.h>: pages, far_read/far_write across a bank's edge (and not
     // past a page's end), far_peek/far_poke, and a page mapped in a bank.
     CHECK(runs_as_expected("bankdata", "cc_bankdata.img"));
+}
+
+TEST(libpug_drives_the_video_card_the_input_devices_and_the_opl3) {
+    // LIBPUG.A, with the card and the chip on the bus: memory, settings,
+    // palette, drawing (read back), a sprite, frames, the input devices
+    // (none plugged in), and SONGKIT's player on SWAMP.SNG.
+    Machine m;
+    m.hardware();
+    std::string song = host_text(repo("demo/swamp/SWAMP.SNG"));
+    CHECK(song.size() > 80);
+    CHECK(m.start("cc_pugtest.img", {test_file("pugtest.c"), file("SWAMP.SNG", song)}));
+    m.run("CC pugtest.c");
+    std::string expected = crlf(host_text(repo("simulator/tests/test_cc/pugtest.out")));
+    CHECK(same("pugtest", expected, printed(m.run("PUGTEST"), "PUGTEST")));
+    size_t keys = 0; // the song played notes: key-on writes to $B0-$B8
+    for (const auto& w : m.opl_log)
+        if ((w.reg & 0xF0) == 0xB0 && (w.reg & 0x0F) <= 8 && (w.value & 0x20)) ++keys;
+    CHECK(keys > 3);
+}
+
+TEST(swampfly_the_c_demo_flies_a_firefly_over_the_swamp) {
+    // demo/programs/C/SWAMPFLY.C, as the disk has it, compiled by CC on the
+    // machine and run with the swamp's files in /DEMO: the three tile layers
+    // and the firefly's sprite on, the bayou and the ground scrolling, the
+    // song playing; a key (q) ends it, the card reset.
+    Machine m;
+    m.hardware();
+    std::vector<pugputer::Fat16File> files = {file("SWAMPFLY.C", host_text(repo("demo/programs/C/SWAMPFLY.C")))};
+    for (const char* f : {"SWAMP1.TLS", "SWAMP1.MAP", "SWAMP2.TLS", "SWAMP2.MAP", "SWAMP3.TLS", "SWAMP3.MAP", "SWAMP.SNG"})
+        files.push_back(file(std::string("DEMO/") + f, host_text(repo(std::string("demo/swamp/") + f))));
+    CHECK(m.start("cc_swampfly.img", files));
+    std::string cmd = "CC swampfly.c";
+    CHECK(same(cmd.c_str(), "", printed(m.run(cmd), cmd)));
+    if (std::getenv("CC_TIMING")) std::printf("  %s: %.1f s at 3.58 MHz\n", cmd.c_str(), m.cycles / 3.58e6);
+    const uint64_t kSecond = 3580000;
+    const vc_card& c = m.video.card();
+    auto hscroll = [&](int layer) {
+        const uint8_t* l = c.cfg + VC_LAYER0 + VC_LAYER_SIZE * layer;
+        return static_cast<uint16_t>(l[8] << 8 | l[9]);
+    };
+    m.s.received.clear();
+    for (char ch : std::string("SWAMPFLY\r")) m.s.send_byte(static_cast<uint8_t>(ch));
+    uint64_t spent = 0;
+    while (c.cfg[VC_DC_CTRL] != 0x0F && spent < 60 * kSecond) spent += m.s.bus.run(kSecond / 10);
+    CHECK(c.cfg[VC_DC_CTRL] == 0x0F);        // layers 0-2 and the sprites
+    CHECK(m.s.received.find("Loading the swamp") != std::string::npos);
+    const uint8_t* spr = c.vram + 0x037C00;  // sprite 0: the firefly, 16x16 at 8 bits
+    CHECK(spr[0] == 0x18 && spr[1] == 0x00 && spr[6] == 0xC5 && spr[7] == 0x80);
+    uint16_t bayou = hscroll(1), ground = hscroll(2);
+    size_t notes = m.opl_log.size();
+    if (const char* dir = std::getenv("VIDCARD_DUMP_DIR")) m.video.set_draw_all(true); // (a picture of it)
+    m.s.bus.run(kSecond);
+    if (const char* dir = std::getenv("VIDCARD_DUMP_DIR")) {
+        std::ofstream f(std::string(dir) + "/swampfly.rgb", std::ios::binary);
+        for (int i = 0; i < pugputer::VideoDevice::kWidth * pugputer::VideoDevice::kHeight; ++i) {
+            uint32_t p = m.video.pixels()[i];
+            char rgb[3] = {static_cast<char>(p >> 16), static_cast<char>(p >> 8), static_cast<char>(p)};
+            f.write(rgb, 3);
+        }
+    }
+    CHECK(hscroll(0) == 0);                  // the sky still, the rest moving:
+    CHECK(static_cast<uint16_t>(hscroll(2) - ground) > 60); // a second at 2 a frame
+    CHECK(static_cast<uint16_t>(hscroll(1) - bayou) > 15);  // and at half a pixel
+    CHECK(m.opl_log.size() > notes + 20);    // the song going on
+    m.s.received.clear();
+    m.video.key(0x14, true);                 // Q, on the card's keyboard
+    m.s.bus.run(kSecond / 10);
+    m.video.key(0x14, false);
+    for (spent = 0; m.s.received.find("/> ") == std::string::npos && spent < 10 * kSecond;)
+        spent += m.s.bus.run(kSecond / 10);
+    CHECK(m.s.received.find("/> ") != std::string::npos); // back at the shell
+    CHECK(c.cfg[VC_DC_CTRL] == 0x01);        // the card as it starts
 }
 
 TEST(cc_programs_are_small) {

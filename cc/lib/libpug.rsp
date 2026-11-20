@@ -1,0 +1,4 @@
+-c libpug.a
+pugvid.o
+pugin.o
+pugsnd.o

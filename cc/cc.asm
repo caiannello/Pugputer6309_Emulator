@@ -12,7 +12,7 @@
 ;     -c          stop at the .O files (-S: at the .ASM, -E: at the .I)
 ;     -o FILE     the output (with -c, -S or -E: one file's)
 ;     -I DIR, -D NAME[=VALUE], -U NAME     CPP's
-;     -L DIR, -l LIB                       LINK's (/LIB and -lc are always there)
+;     -L DIR, -l LIB                       LINK's (/LIB, -lpug and -lc are always there)
 ;     -b N        CC1's: every function banked code, in overlay N (as if each
 ;                 file began with #pragma bank N)
 ;     -v          each command, shown as it's run
@@ -436,8 +436,8 @@ MS_ISC      LDA  #1
 MS_ISASM    LDA  #2
             RTS
 ;------------------------------------------------------------------------------
-; LINK -f com -o PROG.COM -s /LIB/CC.SCR -L /LIB [-L ...] /LIB/CRT0.O objects
-; [-l ...] -lc, from a response file (the command tail is too short for it).
+; LINK --quiet-libs -f com -o PROG.COM -s /LIB/CC.SCR -L /LIB [-L ...] /LIB/CRT0.O objects
+; [-l ...] -lpug -lc, from a response file (the command tail is too short for it).
 ;------------------------------------------------------------------------------
 DOLINK      LDX  #RSPBUF
             CLR  ,X
@@ -666,10 +666,10 @@ S_EXTCOM    FCN  ".COM"
 S_C         FCN  "C"
 S_ASM       FCN  "ASM"
 S_S         FCN  "S"
-S_LINK1     FCN  "-f com -o "
+S_LINK1     FCN  "--quiet-libs -f com -o "
 S_LINK2     FCN  " -s /LIB/CC.SCR -L /LIB"
 S_LINK3     FCN  " /LIB/CRT0.O"
-S_LINK4     FCN  " -lc"
+S_LINK4     FCN  " -lpug -lc"
 ;------------------------------------------------------------------------------
 PA_END      equ  *
 ;------------------------------------------------------------------------------

@@ -199,9 +199,11 @@ B_FPUTC     equ  $1C         ; B: handle, E: the byte (write/append/update)
 B_FREAD     equ  $1D         ; B: handle, X: buf, Y: len -> X: bytes actually
                              ; read (short only at end of file)
 B_FWRITE    equ  $1E         ; B: handle, X: buf, Y: len
-B_FSEEK_NAME equ $1F         ; B: handle, X:Y: 32-bit offset (X = high word),
-                             ; E: whence (SEEK_*) -> X:Y: the new position
-                             ; (read or update mode). Positions past the end
+B_FSEEK_NAME equ $1F         ; B: handle, X:Y: 32-bit offset (X = high word;
+                             ; signed for SEEK_CUR and SEEK_END), E: whence
+                             ; (SEEK_*) -> X:Y: the new position (read or update
+                             ; mode); ERR_TOOBIG for one before the start or past
+                             ; 32 bits. Positions past the end
                              ; read as end-of-file; an update-mode write there
                              ; zero-fills the gap.
 B_FSTAT_NAME equ $20         ; B: handle, X: dest buf (16 bytes: size 4,

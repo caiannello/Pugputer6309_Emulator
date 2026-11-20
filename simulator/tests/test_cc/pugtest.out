@@ -1,0 +1,19 @@
+peek 5a 12 34
+read hello
+fill 7 7 0 copy e
+cfg 11 17 1a 1 1 0 0 3 0 0 0 3 ff fe 0 40
+pal f81f
+000000000030
+00555500
+00555500
+00000000
+999999990
+text 68
+spr 0 80 0 78 0 28 c5 80 count 8
+frames 2
+key 0 0 mods 0
+mouse 1 1 wheel 0
+pad 0 0
+notsong -1
+song 11880 0
+idle 1

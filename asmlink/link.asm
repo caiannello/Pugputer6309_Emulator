@@ -23,6 +23,8 @@
 ;                              looked for in each -L directory in turn; only
 ;                              the members something needs are linked
 ;     -L DIR, --library-path=DIR  a directory for -l (up to 4)
+;     --quiet-libs             no warning for a library nothing needed (CC's:
+;                              it always gives -lpug and -lc)
 ;     @FILE                    more arguments, from FILE (the shell's command
 ;                              line is short; spaces and line ends separate)
 ;
@@ -204,6 +206,7 @@ DP_VP       SET  DPAGE
             DVAR PCSECT,3
             DVAR BODYLEN,2             ; a .COM: its body's bytes (not the overlays')
             DVAR HASOVL,1              ; overlays (sections ovlN) have bytes
+            DVAR QUIETLIBS,1           ; --quiet-libs
 DP_END      equ  DP_VP
 ;------------------------------------------------------------------------------
     ORG  PL_BASE-EXE_HDRSIZE
@@ -355,7 +358,13 @@ CL_LONG     LEAX 2,X                   ; --name=value
             LDY  #LO_LIB
             JSR  PREFIX
             LBEQ CL_LIB2
-            LDY  #LO_BASE
+            LDY  #LO_QLIBS             ; (no value)
+            JSR  PREFIX
+            BNE  CL_NQLIBS
+            LDA  #1
+            STA  <QUIETLIBS
+            LBRA CL_NEXT
+CL_NQLIBS   LDY  #LO_BASE
             JSR  PREFIX
             LBNE USAGE
             LDA  <NBASES               ; SECT=ADDR
@@ -1205,6 +1214,8 @@ LW_LOOP     CMPB <NINPUTS
             INC  <RFPASS
             LDB  IN_UNIT,U
             JSR  INLINK
+            BNE  LW_NEXT
+            TST  <QUIETLIBS
             BNE  LW_NEXT
             LDX  #M_WARNLIB            ; "Warning: library -lNAME (N) does not
             JSR  PRINTS                ; resolve any symbols"
@@ -3213,6 +3224,7 @@ LO_OUTPUT   FCN  "output="
 LO_MAP      FCN  "map="
 LO_SCRIPT   FCN  "script="
 LO_ENTRY    FCN  "entry="
+LO_QLIBS    FCN  "quiet-libs"
 LO_BASE     FCN  "section-base="
 LO_LIB      FCN  "library="
 LO_LPATH    FCN  "library-path="

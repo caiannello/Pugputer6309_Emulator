@@ -1612,8 +1612,13 @@ SKDRUMS     FCB  6,6,$10,$13,2,$10,0 ; track, channel, operators, how many,
             FCB  $FF
 
 ;------------------------------------------------------------------------------
-; The player's variables.
+; The player's variables. (LIBPUG's pugsnd.asm defines SK_LIBRARY: there they
+; are in bss, and it ends the section.)
 ;------------------------------------------------------------------------------
+            IFDEF SK_LIBRARY
+            ENDSECT
+            SECTION bss
+            ENDC
 SK_PLAYING  RMB  1
 SK_TICKS    RMB  2
 SK_RATE     RMB  1

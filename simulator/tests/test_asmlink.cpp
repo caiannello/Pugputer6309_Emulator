@@ -332,30 +332,36 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     CHECK(same("/ASM/ASMLINK/LINK.COM", host_text(LINK_BIN_PATH), m.file("/ASM/ASMLINK/LINK.COM")));
     CHECK(m.run("ASM -o AR.COM ar.asm").find("ERROR") == std::string::npos);
     CHECK(same("/ASM/ASMLINK/AR.COM", host_text(AR_BIN_PATH), m.file("/ASM/ASMLINK/AR.COM")));
-    // The C library: each part as lwasm made it, and AR's LIBC.A as mkdiskimg's.
+    // The C libraries: each part as lwasm made it, and AR's LIBC.A and LIBPUG.A
+    // as mkdiskimg's.
     {
         std::vector<pugputer::Fat16File> lib;
         std::string error;
         CHECK(pugputer::c_library_files(REPO_DIR, lib, error));
         m.run("CD /ASM/LIBC");
-        std::string rsp = host_text(repo("cc/lib/libc.rsp"));
         std::vector<std::string> mods = {"crt0"};
-        for (size_t i = 0, e; i < rsp.size(); i = e + 1) {
-            e = rsp.find('\n', i);
-            if (e == std::string::npos) e = rsp.size();
-            std::string w = rsp.substr(i, e - i);
-            while (!w.empty() && (w.back() == '\r' || w.back() == ' ')) w.pop_back();
-            if (w.size() > 2 && w.compare(w.size() - 2, 2, ".o") == 0) mods.push_back(w.substr(0, w.size() - 2));
+        for (const char* name : {"libc", "libpug"}) {
+            std::string rsp = host_text(repo(std::string("cc/lib/") + name + ".rsp"));
+            for (size_t i = 0, e; i < rsp.size(); i = e + 1) {
+                e = rsp.find('\n', i);
+                if (e == std::string::npos) e = rsp.size();
+                std::string w = rsp.substr(i, e - i);
+                while (!w.empty() && (w.back() == '\r' || w.back() == ' ')) w.pop_back();
+                if (w.size() > 2 && w.compare(w.size() - 2, 2, ".o") == 0) mods.push_back(w.substr(0, w.size() - 2));
+            }
         }
         for (const std::string& mod : mods) {
             CHECK(m.run("ASM -f obj " + mod + ".asm").find("ERROR") == std::string::npos);
             CHECK(same(("/ASM/LIBC/" + upper(mod) + ".O").c_str(), host_text(repo("cc/lib/" + mod + ".o")),
                        m.file("/ASM/LIBC/" + upper(mod) + ".O")));
         }
-        m.run("AR @libc.rsp");
-        for (const auto& f : lib)
-            if (f.name == "LIB/LIBC.A")
-                CHECK(same("/ASM/LIBC/LIBC.A", std::string(f.data.begin(), f.data.end()), m.file("/ASM/LIBC/LIBC.A")));
+        for (const char* name : {"LIBC", "LIBPUG"}) {
+            m.run(std::string("AR @") + name + ".rsp");
+            for (const auto& f : lib)
+                if (f.name == std::string("LIB/") + name + ".A")
+                    CHECK(same((std::string("/ASM/LIBC/") + name + ".A").c_str(), std::string(f.data.begin(), f.data.end()),
+                               m.file(std::string("/ASM/LIBC/") + name + ".A")));
+        }
         m.run("CD /ASM/ASMLINK"); // (where the rest expects to be)
     }
     // The C compiler's programs.

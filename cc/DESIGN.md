@@ -1,11 +1,12 @@
 # CC: a C compiler for the Pugputer (design)
 
-Status: phases 1 to 4 done (2026-11-19). Phase 1: LINK's libraries, AR, CRT0
+Status: phases 1 to 5 done (2026-11-19/20). Phase 1: LINK's libraries, AR, CRT0
 and the first libc. Phase 2: CPP, and CC1 with `char`, `int`, pointers, arrays, functions,
 `typedef` and every statement and operator. Phase 3: `long`, `struct`, `union`, `enum`,
 `asm { }`, `interrupt` and the rest of the declarations and initializers. Phase 4: children
 (DOS's `B_EXEC` with `EXEC_CHILD`, libc's `spawn()`), `CC.COM`, banked code and
-`<pug/bank.h>`. See
+`<pug/bank.h>`. Phase 5: `LIBPUG.A` (`<pug/video.h>`, `<pug/input.h>`,
+`<pug/sound.h>`) and SWAMPFLY, a demo in C. See
 [`README.md`](README.md) for what is there now, and the "Found in phase" sections at the end
 for what each settled. Decisions taken so far (2026-11-19):
 
@@ -182,7 +183,7 @@ Each phase leaves something that works and is tested.
    exit code, libc's `spawn()` (`<pug/sys.h>`), the tools' exit codes, `CC.COM`; `#pragma bank`
    and `-b` (CC1's stubs), LINK's overlay output, `__farcall` and its loader, and
    `<pug/bank.h>`.
-5. **`LIBPUG.A`** (video, sound, input), and a demo written in C.
+5. **`LIBPUG.A`** (video, sound, input), and a demo written in C (done: `SWAMPFLY.C`).
 6. **Later:** a better `malloc`, `float` (and `double` as the same type, as in CMOC),
    bitfields, `-O`, `__far` pointers, and `-9`: plain 6809 code. That needs a second way of
    holding a `long` (there's no Q) and a 6809 build of the library, for its code to run on a
@@ -295,3 +296,25 @@ Things that phase 2 onwards has to follow:
   `init_ovl` runs before bss is cleared, so its state is in `data`.
 - **`@` makes a local label** in ASM and lwasm, so a body can't be `_name@b`; it is `__b_name`.
 - **The overlay records end with one 0 byte,** so the loader takes a short read there.
+
+## Found in phase 5
+
+- **LIBPUG is thin:** the card is registers, data ports and commands, so most calls are a
+  port's address and a few bytes. Everything uses data port 0 (and the command port), leaving
+  port 1 to an interrupt handler.
+- **SONGKIT's player goes in as it is.** `pugsnd.asm` includes `gamekit/sk_play.asm`, which
+  now has an `IFDEF SK_LIBRARY` that ends the code section and starts bss before its
+  variables (1.1KB that would otherwise be zeros in the program). SONGKIT, SONGPLAY and SWAMP
+  assemble as before.
+- **Keeping the song going:** its ticks need polling every few ms. `song_start` points
+  `vc_idle` at `song_poll`, and `vc_vsync` calls it while it waits, so a frame loop needs
+  nothing more. The video module doesn't refer to the sound module, so a program without
+  music doesn't link the player.
+- **`-lpug` always:** CC gives LINK both libraries, and LINK (like lwlink) warns about a
+  library that resolves nothing, so it has `--quiet-libs`, which CC passes.
+- **The C demo is compiled on the Pugputer.** There is no CC on the PC, so `SWAMPFLY.C` goes
+  on the disk as source (`CC swampfly.c`, about 25 s on the machine), and the test compiles
+  and runs it on the emulated one.
+- **pugrun has `--video`:** the video card (with no window) and the OPL3 on the bus.
+- **The emulator's card takes key events from the test** (`VideoDevice::key`), not from the
+  UART, while a program has grabbed the keys.

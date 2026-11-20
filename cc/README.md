@@ -8,7 +8,7 @@ plan is in [`DESIGN.md`](DESIGN.md). What exists so far:
 | `CC.COM` | the driver: compiles, assembles and links, running the others (`cc.asm`) |
 | `CPP.COM` | the C preprocessor (`cpp.asm`) |
 | `CC1.COM` | the compiler proper: preprocessed C to assembly language for `ASM.COM` (`cc1*.asm`) |
-| `/LIB` | the start-up code, `CRT0.O`, the library, `LIBC.A`, and `CC.SCR`, LINK's script for a C program (`lib/`) |
+| `/LIB` | the start-up code, `CRT0.O`, the libraries, `LIBC.A` (C's) and `LIBPUG.A` (the Pugputer's: video, input, sound), and `CC.SCR`, LINK's script for a C program (`lib/`) |
 | `/INCLUDE` | the headers (`include/`) |
 
 All of it is written in 6309 assembly, and every disk image has it: the programs in `/CMD`,
@@ -37,7 +37,8 @@ is. The program is the first file's name with `.COM`, or `-o`'s.
   file). Otherwise the files made on the way (in the current directory: the source's name
   with `.I`, `.ASM`, `.O`) are deleted once used.
 - `-I`, `-D` and `-U` are CPP's; `-b N` is CC1's (see "Banked code"); `-L` and `-l` are LINK's.
-  `/LIB`, `CRT0.O` and `-lc` are always there.
+  `/LIB`, `CRT0.O`, `-lpug` and `-lc` are always there (with LINK's `--quiet-libs`, so a
+  program that uses neither library hears nothing of it).
 - `-v` shows each command as it's run.
 - The tools are looked for in the current directory, then along the search path (`PATH`).
 
@@ -186,6 +187,18 @@ int main(void) { return level_one(21); }  /* fixed code */
 | `<pug/sys.h>` | `spawn(path, tail)`: runs a program as a child (DOS's `B_EXEC` with `EXEC_CHILD`) and goes on when it ends -> its exit code, or -1 |
 | `<pug/bank.h>` | data in banked RAM: `page_alloc` `page_free` `bank_get` `bank_map`; `far_read` `far_write` `far_peek` `far_poke` (a page and an offset in it, copied through `B_PAGE_COPY` whatever the banks show) |
 
+`LIBPUG.A`, the Pugputer's own (`lib/pugvid.asm`, `pugin.asm`, `pugsnd.asm`; the card itself
+is `vidcard/README.md`):
+
+| Header | Functions |
+|---|---|
+| `<pug/video.h>` | the video card. Its address space (24 bits: a `long`): `vc_poke` `vc_peek` `vc_poke16` `vc_write` `vc_read`, and the card's own `vc_fill` `vc_copy`, `vc_wait` for them to be done. The display: `vc_reset` `vc_layer` (mode, map size, map and tiles) `vc_scroll` `vc_stride` `vc_show` `vc_backdrop` `vc_color` (`VC_RGB(r, g, b)`), `vc_text` (the text screen). Time: `vc_vsync` (waits for vertical blank, calling `vc_idle` meanwhile), `vc_frame`. Drawing commands: `gfx_target` `gfx_color` `gfx_plot` `gfx_line` `gfx_rect` `gfx_fillrect` `gfx_circle` `gfx_disc` `gfx_triangle` `gfx_clear` `gfx_font` `gfx_char` `gfx_text` `gfx_blit`. Sprites: `spr_set` `spr_move` `spr_count` `spr_hires`. With the card's constants (`LM_...`, `LW_...`, `SS_...`, `TILE(n, pal)`) |
+| `<pug/input.h>` | `key_grab` (the keys from the console), `key_get` (each press and release: its USB code, `KEY_...`, and its character), `key_waiting` `key_mods`; `mouse_get` `mouse_wheel` `mouse_pointer`; `pad_get` (a `struct pad`: d-pad, buttons by place, sticks) |
+| `<pug/sound.h>` | SONGKIT's player (`gamekit/sk_play.asm`, as games include it): `song_start` (a `.SNG` in memory) `song_pstart` (in pages) `song_poll` `song_tick` `song_stop` `song_off`; and `opl_write`. `song_start` sets `vc_idle`, so a program that waits for each frame with `vc_vsync` keeps the song going |
+
+The demo `/DEMO/SWAMPFLY.C` (`demo/programs/C/`) uses all three: SWAMP's tile layers and
+music, and a firefly to fly with the keys, a gamepad or the mouse.
+
 - **printf** does `%d %i %u %x %X %o %c %s %p %%`, with `-` and `0`, a width (digits or `*`),
   a precision (`.n` or `.*`: the most characters of a `%s`, the fewest digits of a number), and
   `l` for a long. `+`, `#` and space are accepted and ignored. It has no floating point yet.
@@ -258,11 +271,12 @@ the program's. Only `init`'s place is fixed.
 ## Building it
 
 `cc/compile.bat` (or `compile.sh`) assembles CPP and CC1 with lwasm; `cc/lib/compile.bat`
-assembles `crt0.asm` and each part of the library that `libc.rsp` names. `build_all` and
+assembles `crt0.asm` and each part of the libraries that `libc.rsp` and `libpug.rsp` name. `build_all` and
 `reinit_disk` do both, and `mkdiskimg` puts the results on the disk (see
 `simulator/include/pugputer/c_library.hpp`). On the Pugputer, the release disk's `/ASM/CC`
 rebuilds CPP and CC1 (`ASM -o CPP.COM cpp.asm`, `ASM -o CC1.COM cc1.asm`), and `/ASM/LIBC`
-the library (`AR @libc.rsp` makes `LIBC.A`), byte for byte as they were built.
+the libraries (`AR @libc.rsp` makes `LIBC.A`, `AR @libpug.rsp` `LIBPUG.A`), byte for byte as they
+were built.
 
 Memory: CPP keeps its macros in RAM pages from `B_PAGE_ALLOC`, mapped into bank 3 as ASM's
 symbols are. CC1 keeps its names, types and symbols in its own heap (11KB, after its 21KB of
@@ -277,7 +291,9 @@ code and 13KB of buffers); a function's locals go when it ends.
   error messages for programs that must fail, and that they leave no output. CC.COM builds a
   program from C and assembly files (and `-c`, `-S`, `-E`, and a failure, tidied up);
   `spawn` runs children four deep, the caller's memory and their exit codes checked; a program
-  with code in three overlays runs, and gives its pages back; `<pug/bank.h>`'s calls.
+  with code in three overlays runs, and gives its pages back; `<pug/bank.h>`'s calls;
+  `LIBPUG.A` with the video card and the OPL3 on the bus (`pugtest.c`); and SWAMPFLY,
+  compiled on the machine, run, and stopped with a key.
 - `simulator/tests/test_libc.cpp` runs programs written in assembly by the calling convention
   (`test_libc/*.asm`), which ASM and LINK build on the emulated machine. It checks their output
   and the files they leave: printf's conversions, the string, ctype and stdlib functions,

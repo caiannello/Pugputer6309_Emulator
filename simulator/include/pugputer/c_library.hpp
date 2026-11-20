@@ -2,6 +2,7 @@
 // script for a C program) and /LIB/LIBC.A, an archive in lwar's format (what
 // asmlink/ar.asm makes) of the members cc/lib/libc.rsp lists, in that order. That
 // file is AR's response file: "AR @libc.rsp" makes the same archive on the Pugputer.
+// /LIB/LIBPUG.A (video, input, sound) is the same, from libpug.rsp.
 // The objects are cc/lib's compile.bat's (or compile.sh's), made by lwasm.
 // mkdiskimg puts them on every disk, with the C headers in /INCLUDE; test_libc.cpp
 // and test_cc.cpp use them the same way.
@@ -46,38 +47,47 @@ inline bool c_library_files(const std::string& repo, std::vector<Fat16File>& out
         data.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         return true;
     };
-    Fat16File crt0, script, libc;
+    // An archive from a response file's members (its words: AR's options, the
+    // archive, then each member's .o).
+    auto archive = [&](const std::string& rsp, std::vector<uint8_t>& data) {
+        std::vector<uint8_t> list;
+        if (!read("cc/lib/" + rsp, list)) return false;
+        std::vector<std::pair<std::string, std::vector<uint8_t>>> members;
+        std::string word;
+        for (size_t i = 0; i <= list.size(); ++i) {
+            char c = i < list.size() ? static_cast<char>(list[i]) : ' ';
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                if (word.size() > 2 && word.compare(word.size() - 2, 2, ".o") == 0) {
+                    std::vector<uint8_t> o;
+                    if (!read("cc/lib/" + word, o)) return false;
+                    members.push_back({word, std::move(o)});
+                }
+                word.clear();
+            } else {
+                word += c;
+            }
+        }
+        data = make_lwar(members);
+        return true;
+    };
+    Fat16File crt0, script, libc, libpug;
     crt0.name = "LIB/CRT0.O";
     script.name = "LIB/CC.SCR";
     libc.name = "LIB/LIBC.A";
+    libpug.name = "LIB/LIBPUG.A";
     if (!read("cc/lib/crt0.o", crt0.data) || !read("cc/lib/cc.scr", script.data)) return false;
-    std::vector<uint8_t> list;
-    if (!read("cc/lib/libc.rsp", list)) return false;
-    std::vector<std::pair<std::string, std::vector<uint8_t>>> members;
-    std::string word; // (its words: AR's options, the archive, then each member's .o)
-    for (size_t i = 0; i <= list.size(); ++i) {
-        char c = i < list.size() ? static_cast<char>(list[i]) : ' ';
-        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-            if (word.size() > 2 && word.compare(word.size() - 2, 2, ".o") == 0) {
-                std::vector<uint8_t> o;
-                if (!read("cc/lib/" + word, o)) return false;
-                members.push_back({word, std::move(o)});
-            }
-            word.clear();
-        } else {
-            word += c;
-        }
-    }
-    libc.data = make_lwar(members);
+    if (!archive("libc.rsp", libc.data) || !archive("libpug.rsp", libpug.data)) return false;
     out.push_back(std::move(crt0));
     out.push_back(std::move(script));
     out.push_back(std::move(libc));
+    out.push_back(std::move(libpug));
     return true;
 }
 
 // The C headers (cc/include), as /INCLUDE/NAME.H: where CPP looks for them.
 inline const char* const kCHeaders[] = {"stddef.h", "stdio.h", "string.h", "ctype.h",
-                                        "stdlib.h", "limits.h", "stdarg.h", "pug/sys.h", "pug/bank.h"};
+                                        "stdlib.h", "limits.h", "stdarg.h", "pug/sys.h", "pug/bank.h",
+                                        "pug/video.h", "pug/input.h", "pug/sound.h"};
 
 inline bool c_header_files(const std::string& repo, std::vector<Fat16File>& out, std::string& error) {
     for (const char* name : kCHeaders) {

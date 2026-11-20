@@ -1301,7 +1301,7 @@ FW_RET      RTS
 ; IN: B = handle, A = whence (SEEK_SET/CUR/END), X:Y = 32-bit offset (X = high
 ; word; signed for SEEK_CUR and SEEK_END). Read and update modes only. OUT:
 ; carry clear + X:Y = the new position; carry set + A = ERR_BADMODE /
-; ERR_TOOBIG (a position before the start, or beyond 31 bits).
+; ERR_TOOBIG (a position before the start, or beyond 32 bits).
 ;------------------------------------------------------------------------------
 DOS_FSEEK   STA  SK_WHENCE
             STX  SK_HI
@@ -1325,9 +1325,14 @@ SK_MODE_OK  LDA  SK_WHENCE
             LDQ  fslot.size,X
             BRA  SK_ADD
 SK_CUR      LDQ  fslot.pos,X
-SK_ADD      ADDW SK_LO
-            ADCD SK_HI
-            BMI  SK_TOOBIG            ; (a signed offset: the sign is the test)
+SK_ADD      ADDW SK_LO            ; (a signed offset: a carry is fine if it was
+            ADCD SK_HI            ; negative, and needed then -- else before 0)
+            BCS  SK_CARRY
+            TST  SK_HI
+            BMI  SK_TOOBIG
+            BRA  SK_STORE
+SK_CARRY    TST  SK_HI
+            BPL  SK_TOOBIG        ; (past 32 bits)
             BRA  SK_STORE
 SK_SET      LDD  SK_HI
             LDW  SK_LO

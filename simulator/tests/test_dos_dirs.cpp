@@ -387,7 +387,11 @@ TEST(dos_dirs_stat_fstat_seek_whence_and_flush) {
     r = d.seek32(o.a, bios::FROM_START, 0xFFFFFFFFu);
     CHECK(r.ok() && r.x == 0xFFFF && r.y == 0xFFFF);
     CHECK(d.seek32(o.a, bios::FROM_CUR, 1).carry && d.seek32(o.a, bios::FROM_CUR, 1).a == bios::ERR_TOOBIG); // past 32 bits
-    CHECK(d.seek32(o.a, bios::FROM_END, 0xFFFFFFFFu).carry);              // 1000 + 4G-1 overflows
+    // CUR's and END's offsets are signed (DOS 2.4): -1 from the end is 999,
+    // -1001 is before the start.
+    r = d.seek32(o.a, bios::FROM_END, 0xFFFFFFFFu);
+    CHECK(r.ok() && r.x == 0 && r.y == 999);
+    CHECK(d.seek32(o.a, bios::FROM_END, 0xFFFFFC17u).carry && d.seek32(o.a, bios::FROM_END, 0xFFFFFC17u).a == bios::ERR_TOOBIG);
     CHECK(d.seek32(o.a, 9, 0).carry && d.seek32(o.a, 9, 0).a == bios::ERR_BADMODE);
 
     // FSTAT's 16 bytes.

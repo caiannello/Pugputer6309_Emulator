@@ -81,6 +81,12 @@ inline constexpr DemoSource kDemoSources[] = {
     {"cc/lib/spawn.asm", "ASM/LIBC/SPAWN.ASM"},
     {"cc/lib/farcall.asm", "ASM/LIBC/FARCALL.ASM"},
     {"cc/lib/pugbank.asm", "ASM/LIBC/PUGBANK.ASM"},
+    {"cc/lib/pugvid.asm", "ASM/LIBC/PUGVID.ASM"},
+    {"cc/lib/pugin.asm", "ASM/LIBC/PUGIN.ASM"},
+    {"cc/lib/pugsnd.asm", "ASM/LIBC/PUGSND.ASM"},
+    {"cc/lib/libpug.rsp", "ASM/LIBC/LIBPUG.RSP"},
+    {"vidcard/vidcard.d", "ASM/LIBC/VIDCARD.D"},
+    {"gamekit/sk_play.asm", "ASM/LIBC/SK_PLAY.ASM"},
     {"cc/lib/libc.d", "ASM/LIBC/LIBC.D"},
     {"cc/lib/libc.rsp", "ASM/LIBC/LIBC.RSP"},
     {"cc/lib/cc.scr", "ASM/LIBC/CC.SCR"},
@@ -154,7 +160,8 @@ inline constexpr DemoProgram kDemoPrograms[] = {
 
 // Files the demo programs use, copied to /DEMO as they are: the songs VGMPLAY plays, and
 // SWAMP's pictures (a TILEKIT project: TILEKIT SWAMP.TKT opens it) and music (Old Joe
-// Clark, a SONGKIT song: SONGKIT SWAMP.SNG opens it).
+// Clark, a SONGKIT song: SONGKIT SWAMP.SNG opens it); and SWAMPFLY.C, the swamp in C
+// (CC swampfly.c, there, makes SWAMPFLY.COM).
 inline constexpr DemoSource kDemoFiles[] = {
     {"demo/vgm/HAL9000.VGM", "DEMO/VGMPLAY/HAL9000.VGM"},
     {"demo/vgm/JFK.VGM", "DEMO/VGMPLAY/JFK.VGM"},
@@ -167,6 +174,7 @@ inline constexpr DemoSource kDemoFiles[] = {
     {"demo/swamp/SWAMP3.TLS", "DEMO/SWAMP3.TLS"},
     {"demo/swamp/SWAMP3.MAP", "DEMO/SWAMP3.MAP"},
     {"demo/swamp/SWAMP.SNG", "DEMO/SWAMP.SNG"},
+    {"demo/programs/C/SWAMPFLY.C", "DEMO/SWAMPFLY.C"},
 };
 
 } // namespace pugputer
