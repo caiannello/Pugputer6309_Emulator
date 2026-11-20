@@ -1,0 +1,6 @@
+pages 1 1
+write 0 -1
+read 0
+bad 0 peek Z 13
+mapped Z 1
+direct 1

@@ -33,7 +33,8 @@ want graphics in Linux, libsdl2 will be needed. ; see the release's `README.md`.
 | `dos/` | The resident DOS: a FAT16 file system (8.3 names, subdirectories, 32-bit file sizes and block numbers, a FAT cache, crash-safe write ordering) and the program loader. |
 | `shell/` | `SHELL.COM`, the command interpreter: `DIR`, `CD`, `COPY`, `TYPE`, ... and running programs. |
 | `edit/` | `EDIT.COM`, a full-screen text/code editor for an ANSI terminal, modelled on GNU nano, except stripped-down and implemented in 6309 assembly language. The executable file size is currently around 10KB. |
-| `asmlink/` | `ASM.COM` and `LINK.COM`, an assembler and a linker, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
+| `asmlink/` | `ASM.COM`, `LINK.COM` and `AR.COM`, an assembler, a linker and a librarian, implemented in 6309 assembly language, that run on the Pugputer and produce the same code, listings, object files, S-records and maps as lwasm and lwlink -- this compatibility choice was made for an good reason. Once the system is built, using [LWTOOLS](https://www.lwtools.ca/), everything is self-hosting. That is, all .COM files can be rebuilt from .ASM source, on the Pugputer, without needing to switch over to a modern x86 PC.|
+| `cc/` | A C compiler for the Pugputer, in 6309 assembly language, being built in phases ([`cc/DESIGN.md`](cc/DESIGN.md)): `CC.COM`, which compiles, assembles and links a program (running the others as children), `CPP.COM`, the C preprocessor, and `CC1.COM`, the compiler proper, which turns C (CMOC's dialect: every type but floating point, structs, `asm { }`, and code banked in overlays) into assembly for `ASM.COM`. Its library (`cc/lib`: `CRT0.O` and `LIBC.A`, in `/LIB` on every disk) and headers (`cc/include`, in `/INCLUDE`) come with it. |
 | `utils/` | Small utility programs: `HEXDUMP.COM` (a file as hex and ASCII) and `MOVE.COM` (move or rename a file). |
 | `gamekit/` | Tools for making games' graphics on the Pugputer itself, worked with the video card's mouse and keyboard: `TILEKIT.COM`, a tile set and tile map editor for all three of the card's tile layers at once (tiles of 8x8 or 16x16 in 16 or 256 colors, maps up to 256 cells across with flips and palette rows, tile sets shared between layers), with `.TKT` projects keeping everything under one name, and export as assembly source a game `INCLUDE`s. And the start of SONGKIT, its music for the OPL3: the player a game `INCLUDE`s (`sk_play.asm`: 18 channels, 4-op pairs, the chip's drums, tracker effects) `SONGPLAY.COM`, which plays a song from the shell, and `SONGKIT.COM`, the editor: a tracker's pattern page (the song's settings, its orders, a grid of rows and tracks, notes played in from the keyboard as a piano) and an instrument page (every setting of the chip's for an instrument), each change heard at once, even while the song plays. |
 | `basic309/` | **basic309**, Microsoft's Extended Color BASIC ported to run on this system, with GW-BASIC-style sequential and random-access files, directories, `ON ERROR`/`RESUME`, ANSI color, `CLS`/`HOME`, `GOTOXY`, and video card graphics modes/primitives. |
@@ -94,11 +95,12 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
 - **Editor.** `EDIT [file]`: nano's keys (`^O` write out, `^X` exit, `^W` search, `^K`/`^U` cut
   and paste, `M-A` mark, ...), a title bar, a status line, and it fits itself to the terminal's
   size. See `edit/README.md`.
-- **Assembler and linker.** `ASM [-f raw|srec|com|obj] [-o out] [-l[list]] [-s] file`:
+- **Assembler, linker and librarian.** `ASM [-f raw|srec|com|obj] [-o out] [-l[list]] [-s] file`:
   lwasm's syntax, directives, macros, structs and code-size choices, with raw, S-record, `.COM`
-  and LWOBJ object output. `LINK [-f raw|srec|com] [-o out] [-m map] [-s script] file.o ...`:
-  lwlink's link scripts, relocations and maps. On the Pugputer they rebuild the shell, the
-  editor, DOS, BASIC, the BIOS and themselves byte for byte. See `asmlink/README.md`.
+  and LWOBJ object output. `LINK [-f raw|srec|com] [-o out] [-m map] [-s script] [-L dir]
+  file.o ... [-l lib]`: lwlink's link scripts, relocations, libraries and maps. `AR -c|-a|-r|-l|-x
+  archive [file ...]`: lwar's libraries. On the Pugputer they rebuild the shell, the editor,
+  DOS, BASIC, the BIOS and themselves byte for byte. See `asmlink/README.md`.
 - **Utilities.** `HEXDUMP file`: a file as offsets, hex and ASCII, 16 bytes a line.
   `MOVE from [to]`: move a file to another directory, or rename it. See `utils/README.md`.
 - **Game kit.** `TILEKIT [file]`: a tile set and map editor on the video card's screen, used
@@ -119,7 +121,7 @@ Supports 64-color 80x60 text, 640x480x16 bitmap, or 320x240x256 bitmap, tilemaps
 - **Video card.** 640x480 in 256 colors (from 65536): three layers of text (80x30), tile maps
   or bitmaps, 128 sprites between them, and drawing commands the card carries out itself, for a
   card built on an RP2350, and statements for it in BASIC. `/DEMO` on the release disk has a demo
-  of each part of it (`VIDDEMO`, `VIDTEXT`, `VIDTILES`, `VIDGFX`, `VIDMOUSE`, `VIDPAD`, `MANDEL`, the Mandelbrot set, and `SWAMP`, a parallax-scrolling night swamp with music) and `/BASIC/VIDEO.BAS` one in BASIC. See
+  of each part of it (`VIDDEMO`, `VIDTEXT`, `VIDTILES`, `VIDGFX`, `VIDMOUSE`, `VIDPAD`, `MANDEL`, the Mandelbrot set, and `SWAMP`, a parallax-scrolling night swamp with music; `SWAMPFLY.C` is the swamp in C, with a firefly to fly) and `/BASIC/VIDEO.BAS` one in BASIC. See
   `vidcard/README.md`.
 - **Emulator.** A cycle-counted HD6309 (native and 6809-emulation modes), with the UART, SD
   card and banked RAM modeled to the register, and the YMF262 (OPL3) music chip playing through

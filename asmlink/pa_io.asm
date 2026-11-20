@@ -144,6 +144,7 @@ CL_OUTOK    TST  <LISTON
 CL_RET      RTS
 USAGE       LDX  #M_USAGE
             JSR  PRINTS
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 ; X is just past an option letter: to its argument (attached, or the next word).

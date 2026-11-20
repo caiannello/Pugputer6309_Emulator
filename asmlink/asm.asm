@@ -267,6 +267,7 @@ FINISH      JSR  HEAPDONE
             JSR  PRINTDEC
             LDX  #M_ERRORS
             JSR  PRINTS
+            LDB  #1                    ; (the exit code: 1, errors; 0)
 FIN_OK      LDA  #B_EXIT
             SWI2
 ; A fatal error: X = the message. Tidies up and leaves.
@@ -274,6 +275,7 @@ FATAL       JSR  PRINTS
             JSR  PRINTNL
             JSR  CLOSEALL
             JSR  HEAPDONE
+            LDB  #1
             LDA  #B_EXIT
             SWI2
 ;------------------------------------------------------------------------------

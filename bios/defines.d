@@ -199,9 +199,11 @@ B_FPUTC     equ  $1C         ; B: handle, E: the byte (write/append/update)
 B_FREAD     equ  $1D         ; B: handle, X: buf, Y: len -> X: bytes actually
                              ; read (short only at end of file)
 B_FWRITE    equ  $1E         ; B: handle, X: buf, Y: len
-B_FSEEK_NAME equ $1F         ; B: handle, X:Y: 32-bit offset (X = high word),
-                             ; E: whence (SEEK_*) -> X:Y: the new position
-                             ; (read or update mode). Positions past the end
+B_FSEEK_NAME equ $1F         ; B: handle, X:Y: 32-bit offset (X = high word;
+                             ; signed for SEEK_CUR and SEEK_END), E: whence
+                             ; (SEEK_*) -> X:Y: the new position (read or update
+                             ; mode); ERR_TOOBIG for one before the start or past
+                             ; 32 bits. Positions past the end
                              ; read as end-of-file; an update-mode write there
                              ; zero-fills the gap.
 B_FSTAT_NAME equ $20         ; B: handle, X: dest buf (16 bytes: size 4,
@@ -222,15 +224,29 @@ B_DOS_VERSION equ $28        ; -> A: API version (DOS_API_VERSION)
 ; Programs. A program file starts with an 8-byte header (EXE_* below); DOS loads
 ; its body at the header's load address and starts it at the entry address.
 B_EXEC        equ $29        ; X: path of a program file, Y: its command tail (a
-                             ; NUL-terminated string, or 0 for none) -> loads and
-                             ; STARTS the program: on success this does not return
-                             ; (the caller's memory may be overwritten); on failure
-                             ; carry set + A = ERR_NOTFOUND / ERR_BADEXE / ERR_TOOBIG
+                             ; NUL-terminated string, or 0 for none), E: 0 or
+                             ; EXEC_CHILD -> loads and STARTS the program. E = 0:
+                             ; on success this does not return (the caller's memory
+                             ; may be overwritten). E = EXEC_CHILD: the program runs
+                             ; as a child, in pages of its own, and when it ends
+                             ; (B_EXIT) the caller goes on, its memory as it was,
+                             ; with carry clear and B = the child's exit code; the
+                             ; child's open files and directory scans are closed
+                             ; (not its pages: B_PAGE_ALLOC's stay allocated). A
+                             ; child can start a child, EXEC_MAXLEVEL deep. On
+                             ; failure carry set + A = ERR_NOTFOUND / ERR_BADEXE /
+                             ; ERR_TOOBIG (or, for a child, ERR_NOSPACE: no pages,
+                             ; or too deep). A caller with its stack in bank 0 (the
+                             ; boot stack) leaves the child the stack below it.
 B_ARGS        equ $2A        ; -> X: address (in DOS's RAM) of the running program's
                              ; command tail, NUL-terminated (empty if there was none)
-B_EXIT        equ $2B        ; the program is finished: DOS closes every open file
-                             ; and directory scan and starts the shell again (or, on
+B_EXIT        equ $2B        ; B: an exit code -> the program is finished: DOS
+                             ; closes its open files and directory scans, and goes
+                             ; back to the program that started it as a child (B
+                             ; there = the code), or starts the shell again (or, on
                              ; a disk with none, BASIC.COM). Never returns.
+EXEC_CHILD    equ 1          ; B_EXEC's E: run the program as a child
+EXEC_MAXLEVEL equ 4          ; children within children, at most
 B_PATH        equ $2C        ; X: a new program search path (NUL-terminated: directories
                              ; separated by ";", at most PATHVARMAX characters), or 0
                              ; to leave it -> X: address (in DOS's RAM) of the current
@@ -281,8 +297,8 @@ RAM_IRQV    equ  $0026       ; the IRQ entry of the BIOS's RAM jump table is a J
                              ; Must be above the BIOS's RAM (EndOfVars in
                              ; pugbios.map); test_bios_layout checks that.
 
-DOS_API_VERSION equ $23      ; major*16 + minor: 2.3 (2.1 added programs, 2.2 B_PATH,
-                             ; 2.3 EXE_MORE)
+DOS_API_VERSION equ $24      ; major*16 + minor: 2.4 (2.1 added programs, 2.2 B_PATH,
+                             ; 2.3 EXE_MORE, 2.4 children: B_EXEC's EXEC_CHILD)
 PATHVARMAX  equ  79          ; the longest B_PATH search path
 
 ; Program files. Header, all 16-bit values big-endian:

@@ -8,16 +8,19 @@
 // operation in every operand form, for each CPU; directives, macros and
 // expressions; object files; links with the default and other scripts). The
 // rest: what they make runs, errors are reported and leave no output, and the
-// copy ASM makes of itself works.
+// copy ASM makes of itself works. AR makes lwar's archives, and LINK links
+// libraries (-L, -l, and archives named as files) exactly as lwlink does.
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "basic309_session.hpp"
 #include "disk_images.hpp"
+#include "pugputer/c_library.hpp"
 #include "pugputer/demo_sources.hpp"
 #include "fat16_reader.hpp"
 #include "test_framework.hpp"
@@ -72,6 +75,7 @@ struct Machine {
     bool start(const char* image_name, std::vector<pugputer::Fat16File> files) {
         if (!add(files, ASM_BIN_PATH, "ASM.COM")) return false;
         if (!add(files, LINK_BIN_PATH, "LINK.COM")) return false;
+        if (!add(files, AR_BIN_PATH, "AR.COM")) return false;
         img = build_image(image_name, 32768, 4, std::move(files));
         return !img.empty() && s.boot_shell(PUGBIOS_S19_PATH, img.c_str());
     }
@@ -164,6 +168,22 @@ const char* const kBiosRsp = "-f srec -o PUGBIOS.S19 -m PUGBIOS.MAP -s LINK.SCR\
 std::string upper(std::string s) {
     for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return s;
+}
+
+// An archive as lwar makes it: "LWAR1V", each member's name, a NUL, its length
+// (32 bits, high byte first) and its bytes, then a NUL.
+using Members = std::vector<std::pair<std::string, std::string>>;
+std::string lwar(const Members& members) {
+    std::string a = "LWAR1V";
+    for (const auto& m : members) {
+        a += m.first;
+        a += '\0';
+        uint32_t n = static_cast<uint32_t>(m.second.size());
+        for (int sh = 24; sh >= 0; sh -= 8) a += static_cast<char>((n >> sh) & 0xFF);
+        a += m.second;
+    }
+    a += '\0';
+    return a;
 }
 
 #if PUGPUTER_HAVE_LWASM
@@ -310,6 +330,52 @@ TEST(asm_rebuilds_every_program_from_the_demo_disk_sources) {
     CHECK(same("/ASM/ASMLINK/ASM.COM", host_text(ASM_BIN_PATH), m.file("/ASM/ASMLINK/ASM.COM")));
     CHECK(m.run("ASM -o LINK.COM link.asm").find("ERROR") == std::string::npos);
     CHECK(same("/ASM/ASMLINK/LINK.COM", host_text(LINK_BIN_PATH), m.file("/ASM/ASMLINK/LINK.COM")));
+    CHECK(m.run("ASM -o AR.COM ar.asm").find("ERROR") == std::string::npos);
+    CHECK(same("/ASM/ASMLINK/AR.COM", host_text(AR_BIN_PATH), m.file("/ASM/ASMLINK/AR.COM")));
+    // The C libraries: each part as lwasm made it, and AR's LIBC.A and LIBPUG.A
+    // as mkdiskimg's.
+    {
+        std::vector<pugputer::Fat16File> lib;
+        std::string error;
+        CHECK(pugputer::c_library_files(REPO_DIR, lib, error));
+        m.run("CD /ASM/LIBC");
+        std::vector<std::string> mods = {"crt0"};
+        for (const char* name : {"libc", "libpug"}) {
+            std::string rsp = host_text(repo(std::string("cc/lib/") + name + ".rsp"));
+            for (size_t i = 0, e; i < rsp.size(); i = e + 1) {
+                e = rsp.find('\n', i);
+                if (e == std::string::npos) e = rsp.size();
+                std::string w = rsp.substr(i, e - i);
+                while (!w.empty() && (w.back() == '\r' || w.back() == ' ')) w.pop_back();
+                if (w.size() > 2 && w.compare(w.size() - 2, 2, ".o") == 0) mods.push_back(w.substr(0, w.size() - 2));
+            }
+        }
+        for (const std::string& mod : mods) {
+            CHECK(m.run("ASM -f obj " + mod + ".asm").find("ERROR") == std::string::npos);
+            CHECK(same(("/ASM/LIBC/" + upper(mod) + ".O").c_str(), host_text(repo("cc/lib/" + mod + ".o")),
+                       m.file("/ASM/LIBC/" + upper(mod) + ".O")));
+        }
+        for (const char* name : {"LIBC", "LIBPUG"}) {
+            m.run(std::string("AR @") + name + ".rsp");
+            for (const auto& f : lib)
+                if (f.name == std::string("LIB/") + name + ".A")
+                    CHECK(same((std::string("/ASM/LIBC/") + name + ".A").c_str(), std::string(f.data.begin(), f.data.end()),
+                               m.file(std::string("/ASM/LIBC/") + name + ".A")));
+        }
+        m.run("CD /ASM/ASMLINK"); // (where the rest expects to be)
+    }
+    // The C compiler's programs.
+    m.run("CD /ASM/CC");
+    for (const char* prog : {"cc", "cpp", "cc1"}) {
+        std::string cmd = std::string("ASM -o ") + upper(prog) + ".COM " + prog + ".asm";
+        std::string said = m.run(cmd);
+        CHECK(said.find("ERROR") == std::string::npos);
+        std::string built = "/ASM/CC/" + upper(prog) + ".COM";
+        if (m.file(built) == "<none>") std::fprintf(stderr, "  %s said: %s\n", cmd.c_str(), said.c_str());
+        CHECK(same(built.c_str(), host_text(repo(std::string("cc/") + prog + ".bin")), m.file(built)));
+        if (std::getenv("ASM_TIMING")) std::printf("  %s: %.1f s at 3.58 MHz\n", cmd.c_str(), m.cycles / 3.58e6);
+    }
+    m.run("CD /ASM/ASMLINK");
     // A new program runs from where it was made, ahead of the search path.
     m.run("CD ..");
     CHECK(m.run("HEXDUMP basiccom.asm").find("000000  2A 20 42 41 53 49 43 43") != std::string::npos);
@@ -567,6 +633,47 @@ TEST(link_makes_programs_that_run) {
     CHECK(out.find("Can't open file nosuch.o") != std::string::npos);
 }
 
+TEST(ar_makes_lwars_archives) {
+    const std::string one = "first\r\n", two = "second!\r\n", three = "the third one\r\n";
+    Machine m;
+    CHECK(m.start("ar.img", {text("ONE.TXT", one), text("TWO.TXT", two), text("SUB/THREE.TXT", three),
+                             text("AR.RSP", "-c R.A one.txt\r\ntwo.txt\r\n")}));
+    // -c, then -l (lwar's "NAME: %04lx bytes")
+    m.run("AR -c T.A one.txt two.txt");
+    CHECK(same("AR -c", lwar({{"one.txt", one}, {"two.txt", two}}), m.file("T.A")));
+    std::string out = m.run("AR -l T.A");
+    CHECK(out.find("one.txt: 0007 bytes\r\ntwo.txt: 0009 bytes\r\n") != std::string::npos);
+    // -a: at the end, the name as given
+    m.run("AR -a T.A sub/three.txt");
+    CHECK(same("AR -a", lwar({{"one.txt", one}, {"two.txt", two}, {"sub/three.txt", three}}), m.file("T.A")));
+    // -r -n: the one replaced goes to the end; every name kept is the last part
+    m.run("AR -r -n T.A one.txt");
+    CHECK(same("AR -r -n", lwar({{"two.txt", two}, {"three.txt", three}, {"one.txt", one}}), m.file("T.A")));
+    CHECK(m.file("ARTEMP.TMP") == "<none>");
+    // -m: an archive's members, not the archive
+    m.run("AR -cn U.A sub/three.txt");
+    m.run("AR --create --merge V.A u.a two.txt");
+    CHECK(same("AR -m", lwar({{"three.txt", three}, {"two.txt", two}}), m.file("V.A")));
+    // -x: the member named, as a file; then all of them
+    m.run("AR -x V.A three.txt");
+    CHECK(same("AR -x", three, m.file("THREE.TXT")));
+    m.run("DEL two.txt");
+    m.run("AR -x T.A");
+    CHECK(same("AR -x (all)", two, m.file("TWO.TXT")));
+    // @FILE
+    m.run("AR @ar.rsp");
+    CHECK(same("AR @FILE", lwar({{"one.txt", one}, {"two.txt", two}}), m.file("R.A")));
+    // Errors: reported, and no archive (or temporary file) left
+    CHECK(m.run("AR -l none.a").find("Cannot open archive file none.a") != std::string::npos);
+    CHECK(m.run("AR -l one.txt").find("one.txt is not a valid archive file.") != std::string::npos);
+    CHECK(m.run("AR -c W.A one.txt nosuch.txt").find("Cannot open file nosuch.txt") != std::string::npos);
+    CHECK(m.file("W.A") == "<none>");
+    CHECK(m.file("ARTEMP.TMP") == "<none>");
+    CHECK(m.run("AR T.A").find("You must specify an operation.") != std::string::npos);
+    CHECK(m.run("AR -l").find("You must specify an archive file.") != std::string::npos);
+    CHECK(m.run("AR").find("Usage: AR") != std::string::npos);
+}
+
 #if PUGPUTER_HAVE_LWASM
 TEST(asm_matches_lwasm_on_object_files) {
     check_against_lwasm("objf.asm", false, true);
@@ -578,5 +685,79 @@ TEST(link_matches_lwlink_with_its_scripts) {
     check_link("-f srec -s link1.scr", "OUT.S19", {"link1.scr"});
     check_link("-f raw --section-base=tab=2000 --section-base=bss=0300 -e start", "OUT.BIN");
     check_link("-f srec -e 4321", "OUT.S19");
+}
+
+// lmain.asm and the members of libt.a (ld, lc, la, lk, lb) and libx.a (lx), in
+// test_asm/asmlink, made by lwasm; AR makes the libraries from them on the
+// Pugputer (they must be what lwar makes), and LINK links them as lwlink does:
+// with -L and -l (members brought in only as they are needed, a member needing a
+// later one, and another the program's; the first of two exports found wins; a
+// constant section; a library that brings nothing in is warned about), with
+// -l:NAME, and with an archive named as a file (all of it).
+TEST(link_matches_lwlink_with_libraries) {
+    if (!std::ifstream(LWLINK_EXE_PATH)) {
+        std::printf("  (no lwlink: skipped)\n");
+        return;
+    }
+    std::string dir = host_dir();
+#ifdef _WIN32
+    std::system(("mkdir \"" + dir + "/LIB\" >NUL 2>NUL").c_str());
+#else
+    std::system(("mkdir -p \"" + dir + "/LIB\"").c_str());
+#endif
+    std::vector<pugputer::Fat16File> disk;
+    Members libt, libx;
+    for (const char* src : {"lmain", "ld", "lc", "la", "lk", "lb", "lx"}) {
+        std::string name = src;
+        test_source(dir, name + ".asm");
+        CHECK(host_run(dir, LWASM_EXE_PATH, name + ".asm --6309 --format=obj --output=" + name + ".o"));
+        CHECK(add(disk, dir + "/" + name + ".o", upper(name) + ".O"));
+        std::string o = host_text(dir + "/" + name + ".o");
+        if (name == "lx")
+            libx.push_back({"lx.o", o});
+        else if (name != "lmain")
+            libt.push_back({name + ".o", o});
+    }
+    for (const auto& lib : {std::make_pair(std::string("libt.a"), lwar(libt)),
+                            std::make_pair(std::string("libx.a"), lwar(libx))}) {
+        std::ofstream o(dir + "/LIB/" + lib.first, std::ios::binary);
+        o << lib.second;
+    }
+    const std::vector<std::pair<std::string, std::string>> links = {
+        {"-f srec -L LIB lmain.o -lt -lx", "OUT.S19"},
+        {"-f raw -L LIB -lx lmain.o -l:libt.a", "OUT.BIN"},
+        {"-f srec lmain.o LIB/libt.a", "OUT.S19"},
+    };
+    for (size_t i = 0; i < links.size(); ++i)
+        disk.push_back(text("L" + std::to_string(i) + ".RSP", "-o " + links[i].second + " -m OUT.MAP " + links[i].first + "\r\n"));
+    Machine m;
+    CHECK(m.start("link_lib.img", disk));
+    m.run("MKDIR lib");
+    m.run("AR -c lib/libt.a ld.o lc.o la.o lk.o lb.o");
+    m.run("AR -c lib/libx.a lx.o");
+    CHECK(same("libt.a by AR", lwar(libt), m.file("LIB/LIBT.A")));
+    CHECK(same("libx.a by AR", lwar(libx), m.file("LIB/LIBX.A")));
+    for (size_t i = 0; i < links.size(); ++i) {
+        const std::string& args = links[i].first;
+        const std::string& out = links[i].second;
+        std::remove((dir + "/" + out).c_str());
+        std::remove((dir + "/OUT.MAP").c_str());
+        // (lwlink's options take their arguments from the words that aren't
+        // options, in order: -o and -m go first, as in check_link)
+        CHECK(host_run(dir, LWLINK_EXE_PATH, "-o " + out + " -m OUT.MAP " + args));
+        std::string said = m.run("LINK @l" + std::to_string(i) + ".rsp");
+        if (m.file(upper(out)) == "<none>") std::fprintf(stderr, "  LINK said: %s\n", said.c_str());
+        CHECK(same(("the output of: " + args).c_str(), host_text(dir + "/" + out), m.file(upper(out))));
+        CHECK(same(("the map of: " + args).c_str(), no_cr(host_text(dir + "/OUT.MAP")), no_cr(m.file("OUT.MAP"))));
+        if (i == 0) CHECK(said.find("Warning: library -lx (1) does not resolve any symbols") != std::string::npos);
+        if (i == 1) CHECK(said.find("Warning: library -lx (0) does not resolve any symbols") != std::string::npos);
+    }
+    // A library that isn't there (and -l looks only in the -L directories, as in
+    // lwlink), and one that leaves a symbol missing
+    CHECK(m.run("LINK -L lib lmain.o -lnone").find("Can't open library: -lnone") != std::string::npos);
+    CHECK(m.run("LINK -o X.BIN lmain.o -lt").find("Can't open library: -lt") != std::string::npos);
+    std::string out = m.run("LINK -o X.BIN -L lib lmain.o -lx");
+    CHECK(out.find("External symbol geta not found in lmain.o:init") != std::string::npos);
+    CHECK(m.file("X.BIN") == "<none>");
 }
 #endif

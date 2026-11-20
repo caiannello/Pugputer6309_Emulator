@@ -1,0 +1,6 @@
+/* Deep nesting: 60 parentheses, 20 ?: with casts, 25 blocks. */
+#include <stdio.h>
+int f(int x) { return ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((x + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1) + 1); }
+int h(int x) { return (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? (x ? x : (int)(char)0) : (int)(char)1) : (int)(char)2) : (int)(char)3) : (int)(char)4) : (int)(char)5) : (int)(char)6) : (int)(char)7) : (int)(char)8) : (int)(char)9) : (int)(char)10) : (int)(char)11) : (int)(char)12) : (int)(char)13) : (int)(char)14) : (int)(char)15) : (int)(char)16) : (int)(char)17) : (int)(char)18) : (int)(char)19); }
+int g(int x) {{ if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) { if (x) x++; } } } } } } } } } } } } } } } } } } } } } } } } } return x; }
+int main(void) { printf("%d\n", f(1) + g(2) + h(3)); return 0; }

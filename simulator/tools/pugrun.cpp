@@ -5,11 +5,12 @@
 // use the same parts through the test harness).
 //
 //   pugrun [--add HOSTFILE[=NAME]]... [--get NAME=HOSTFILE]... [--disk IMG]
-//          [--cycles N] [--quiet] COMMAND [COMMAND...]
+//          [--cycles N] [--quiet] [--video] COMMAND [COMMAND...]
 //
 // Each COMMAND is one shell line (quote it). --add puts a host file in the disk's
 // root (as NAME, default its own name); --get copies a file off the disk when all
 // the commands are done. --cycles is the budget for each command (default 4e9).
+// --video puts the video card (with no window) and the OPL3 on the bus.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,11 +21,13 @@
 
 #include "fat16_reader.hpp"
 #include "pugputer/fat16_image.hpp"
+#include "pugputer/opl3_device.hpp"
 #include "pugputer/rom_device.hpp"
 #include "pugputer/sdcard_device.hpp"
 #include "pugputer/srec_loader.hpp"
 #include "pugputer/system_bus.hpp"
 #include "pugputer/uart_r65c51.hpp"
+#include "pugputer/video_device.hpp"
 
 namespace {
 bool read_file(const std::string& path, std::vector<uint8_t>& out) {
@@ -49,6 +52,7 @@ int main(int argc, char** argv) {
     std::string disk = "pugrun.img";
     uint64_t budget = 4000000000ull;
     bool quiet = false;
+    bool video = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--add" && i + 1 < argc) {
@@ -76,6 +80,8 @@ int main(int argc, char** argv) {
             budget = std::strtoull(argv[++i], nullptr, 10);
         } else if (a == "--quiet") {
             quiet = true;
+        } else if (a == "--video") {
+            video = true;
         } else {
             commands.push_back(a);
         }
@@ -110,6 +116,12 @@ int main(int argc, char** argv) {
     bus.map_device("bios_rom", 0xF000, 0x1000, &rom, pugputer::IrqLine::None);
     bus.map_device("sdcard", 0xFFD8, 4, &sd, pugputer::IrqLine::None);
     bus.map_device("uart", 0xFFE8, 4, &uart, pugputer::IrqLine::IRQ);
+    pugputer::VideoDevice vc;
+    pugputer::Opl3Device opl3;
+    if (video) {
+        bus.map_device("video", 0xFF80, 0x20, &vc, pugputer::IrqLine::IRQ);
+        bus.map_device("opl3", 0xFFE0, 4, &opl3);
+    }
     bus.map_bank_registers();
     uart.set_tx_callback([&](uint8_t b) { out += static_cast<char>(b); });
     bus.reset();

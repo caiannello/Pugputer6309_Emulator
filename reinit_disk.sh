@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Rebuilds BIOS, dos.asm, the shell, the editor, ASM, LINK, the utilities, the demos and basic309, then
-# regenerates basic309/disk.img from scratch (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM,
-# and /DEMO: SWAMP.COM and its pictures -- no other files, apart from local/disk/ if there is one) -- run this any time you want a clean slate between test sessions, or after
-# editing bios/, dos/, shell/, edit/, asmlink/, utils/, gamekit/ or basic309/.
+# Rebuilds BIOS, dos.asm, the shell, the editor, ASM, LINK, the C compiler and its libraries, the
+# utilities, the game kit, the demos and basic309, then regenerates basic309/disk.img from scratch (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, AR.COM, CC.COM, CPP.COM, CC1.COM, HEXDUMP.COM, MOVE.COM,
+# TILEKIT.COM, SONGKIT.COM, SONGPLAY.COM and BASIC.COM; /LIB and /INCLUDE: the C libraries and headers;
+# and /DEMO: SWAMP.COM, its pictures and music, and SWAMPFLY.C -- no other files, apart from local/disk/ if there is one) -- run this any time you want a clean slate between test sessions, or after
+# editing bios/, dos/, shell/, edit/, asmlink/, cc/, utils/, gamekit/ or basic309/.
 # (The Linux counterpart of reinit_disk.bat.)
 set -e
 ROOT=$(cd "$(dirname "$0")" && pwd)
@@ -22,6 +23,9 @@ echo "Rebuilding the editor..."
 "$ROOT/edit/compile.sh"
 echo "Rebuilding the assembler and linker..."
 "$ROOT/asmlink/compile.sh"
+echo "Rebuilding the C compiler and library..."
+"$ROOT/cc/compile.sh"
+"$ROOT/cc/lib/compile.sh"
 echo "Rebuilding the utilities..."
 "$ROOT/utils/compile.sh"
 echo "Rebuilding the game kit..."
@@ -31,7 +35,7 @@ echo "Rebuilding the demos..."
 echo "Rebuilding basic309..."
 "$ROOT/basic309/build_basic.sh"
 
-echo "Regenerating disk.img (/CMD: SHELL.COM, EDIT.COM, ASM.COM, LINK.COM, HEXDUMP.COM, MOVE.COM, TILEKIT.COM and BASIC.COM; /DEMO/SWAMP.COM; clean slate)..."
+echo "Regenerating disk.img (/CMD, /LIB, /INCLUDE, /DEMO/SWAMP*; clean slate)..."
 # local/disk/ (not in the repository, see .gitignore): experiments to try on the disk, copied
 # to its root as they are -- local/disk/SWAMP/X.BAS becomes /SWAMP/X.BAS
 LOCALDISK=()

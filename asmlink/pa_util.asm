@@ -218,7 +218,7 @@ ISALPHA     CMPA #'A'
 ;------------------------------------------------------------------------------
 ; 32-bit arithmetic on MA and MB (big-endian, in the direct page area below):
 ; MUL32: MA = MA * MB (low 32 bits). DIV32: MA = MA / MB, MB = MA % MB, signed,
-; truncating toward zero as C does.
+; truncating toward zero as C does. UDIV32: the same, unsigned (MB < $80000000).
 ;------------------------------------------------------------------------------
 MUL32       PSHS D,X
             PSHSW
@@ -263,6 +263,10 @@ DV_APOS     TST  MB
             LDA  MSIGN
             EORA #1
             STA  MSIGN
+            BRA  DV_BPOS
+UDIV32      PSHS D,X
+            PSHSW
+            CLR  MSIGN
 DV_BPOS     CLRD                       ; MQ = the remainder so far
             CLRW
             STQ  MQ

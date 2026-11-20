@@ -298,6 +298,7 @@ PG_EXT      LDA  ,X+
 PG_TERM     CLR  ,Y
             LDX  #PATHBUF              ; first try: the name as given
             LDY  ARGP
+            CLRE                       ; (E = 0: in place of the shell)
             LDA  #B_EXEC
             SWI2                       ; (comes back only if it could not start it)
             CMPA #ERR_NOTFOUND
@@ -335,6 +336,7 @@ PG_NCOPY    LDA  ,X+
             BNE  PG_NCOPY
             LDX  #PATHBUF2
             LDY  ARGP
+            CLRE                       ; (E = 0: in place of the shell)
             LDA  #B_EXEC
             SWI2
             CMPA #ERR_NOTFOUND         ; not there: the next directory
