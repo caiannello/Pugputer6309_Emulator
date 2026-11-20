@@ -5,7 +5,8 @@ BIOS, DOS, shell, a text editor, an assembler and linker, tile/map and music edi
 it on a PC. 
 
 Parity with the real-hardware Pugputer 6309 is pretty decent, so you can try it out without having to build anything!
-(If anybody does build one, though, I'd really love to hear about it!) 
+(If anybody does build one, though, I'd really love to hear about it! All of the resident SW that runs in the emulator 
+does run on the real thing!) 
 
 ![tilekit editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
 
