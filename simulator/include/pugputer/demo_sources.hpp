@@ -149,6 +149,8 @@ inline constexpr DemoSource kToolFiles[] = {
     {"gamekit/banks/FATMAN4.WOP", "BANKS/FATMAN4.WOP"},
     {"gamekit/songs/README.TXT", "SNG/README.TXT"},
     {"gamekit/songs/BEASTEXP.SNG", "SNG/BEASTEXP.SNG"},
+    {"gamekit/songs/SPCEDEBR.SNG", "SNG/SPCEDEBR.SNG"},
+    {"gamekit/songs/SPREMCY.SNG", "SNG/SPREMCY.SNG"},
 };
 
 // The demo programs in /DEMO: raw images (demo/compile.bat or .sh assembles them from
