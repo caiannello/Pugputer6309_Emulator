@@ -36,8 +36,10 @@ Tools for making a game's graphics and music on the Pugputer itself.
 | `tools/sk_fields.py` | makes the instrument page's table of fields in `sk_inst.asm`: where each is, and which is next to it |
 | `tools/sk_overlays.py` | checks that SONGKIT's code only reaches another overlay through a stub (below, "SONGKIT's memory") |
 | `banks/` | SONGKIT's instrument banks: The Fat Man's General MIDI banks, 2-op and 4-op (`FATMAN2.WOP`, `FATMAN4.WOP`), and a `README.TXT` with their credit and license; `mkdiskimg` puts them in `/BANKS` |
+| `songs/` | example songs, with a `README.TXT` saying where each came from; `mkdiskimg` puts them in `/SNG` (`BEASTEXP.SNG`: `mod2sng` made it from a module) |
 | `tools/wopl_names.py` | (on a PC) gives a WOPL bank's unnamed instruments their General MIDI names, and its banks names -- the Fat Man's come with none |
 | `tools/midi2sng.py` | (on a PC) makes a MIDI file a song, on The Fat Man's patches, 4-op where it is heard to matter most (below, "MIDI files") |
+| `tools/mod2sng.py` | (on a PC) makes an Amiga module a song, each sample on the patch -- or chord of them, or sines -- heard closest to it (below, "Amiga modules") |
 | `gk_ui.asm` | what the kit's editors share: the mouse and keys, the editor drawn on sprites ("surfaces") so the card's three layers are all the work's, text on them, the palette and the editor's own colors from it, the mouse pointer, a line of typing |
 
 `compile.sh` (or `compile.bat`) assembles them with lwtools into `build/tilekit.bin`,
@@ -631,6 +633,70 @@ pairs up for the notes it would lose. The song itself:
 `SONGKIT_EDIT=OUT.SNG` with the test program and `songkit_editor_opens_a_song_given` shows
 it as SONGKIT opens it. Not done: the mod wheel (vibrato), channel pressure, portamento,
 rhythm mode's drums (the drums are on channels of their own), GS and XG drum kits.
+
+### Amiga modules
+
+`tools/mod2sng.py`, on a PC (Python and numpy), makes an Amiga module (`.MOD`: ProTracker,
+NoiseTracker, Soundtracker; 4 to 8 channels) a song:
+
+```
+python gamekit/tools/mod2sng.py song.mod [OUT.SNG] [options]
+```
+
+A module's instruments are recordings (samples), so each is given the sound on the OPL3 heard
+closest to it -- like `midi2sng`, by listening: every sound tried is played with SONGPLAY on the
+emulated machine and heard against the sample itself, played as the Amiga would play it, at
+the notes and lengths the song plays it. The difference is measured as loudness (each band of
+a log-mel spectrogram, its power to the 0.3, Stevens' law), so a quiet partial missed counts
+for little and a loud one for much; it is printed as a percent of the sample's loudness.
+
+- The module is first played as ProTracker plays it, tick by tick: each channel's sample,
+  period and volume, its effects, `Bxx` `Dxx` `E6x` `EEx`. The song is made from that: its
+  orders are the orders played (a pattern the same as another kept once), its loop where the
+  module comes back to, and each cell says what the module did there.
+- Each sample is heard for its pitch (a note a sample is played at is its note in the song,
+  the sample's tuning in the instrument's fine tune) -- and, a chord, its notes.
+- Every patch of both of The Fat Man's banks is played as the sample: melodic ones at its
+  pitch, drums at their own note (and at its pitch); then the closest few an octave either
+  way (a drum's, a fourth and an octave).
+- A chord sample is also tried as its notes, each a track of its own on one patch. A sample
+  whose sound no patch comes close to -- a voice -- is also tried as sines at its loudest
+  harmonics (the operators' multiples, both operators of a 2-op channel heard, three of a
+  4-op one), each with the chip's envelope closest to its own (the envelopes as the emulated
+  chip makes them, measured first). A sample whose pitch moves is its voices, each on tracks
+  of its own, started and let go when the voice is (SONGKIT has no such instrument: the
+  cells do it, a `EDx` placing each).
+- The closest of each kind are refined: each operator's attack, decay, sustain level,
+  release and sustain, the modulators' levels, the feedback, a layer's level, start and
+  length, a step at a time, kept where heard closer.
+- Each module channel gets the tracks its sounds need (4-op ones where they are 4-op). If they
+  don't fit (six 4-op pairs; 18 tracks), the sounds whose next best costs least -- by how
+  far it is heard from the sample, and by how much the sample is heard -- give way.
+- Each sound is as loud against the others as its sample is, and the song as loud as its
+  loudest note lets it be.
+
+The cells: a note's volume (linear, on the Amiga) in steps of 0.75 dB; `1xx` `2xx` `3xx`
+in 32nds of a semitone a tick, from the periods the module's slides went through (a row at a
+time, so a slide's speed in semitones -- which changes as it goes, on the Amiga -- is right
+row by row); `Axy` in steps a tick; `0xy`, `4xy` (its depth from the module's), `ECx`, `EDx`,
+`Fxx` (a tempo as ticks a second). A one-shot sample's end lets its key go. Left out (SONGKIT
+has none like them): sample offset (`9xx`), retrigger (`E9x`), tremolo (`7xy`), and a volume
+slide and a pitch effect in the same row (the volume is right again at the next row). The
+filter (`E0x`) does nothing.
+
+| Option | |
+|---|---|
+| `--wav f`, `--mod-wav f` | the song as written, and the module as it was heard against, as WAV files |
+| `--verbose` | each sample's closest sounds |
+| `--analyse` | only each sample's pitch and chord, nothing played |
+| `--refine n` | rounds of refining (8) |
+| `--no-layers`, `--no-additive` | no chords, no sines |
+| `--sines 15,3` | these samples as sines, even where a patch is heard closer |
+| `--names patch` | the instruments named for their patches, not the samples (a module's sample names are often its greetings) |
+| `--layer-cost n` | how much closer (points) a track more must make a sound (1.5) |
+| `--gain dB` | louder than the loudest note at full volume (0) |
+| `--amiga-pan` | channels 1 and 4 left, 2 and 3 right, as on the Amiga (default: both sides) |
+| `--no-loop` | the song ends; `--no-sources`: no bank sources in it |
 
 ### Songs
 

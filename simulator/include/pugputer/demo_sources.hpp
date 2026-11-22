@@ -141,11 +141,14 @@ inline constexpr DemoSource kDemoSources[] = {
 
 // SONGKIT's instrument banks, on every disk (as the programs in /CMD are): /BANKS, the
 // folder its bank page looks in first -- The Fat Man's General MIDI banks (MIT; their
-// notice in README.TXT beside them, and in NOTICE.md).
+// notice in README.TXT beside them, and in NOTICE.md). And in /SNG, example songs
+// (gamekit/songs, with a README.TXT saying where each came from).
 inline constexpr DemoSource kToolFiles[] = {
     {"gamekit/banks/README.TXT", "BANKS/README.TXT"},
     {"gamekit/banks/FATMAN2.WOP", "BANKS/FATMAN2.WOP"},
     {"gamekit/banks/FATMAN4.WOP", "BANKS/FATMAN4.WOP"},
+    {"gamekit/songs/README.TXT", "SNG/README.TXT"},
+    {"gamekit/songs/BEASTEXP.SNG", "SNG/BEASTEXP.SNG"},
 };
 
 // The demo programs in /DEMO: raw images (demo/compile.bat or .sh assembles them from
