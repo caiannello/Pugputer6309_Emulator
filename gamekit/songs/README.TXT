@@ -5,14 +5,11 @@ These are Amiga MOD to SNG conversions made using gamekit/tools/mod2sng.py,
 
 Disclaimer: 
     I don't think these conversions do justice to the originals, which 
-    everybody should listen to! OPL3, which is oscillator-based, is a 
-    completely different thing from Amiga MOD (sample based). The fact 
+    are magnificient! Check them out! OPL3, which is oscillator-based, is
+    a completely different thing from Amiga MOD (sample based). The fact 
     these songs are even recognizable at all is a small victory to me.
     Note to original authors, if you don't want mangled versions of your 
     songs circulating about, let me know.
-
-Self note: Just adding songs here wont get them on the SD card, you must also
-edit simulator/include/pugputer/demo_sources.hpp .
 
 BEASTEXP.SNG  "beast-exploring": the exploration theme of Shadow of the Beast
               (Psygnosis, 1989), music by David Whittaker; the module arranged
