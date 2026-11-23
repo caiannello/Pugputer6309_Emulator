@@ -8,9 +8,15 @@ Parity with the real-hardware Pugputer 6309 is pretty decent, so you can try it 
 (If anybody does build one, though, I'd really love to hear about it! All of the resident SW that runs in the emulator 
 does run on the real thing!) 
 
+TILEKIT editor
+
 ![tilekit editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
 
+Editing C code in resident editor for resident compiler
+
 ![editing C](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/media/c_edit.png?raw=true)
+
+UART interface demo
 
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/media/demo.png?raw=true)
 
