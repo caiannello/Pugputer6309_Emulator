@@ -22,7 +22,7 @@ BEASTTTL.SNG  "beast-title": Also from Shadow of the Beast
               by Jogeir Liljedahl.
 
 LEANDER.SNG   "leander_title" from the 1991 Amiga Game "Leander" by Traveller's 
-              Tails, Published by Psygnosis. Music by Matthew "4mat" Simmonds.
+              Tales, Published by Psygnosis. Music by Matthew "4mat" Simmonds.
 
 SPACDEBR.SNG  "Space Debris": Conversion of famous 1991 Amiga MOD 
               by Markus "Captain" Kaarlonen
