@@ -16,6 +16,10 @@ BEASTEXP.SNG  "beast-exploring": the exploration theme of Shadow of the Beast
               by Jogeir Liljedahl.  Instrument 8 of the tool output was 
               manually changed from "Fart"sichord to FATMAN 4-op Acous. Snare.
 
+BEASTTTL.SNG  "beast-title": Also from Shadow of the Beast
+              (Psygnosis, 1989), music by David Whittaker; the module arranged
+              by Jogeir Liljedahl.
+
 LEANDER.SNG   "leander_title" from the 1991 Amiga Game "Leander" by Traveller's 
               Tails, Published by Psygnosis. Music by Matthew "4mat" Simmonds.
 

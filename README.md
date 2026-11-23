@@ -10,6 +10,8 @@ does run on the real thing!)
 
 ![tilekit editor](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/gamekit/tilekit.png?raw=true)
 
+![editing C](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/media/c_edit.png?raw=true)
+
 ![Demo Running in Tera Term](https://github.com/caiannello/Pugputer6309_Emulator/blob/main/media/demo.png?raw=true)
 
 ## Demo Releases
